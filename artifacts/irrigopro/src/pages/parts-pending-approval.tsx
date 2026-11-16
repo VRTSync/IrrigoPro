@@ -10,7 +10,7 @@ import { CheckCircle, Package, ClipboardList, DollarSign } from "lucide-react";
 import { useState } from "react";
 import type { Part, ManualPartReview } from "@workspace/db/schema";
 import { useGetActiveMarkupSchedule, getGetActiveMarkupScheduleQueryKey } from "@workspace/api-client-react";
-import { computeCustomerPrice, computeTieredMarkup, isMaterialMarkupEligible } from "@workspace/shared";
+import { computeCustomerPrice, computeMarkup, isMaterialMarkupEligible, markupScheduleParams } from "@workspace/shared";
 import { useAuth } from "@/lib/auth-context";
 import { errorMessage, formatMoney, isNotFoundError } from "@/lib/markup-tier-form";
 
@@ -49,8 +49,9 @@ export function PendingPartRow({ part, onApprove, isApproving }: PendingPartRowP
     note = errorMessage(schedule.error, "Could not load the markup schedule.");
   } else if (schedule.data) {
     mode = "computed";
-    computed = computeCustomerPrice(costNumber, schedule.data.tiers);
-    const markup = computeTieredMarkup(costNumber, schedule.data.tiers);
+    const params = markupScheduleParams(schedule.data);
+    computed = computeCustomerPrice(costNumber, params);
+    const markup = computeMarkup(costNumber, params);
     note = `${schedule.data.schedule.name}: +${formatMoney(markup)} (${((markup / costNumber) * 100).toFixed(1)}% effective)`;
   } else {
     mode = "loading";

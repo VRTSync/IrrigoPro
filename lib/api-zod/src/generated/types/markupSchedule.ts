@@ -10,6 +10,7 @@ export interface MarkupSchedule {
   id: number;
   companyId: number;
   name: string;
+  minimumMarkupDollars: string;
   effectiveDate: string;
   isActive: boolean;
   createdAt: Date;

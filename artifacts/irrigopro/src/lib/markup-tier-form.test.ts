@@ -7,9 +7,10 @@ describe("markup tier form helpers", () => {
     const { tiers, error } = draftsToTiers(tiersToDrafts(DEFAULT_MARKUP_TIERS));
     expect(error).toBeNull();
     expect(tiers).toEqual(DEFAULT_MARKUP_TIERS);
-    expect(computeCustomerPrice(180, tiers)).toBe(288.25);
-    expect(computeCustomerPrice(1.75, tiers)).toBe(4.38);
-    expect(computeCustomerPrice(1150, tiers)).toBe(1491.25);
+    const schedule = { tiers, minimumMarkupDollars: 2 };
+    expect(computeCustomerPrice(180, schedule)).toBe(252);
+    expect(computeCustomerPrice(1.75, schedule)).toBe(4.38);
+    expect(computeCustomerPrice(1150, schedule)).toBe(1380);
   });
 
   it("adds and removes the last tier while staying valid", () => {

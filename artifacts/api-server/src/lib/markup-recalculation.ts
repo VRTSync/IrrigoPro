@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { parts, materialMarkupSchedules as schedules, pricingAuditEvents, type Part } from "@workspace/db";
-import { computeCustomerPrice, isMaterialMarkupEligible } from "@workspace/shared";
+import { computeCustomerPrice, isMaterialMarkupEligible, markupScheduleParams } from "@workspace/shared";
 import { db } from "../db";
 import { getActiveMarkupSchedule, lockMarkupCompany, type MarkupScheduleContext } from "../storage/markup-schedules";
 import { createSingleUseConfirmation } from "./single-use-confirmation";
@@ -64,7 +64,7 @@ export async function repriceMarkupPart(expected: Part, context: MarkupScheduleC
     if (!part || JSON.stringify(partFingerprint(part)) !== JSON.stringify(partFingerprint(expected)))
       throw new RecalculationError(`Part ${expected.sku} changed since preview. Preview again.`);
     if (!part.isActive || !isMaterialMarkupEligible(part)) throw new RecalculationError(`Part ${expected.sku} is no longer eligible.`);
-    const price = computeCustomerPrice(Number(part.cost), context.tiers).toFixed(2);
+    const price = computeCustomerPrice(Number(part.cost), markupScheduleParams(context)).toFixed(2);
     if (price === Number(part.price).toFixed(2)) return "unchanged" as const;
     await tx.update(parts).set({ price }).where(and(eq(parts.companyId, actor.companyId), eq(parts.id, part.id)));
     await tx.insert(pricingAuditEvents).values({

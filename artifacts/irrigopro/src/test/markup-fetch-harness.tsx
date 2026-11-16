@@ -10,6 +10,7 @@ export type Route = (call: Call) => Reply | undefined;
 
 export const activeSchedule = {
   id: 11, companyId: 5, name: "Standard 2026", effectiveDate: "2026-01-01", isActive: true,
+  minimumMarkupDollars: "2.00",
   createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 };
 export const oldSchedule = {

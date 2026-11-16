@@ -14,6 +14,11 @@ export interface MarkupScheduleUpdate {
    */
   name?: string;
   /**
+   * @minimum 0
+   * @maximum 99999999.99
+   */
+  minimumMarkupDollars?: number;
+  /**
    * @minItems 1
    * @maxItems 100
    */

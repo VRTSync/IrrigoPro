@@ -1,4 +1,4 @@
-import { computeCustomerPrice, isMaterialMarkupEligible, type MarkupTier } from "@workspace/shared";
+import { computeCustomerPrice, isMaterialMarkupEligible, markupScheduleParams } from "@workspace/shared";
 import type { Part } from "@workspace/db";
 import * as schedules from "../storage/markup-schedules";
 
@@ -9,8 +9,8 @@ export async function resolveMaterialSchedule(companyId: number, customerId?: nu
   if (!active) return null;
   return override ? schedules.getMarkupSchedule(override.scheduleId, companyId) : active;
 }
-export function materialUnitPrice(part: { cost?: string | number | null; category: string; price: string | number }, tiers?: readonly MarkupTier[] | null) {
-  return tiers && isMaterialMarkupEligible(part) ? computeCustomerPrice(Number(part.cost), tiers) : Number(part.price);
+export function materialUnitPrice(part: { cost?: string | number | null; category: string; price: string | number }, context?: schedules.MarkupScheduleContext | null) {
+  return context && isMaterialMarkupEligible(part) ? computeCustomerPrice(Number(part.cost), markupScheduleParams(context)) : Number(part.price);
 }
 
 export type PricingLine = {
@@ -55,7 +55,7 @@ export async function priceDocumentLines<T extends PricingLine>(
         if (!part || part.companyId !== companyId) throw new schedules.MarkupNotFound();
         parts.set(partId, part);
       }
-      unit = materialUnitPrice(part, context?.tiers);
+      unit = materialUnitPrice(part, context);
       if (validateSubmitted && (!Number.isFinite(Number(line[field])) || Math.abs(Number(line[field]) - unit) > .005))
         throw new MaterialPricingError(`Catalog price for "${part.name}" changed. Refresh the part and try again.`);
     } else {

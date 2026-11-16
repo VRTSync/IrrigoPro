@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { insertPartSchema } from "@workspace/db/schema";
 import { useGetActiveMarkupSchedule, getGetActiveMarkupScheduleQueryKey } from "@workspace/api-client-react";
-import { computeCustomerPrice, computeTieredMarkup, isMaterialMarkupEligible } from "@workspace/shared";
+import { computeCustomerPrice, computeMarkup, materialPriceChecks, markupScheduleParams, isMaterialMarkupEligible } from "@workspace/shared";
 import { useAuth } from "@/lib/auth-context";
 import { errorMessage, formatMoney, isNotFoundError } from "@/lib/markup-tier-form";
 import type { Part, PartCategory, PartBrand, PartSize, PartMaterial, PartFittingType } from "@workspace/db/schema";
@@ -191,8 +191,8 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
   } else if (scheduleError) {
     pricing = { mode: "error", message: errorMessage(scheduleError, "Could not load the markup schedule.") };
   } else if (activeSchedule.data) {
-    const tiers = activeSchedule.data.tiers;
-    pricing = { mode: "computed", price: computeCustomerPrice(costNumber, tiers), markup: computeTieredMarkup(costNumber, tiers) };
+    const params = markupScheduleParams(activeSchedule.data);
+    pricing = { mode: "computed", price: computeCustomerPrice(costNumber, params), markup: computeMarkup(costNumber, params) };
   } else {
     pricing = { mode: "loading" };
   }
@@ -532,6 +532,12 @@ export function PartFormDialog({ part, open, onOpenChange }: PartFormDialogProps
                 <>
                   Computed from {activeSchedule.data?.schedule.name}: {formatMoney(pricing.price)} (markup {formatMoney(pricing.markup)},{" "}
                   {((pricing.markup / costNumber) * 100).toFixed(1)}% effective). Price is set by the schedule.
+                  {activeSchedule.data && (() => {
+                    const checks = materialPriceChecks(costNumber, markupScheduleParams(activeSchedule.data));
+                    return <span className="mt-1 block text-xs" data-testid="part-calculation-checks">
+                      Flat-tier price: {formatMoney(checks.flatPrice)} · Minimum check: {formatMoney(checks.minimumPrice)} · Never-less check: {formatMoney(checks.neverLessPrice)}. Highest wins.
+                    </span>;
+                  })()}
                 </>
               )}
               {pricing.mode === "manual" && <>Manual price. {pricing.reason}</>}

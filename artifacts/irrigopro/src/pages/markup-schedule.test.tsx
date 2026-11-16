@@ -35,11 +35,31 @@ describe("Material Markup page", () => {
     expect(await screen.findByTestId("card-active-schedule")).toBeInTheDocument();
     expect(screen.getByTestId("text-effective-date")).toHaveTextContent("Effective Jan 1, 2026");
     expect(screen.getByTestId("input-active-name")).toHaveValue("Standard 2026");
-    expect(screen.getByTestId("example-active-180")).toHaveTextContent("$288.25");
-    expect(screen.getByTestId("example-active-180")).toHaveTextContent("+$108.25");
+    expect(screen.getByTestId("example-active-180")).toHaveTextContent("$252.00");
+    expect(screen.getByTestId("example-active-180")).toHaveTextContent("+$72.00");
     expect(screen.getByTestId("example-active-1.75")).toHaveTextContent("$4.38");
-    expect(screen.getByTestId("example-active-1150")).toHaveTextContent("$1,491.25");
+    expect(screen.getByTestId("example-active-1150")).toHaveTextContent("$1,380.00");
+    expect(screen.getByTestId("input-minimum-active")).toHaveValue(2);
+    expect(screen.getByTestId("example-active-180")).toHaveTextContent("Never-less check: $165.00");
     expect(await screen.findByTestId("row-schedule-7")).toHaveTextContent("Inactive");
+  });
+  it("validates and saves an edited minimum with live calculation checks", async () => {
+    const calls = installFetch(baseRoute((c) => c.method === "PUT" ? { status: 200, body: activeSchedule } : undefined));
+    mount();
+    const input = await screen.findByTestId("input-minimum-active");
+    const save = screen.getByTestId("button-save-schedule");
+    for (const value of ["", "-1", "0.001"]) {
+      fireEvent.change(input, { target: { value } });
+      expect(save).toBeDisabled();
+      expect(screen.getByTestId("text-tier-error-active")).toBeInTheDocument();
+    }
+    fireEvent.change(input, { target: { value: "5.50" } });
+    expect(save).toBeEnabled();
+    expect(screen.getByTestId("example-active-1.75")).toHaveTextContent("$7.25");
+    expect(screen.getByTestId("example-active-1.75")).toHaveTextContent("Flat-tier: $4.38");
+    expect(screen.getByTestId("example-active-1.75")).toHaveTextContent("Minimum check: $7.25");
+    fireEvent.click(save);
+    await waitFor(() => expect(writes(calls)[0].body).toMatchObject({ minimumMarkupDollars: 5.5 }));
   });
 
   it("blocks invalid tiers and blank names, then saves a new version with edited name and rates", async () => {
@@ -106,6 +126,8 @@ describe("Material Markup page", () => {
     expect(create).toBeDisabled();
     fireEvent.change(screen.getByTestId("input-new-name"), { target: { value: "Contract" } });
     fireEvent.change(screen.getByTestId("input-new-date"), { target: { value: "2026-03-01" } });
+    expect(screen.getByTestId("input-minimum-new")).toHaveValue(2);
+    fireEvent.change(screen.getByTestId("input-minimum-new"), { target: { value: "3.75" } });
     fireEvent.change(screen.getByTestId("input-tier-percent-new-6"), { target: { value: "" } });
     expect(screen.getByTestId("text-tier-error-new")).toHaveTextContent(/Tier 6/);
     expect(create).toBeDisabled();
@@ -114,7 +136,7 @@ describe("Material Markup page", () => {
     fireEvent.click(create);
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/markup-schedules" });
-    expect(writes(calls)[0].body).toMatchObject({ name: "Contract", effectiveDate: "2026-03-01" });
+    expect(writes(calls)[0].body).toMatchObject({ name: "Contract", effectiveDate: "2026-03-01", minimumMarkupDollars: 3.75 });
     expect(calls.some((c) => c.path.endsWith("/activate"))).toBe(false);
   });
 
@@ -135,7 +157,8 @@ describe("Material Markup page", () => {
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByTestId("table-tiers-detail-7");
     expect(within(dialog).queryAllByRole("spinbutton")).toHaveLength(0);
-    expect(within(dialog).getByTestId("example-detail-7-180")).toHaveTextContent("$288.25");
+    expect(within(dialog).getByTestId("minimum-detail-7")).toHaveTextContent("$2.00");
+    expect(within(dialog).getByTestId("example-detail-7-180")).toHaveTextContent("$252.00");
     fireEvent.keyDown(dialog, { key: "Escape" });
     fireEvent.click(screen.getByTestId("button-deactivate-schedule"));
     await waitFor(() => expect(writes(calls)[0]).toMatchObject({ path: "/api/markup-schedules/11/deactivate" }));

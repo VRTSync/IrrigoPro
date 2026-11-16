@@ -6,7 +6,7 @@ import type { Part } from "@workspace/db";
 
 const part = { id: 10, companyId: 1, name: "Valve", price: "50.00", cost: "180.00", category: "Valve" } as Part;
 const store = { async getPart(id: number) { return id === 10 ? part : undefined; } };
-const schedule = async () => ({ schedule: { id: 1 } as any, tiers: DEFAULT_MARKUP_TIERS });
+const schedule = async () => ({ schedule: { id: 1, minimumMarkupDollars: "2.00" } as any, tiers: DEFAULT_MARKUP_TIERS });
 test("same document keeps stored line price after rate change and prices new lines currently", async () => {
   let resolutions = 0;
   const result = await priceDocumentLines([
@@ -18,7 +18,7 @@ test("same document keeps stored line price after rate change and prices new lin
   assert.equal(resolutions, 1);
   assert.equal(result[0].unitPrice, "42.75");
   assert.equal((result[0] as any).totalPrice, "128.25");
-  assert.equal(result[1].unitPrice, "288.25");
+  assert.equal(result[1].unitPrice, "252.00");
   assert.equal(result[2].unitPrice, "8.00");
 });
 test("estimate partPrice uses stored sourceItemId and rejects tampered new catalog prices", async () => {
@@ -34,12 +34,26 @@ test("manual, excluded, zero/no cost and absent schedules retain manual catalog 
   const manualOrder = await priceDocumentLines([{ partId: null, quantity: 2, partPrice: "12.50" }], 1, null, [], store, "unitPrice", false, async () => null);
   assert.equal((manualOrder[0] as any).unitPrice, "12.50");
   for (const category of ["Rental", "Service", "Labor"])
-    assert.equal(materialUnitPrice({ ...part, category }, DEFAULT_MARKUP_TIERS), 50);
+    assert.equal(materialUnitPrice({ ...part, category }, await schedule()), 50);
   for (const cost of [null, "", "0"])
-    assert.equal(materialUnitPrice({ ...part, cost }, DEFAULT_MARKUP_TIERS), 50);
+    assert.equal(materialUnitPrice({ ...part, cost }, await schedule()), 50);
   assert.equal(materialUnitPrice(part, null), 50);
   const result = await priceDocumentLines([{ partId: 10, quantity: 1, unitPrice: ".01" }], 1, null, [], store, "unitPrice", false, async () => null);
   assert.equal(result[0].unitPrice, "50.00");
+});
+test("document pricing honors a customer's full schedule including its minimum", async () => {
+  const custom = async (_companyId: number, customerId?: number | null) => {
+    assert.equal(customerId, 99);
+    return { ...await schedule(), schedule: { id: 2, minimumMarkupDollars: "6.50" } as any };
+  };
+  const cheap = { async getPart() { return { ...part, cost: ".25" }; } };
+  const result = await priceDocumentLines([
+    { id: 71, partId: 10, quantity: 3, unitPrice: ".01" },
+    { partId: 10, quantity: 2, unitPrice: "6.75" },
+  ], 1, 99, [{ id: 71, partId: 10, unitPrice: "4.00" }], cheap, "unitPrice", true, custom);
+  assert.equal(result[0].unitPrice, "4.00");
+  assert.equal(result[1].unitPrice, "6.75");
+  assert.equal((result[1] as any).totalPrice, "13.50");
 });
 test("foreign parts and unscoped requests fail, schedule failures never degrade to manual", async () => {
   await assert.rejects(priceDocumentLines([{ partId: 10 }], 2, null, [], store, "unitPrice", false, schedule), /not found/);

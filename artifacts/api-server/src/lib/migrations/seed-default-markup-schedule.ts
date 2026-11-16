@@ -13,7 +13,7 @@ async function eligible() {
 }
 export const seedDefaultMarkupScheduleMigration: MigrationDefinition = {
   id: "seed-default-markup-schedule", title: "Seed default material markup schedules",
-  description: "Add six incremental cost brackets only to companies without an active schedule. Existing schedules and catalog/document prices are unchanged.",
+  description: "Add six flat cost tiers with a $2.00 minimum markup only to companies without an active schedule. Existing schedules and catalog/document prices are unchanged.",
   appSettingsKey: key,
   async check() {
     const rows = await eligible();
@@ -27,7 +27,7 @@ export const seedDefaultMarkupScheduleMigration: MigrationDefinition = {
     return {
       requiresAcknowledgement: true, orphanRows: { eligibleCompanies: rows.length },
       steps: rows.map(r => ({ id: `company-${r.id}`, description: `${r.name}: Standard Material Markup` })),
-      warnings: DEFAULT_MARKUP_TIERS.map(t => `$${t.minCost.toFixed(2)}–${t.maxCost === null ? "unbounded" : "$" + t.maxCost.toFixed(2)}: ${t.markupPercent}%`),
+      warnings: ["Minimum markup: $2.00", ...DEFAULT_MARKUP_TIERS.map(t => `$${t.minCost.toFixed(2)}–${t.maxCost === null ? "unbounded" : "$" + t.maxCost.toFixed(2)}: ${t.markupPercent}%`)],
     };
   },
   async run(emit, opts) {
@@ -42,7 +42,7 @@ export const seedDefaultMarkupScheduleMigration: MigrationDefinition = {
           await lockMarkupCompany(tx, row.id);
           const [active] = await tx.select({ id: schedules.id }).from(schedules).where(and(eq(schedules.companyId, row.id), eq(schedules.isActive, true)));
           if (active) continue;
-          await insertSchedule(tx, { companyId: row.id, name: "Standard Material Markup", effectiveDate: new Date().toISOString().slice(0, 10), tiers: DEFAULT_MARKUP_TIERS }, true);
+          await insertSchedule(tx, { companyId: row.id, name: "Standard Material Markup", minimumMarkupDollars: 2, effectiveDate: new Date().toISOString().slice(0, 10), tiers: DEFAULT_MARKUP_TIERS }, true);
           count++;
         }
         await tx.insert(appSettings).values({ key, value: new Date().toISOString() }).onConflictDoUpdate({ target: appSettings.key, set: { value: new Date().toISOString(), updatedAt: new Date() } });

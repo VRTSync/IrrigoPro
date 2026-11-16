@@ -60,6 +60,7 @@ export const ListMarkupSchedulesResponseItem = zod.object({
   id: zod.number(),
   companyId: zod.number(),
   name: zod.string(),
+  minimumMarkupDollars: zod.string(),
   effectiveDate: zod.string(),
   isActive: zod.boolean(),
   createdAt: zod.coerce.date(),
@@ -81,6 +82,11 @@ export const CreateMarkupScheduleQueryParams = zod.object({
 
 export const createMarkupScheduleBodyNameMax = 200;
 
+export const createMarkupScheduleBodyMinimumMarkupDollarsDefault = 2;
+export const createMarkupScheduleBodyMinimumMarkupDollarsMin = 0;
+export const createMarkupScheduleBodyMinimumMarkupDollarsMax = 99999999.99;
+export const createMarkupScheduleBodyMinimumMarkupDollarsMultipleOf = 0.01;
+
 export const createMarkupScheduleBodyEffectiveDateRegExp = new RegExp(
   "^\\d{4}-\\d{2}-\\d{2}$",
 );
@@ -98,6 +104,12 @@ export const createMarkupScheduleBodyTiersMax = 100;
 
 export const CreateMarkupScheduleBody = zod.object({
   name: zod.string().min(1).max(createMarkupScheduleBodyNameMax),
+  minimumMarkupDollars: zod
+    .number()
+    .min(createMarkupScheduleBodyMinimumMarkupDollarsMin)
+    .max(createMarkupScheduleBodyMinimumMarkupDollarsMax)
+    .multipleOf(createMarkupScheduleBodyMinimumMarkupDollarsMultipleOf)
+    .default(createMarkupScheduleBodyMinimumMarkupDollarsDefault),
   effectiveDate: zod
     .string()
     .regex(createMarkupScheduleBodyEffectiveDateRegExp),
@@ -149,6 +161,7 @@ export const GetActiveMarkupScheduleResponse = zod.object({
     id: zod.number(),
     companyId: zod.number(),
     name: zod.string(),
+    minimumMarkupDollars: zod.string(),
     effectiveDate: zod.string(),
     isActive: zod.boolean(),
     createdAt: zod.coerce.date(),
@@ -188,6 +201,7 @@ export const GetMarkupScheduleOptionsResponseItem = zod.object({
   id: zod.number(),
   companyId: zod.number(),
   name: zod.string(),
+  minimumMarkupDollars: zod.string(),
   effectiveDate: zod.string(),
   isActive: zod.boolean(),
   createdAt: zod.coerce.date(),
@@ -221,6 +235,7 @@ export const GetMarkupScheduleResponse = zod.object({
     id: zod.number(),
     companyId: zod.number(),
     name: zod.string(),
+    minimumMarkupDollars: zod.string(),
     effectiveDate: zod.string(),
     isActive: zod.boolean(),
     createdAt: zod.date(),
@@ -258,6 +273,10 @@ export const UpdateMarkupScheduleQueryParams = zod.object({
 
 export const updateMarkupScheduleBodyNameMax = 200;
 
+export const updateMarkupScheduleBodyMinimumMarkupDollarsMin = 0;
+export const updateMarkupScheduleBodyMinimumMarkupDollarsMax = 99999999.99;
+export const updateMarkupScheduleBodyMinimumMarkupDollarsMultipleOf = 0.01;
+
 export const updateMarkupScheduleBodyTiersItemMinCostMin = 0.01;
 export const updateMarkupScheduleBodyTiersItemMinCostMax = 99999999.99;
 
@@ -271,6 +290,12 @@ export const updateMarkupScheduleBodyTiersMax = 100;
 
 export const UpdateMarkupScheduleBody = zod.object({
   name: zod.string().min(1).max(updateMarkupScheduleBodyNameMax).optional(),
+  minimumMarkupDollars: zod
+    .number()
+    .min(updateMarkupScheduleBodyMinimumMarkupDollarsMin)
+    .max(updateMarkupScheduleBodyMinimumMarkupDollarsMax)
+    .multipleOf(updateMarkupScheduleBodyMinimumMarkupDollarsMultipleOf)
+    .optional(),
   tiers: zod
     .array(
       zod.object({
@@ -299,6 +324,7 @@ export const UpdateMarkupScheduleResponse = zod.object({
   id: zod.number(),
   companyId: zod.number(),
   name: zod.string(),
+  minimumMarkupDollars: zod.string(),
   effectiveDate: zod.string(),
   isActive: zod.boolean(),
   createdAt: zod.date(),

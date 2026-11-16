@@ -1,5 +1,6 @@
 import { Minus, Plus } from "lucide-react";
-import { computeCustomerPrice, computeTieredMarkup, type MarkupTier } from "@workspace/shared";
+import { computeMarkup, materialPriceChecks, type MarkupTier } from "@workspace/shared";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -113,23 +114,40 @@ export function TierEditor({ idPrefix, drafts, onChange, readOnly = false }: Tie
   );
 }
 
-export function MarkupExamples({ tiers, error, idPrefix }: { tiers: MarkupTier[]; error: string | null; idPrefix: string }) {
+export function MinimumMarkupInput({ value, onChange, idPrefix }: { value: string; onChange: (value: string) => void; idPrefix: string }) {
+  return <div className="max-w-md">
+    <Label htmlFor={`${idPrefix}-minimum`}>Minimum markup ($)</Label>
+    <Input id={`${idPrefix}-minimum`} type="number" min="0" max="99999999.99" step="0.01" inputMode="decimal"
+      value={value} onChange={e => onChange(e.target.value)} data-testid={`input-minimum-${idPrefix}`} />
+    <p className="mt-1 text-xs text-gray-500">Minimum dollar markup added to each eligible part’s cost.</p>
+  </div>;
+}
+
+export function MarkupExamples({ tiers, minimumMarkupDollars, error, idPrefix }: { tiers: MarkupTier[]; minimumMarkupDollars: number; error: string | null; idPrefix: string }) {
   return (
     <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4" aria-live="polite">
       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-blue-900">Live examples</p>
       {error ? (
-        <p className="text-sm text-gray-600">Examples appear once the tiers are valid.</p>
+        <p className="text-sm text-gray-600">Examples appear once the tiers and minimum are valid.</p>
       ) : (
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {MARKUP_EXAMPLE_COSTS.map((cost) => {
-            const markup = computeTieredMarkup(cost, tiers);
-            const price = computeCustomerPrice(cost, tiers);
+            const schedule = { tiers, minimumMarkupDollars };
+            const markup = computeMarkup(cost, schedule);
+            const checks = materialPriceChecks(cost, schedule);
+            const price = checks.price;
             return (
               <div key={cost} className="rounded-md bg-white p-3 shadow-sm" data-testid={`example-${idPrefix}-${cost}`}>
                 <dt className="text-xs text-gray-500">Cost {formatMoney(cost)}</dt>
                 <dd className="mt-1 text-lg font-semibold tabular-nums text-gray-900">{formatMoney(price)}</dd>
                 <dd className="text-xs text-gray-500 tabular-nums">
                   +{formatMoney(markup)} ({((markup / cost) * 100).toFixed(1)}% effective)
+                </dd>
+                <dd className="mt-2 text-xs text-gray-600">
+                  Flat-tier: {formatMoney(checks.flatPrice)}<br />
+                  Minimum check: {formatMoney(checks.minimumPrice)}<br />
+                  Never-less check: {formatMoney(checks.neverLessPrice)}<br />
+                  Highest wins.
                 </dd>
               </div>
             );

@@ -1,4 +1,10 @@
-import { validateMarkupTiers, type MarkupTier } from "@workspace/shared";
+import { validateMarkupTiers, validateMinimumMarkup, type MarkupTier } from "@workspace/shared";
+
+export function minimumMarkupError(value: string): string | null {
+  if (value.trim() === "") return "Enter a minimum markup";
+  try { validateMinimumMarkup(Number(value)); return null; }
+  catch (e) { return e instanceof Error ? e.message : "Invalid minimum markup"; }
+}
 
 /** Editable row: the lower bound is derived from the previous upper bound. */
 export interface TierDraft {

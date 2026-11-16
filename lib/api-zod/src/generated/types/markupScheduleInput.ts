@@ -13,6 +13,11 @@ export interface MarkupScheduleInput {
    * @maxLength 200
    */
   name: string;
+  /**
+   * @minimum 0
+   * @maximum 99999999.99
+   */
+  minimumMarkupDollars?: number;
   /** @pattern ^\d{4}-\d{2}-\d{2}$ */
   effectiveDate: string;
   /**

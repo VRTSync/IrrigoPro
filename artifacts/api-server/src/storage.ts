@@ -8407,7 +8407,7 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.getPart(id);
     if (!existing || existing.companyId !== companyId) return undefined;
     const context = await resolveMaterialSchedule(companyId);
-    price = materialUnitPrice({ ...existing, price, cost: cost === undefined ? existing.cost : cost }, context?.tiers).toFixed(2);
+    price = materialUnitPrice({ ...existing, price, cost: cost === undefined ? existing.cost : cost }, context).toFixed(2);
     // Update the part itself
     const updateFields: Partial<typeof parts.$inferInsert> = {
       approvalStatus: 'approved',
@@ -10917,7 +10917,7 @@ export class DatabaseStorage implements IStorage {
       const catalogIds = [...new Set(eligible.flatMap(f => f.partId ? [f.partId] : []))];
       if (catalogIds.length) {
         const catalog = await tx.select().from(parts).where(and(eq(parts.companyId, companyId), inArray(parts.id, catalogIds)));
-        for (const part of catalog) currentMaterialPrices.set(part.id, materialUnitPrice(part, markupContext?.tiers));
+        for (const part of catalog) currentMaterialPrices.set(part.id, materialUnitPrice(part, markupContext));
         if (catalog.length !== catalogIds.length) throw new markupSchedules.MarkupNotFound();
       }
       const calc = (f: typeof allFindings[number]) => {

@@ -180,12 +180,14 @@ export const materialMarkupSchedules = pgTable("material_markup_schedules", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").notNull().references(() => companies.id),
   name: text("name").notNull(),
+  minimumMarkupDollars: decimal("minimum_markup_dollars", { precision: 10, scale: 2 }).notNull().default("2.00"),
   effectiveDate: date("effective_date", { mode: "string" }).notNull(),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
 }, t => ({
   companyActive: index("markup_schedule_company_active").on(t.companyId, t.isActive),
+  minimumValid: check("markup_schedule_minimum_valid", sql`${t.minimumMarkupDollars} >= 0`),
   oneActive: uniqueIndex("markup_schedule_one_active").on(t.companyId).where(sql`${t.isActive}`),
   companyIdentity: unique("markup_schedule_company_identity").on(t.id, t.companyId),
 }));

@@ -59,6 +59,7 @@ export interface MarkupSchedule {
   id: number;
   companyId: number;
   name: string;
+  minimumMarkupDollars: string;
   effectiveDate: string;
   isActive: boolean;
   createdAt: string;
@@ -76,6 +77,11 @@ export interface MarkupScheduleInput {
    * @maxLength 200
    */
   name: string;
+  /**
+   * @minimum 0
+   * @maximum 99999999.99
+   */
+  minimumMarkupDollars?: number;
   /** @pattern ^\d{4}-\d{2}-\d{2}$ */
   effectiveDate: string;
   /**
@@ -91,6 +97,11 @@ export interface MarkupScheduleUpdate {
    * @maxLength 200
    */
   name?: string;
+  /**
+   * @minimum 0
+   * @maximum 99999999.99
+   */
+  minimumMarkupDollars?: number;
   /**
    * @minItems 1
    * @maxItems 100

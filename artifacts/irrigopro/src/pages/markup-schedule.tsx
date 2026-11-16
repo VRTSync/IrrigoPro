@@ -26,9 +26,9 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MarkupExamples, TierEditor } from "@/components/markup/tier-editor";
+import { MarkupExamples, MinimumMarkupInput, TierEditor } from "@/components/markup/tier-editor";
 import { RecalculatePrices } from "@/components/markup/recalculate-prices";
-import { draftsToTiers, errorMessage, isNotFoundError, tiersToDrafts, type TierDraft } from "@/lib/markup-tier-form";
+import { draftsToTiers, errorMessage, isNotFoundError, minimumMarkupError, tiersToDrafts, type TierDraft } from "@/lib/markup-tier-form";
 
 const fmtDate = (s: string) => {
   try {
@@ -75,14 +75,14 @@ export default function MarkupSchedulePage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Material Markup</h1>
           <p className="mt-1 text-sm text-gray-600">
-            Tiered, cost-based pricing for catalog parts. Each bracket applies only to the portion of cost within it.
+            Flat-tier pricing applies one rate to the entire cost. The minimum markup and previous-tier price floor prevent underpricing.
           </p>
         </div>
         {isSuperAdmin && (
           <div className="w-full sm:w-64">
             <Label htmlFor="markup-company">Company</Label>
             <Select
-              value={companyId ? String(companyId) : undefined}
+              value={companyId ? String(companyId) : ""}
               onValueChange={(v) => setSelectedCompanyId(Number(v))}
             >
               <SelectTrigger id="markup-company" data-testid="select-markup-company">
@@ -228,14 +228,14 @@ function MarkupScheduleManager({ companyId }: { companyId: number | null }) {
               {history.map((s) => (
                 <li key={s.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between" data-testid={`row-schedule-${s.id}`}>
                   <div>
-                    <p className="font-medium text-gray-900">
+                    <div className="font-medium text-gray-900">
                       {s.name}{" "}
                       {s.isActive ? (
                         <Badge className="ml-1 bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Active</Badge>
                       ) : (
                         <Badge variant="outline" className="ml-1">Inactive</Badge>
                       )}
-                    </p>
+                    </div>
                     <p className="text-xs text-gray-500">
                       Effective {fmtDate(s.effectiveDate)} · Created {fmtDate(s.createdAt)}
                     </p>
@@ -284,15 +284,17 @@ function ActiveScheduleEditor({
   const { toast } = useToast();
   const invalidate = useInvalidateMarkup();
   const [name, setName] = useState(schedule.name);
+  const [minimum, setMinimum] = useState(schedule.minimumMarkupDollars);
   const [drafts, setDrafts] = useState<TierDraft[]>(initialDrafts);
   const update = useUpdateMarkupSchedule();
-  const { tiers, error } = useMemo(() => draftsToTiers(drafts), [drafts]);
+  const { tiers, error: tierError } = useMemo(() => draftsToTiers(drafts), [drafts]);
+  const error = tierError ?? minimumMarkupError(minimum);
   const nameError = name.trim() === "" ? "Name is required" : name.length > 200 ? "Name is too long" : null;
 
   const save = () => {
     if (error || nameError) return;
     update.mutate(
-      { id: schedule.id, data: { name: name.trim(), tiers }, params },
+      { id: schedule.id, data: { name: name.trim(), tiers, minimumMarkupDollars: Number(minimum) }, params },
       {
         onSuccess: () => {
           toast({ title: "New version saved", description: "The previous version is kept in Schedule History. Existing catalog prices are not changed." });
@@ -327,9 +329,10 @@ function ActiveScheduleEditor({
           />
           {nameError && <p className="mt-1 text-sm text-red-600">{nameError}</p>}
         </div>
+        <MinimumMarkupInput idPrefix="active" value={minimum} onChange={setMinimum} />
         <TierEditor idPrefix="active" drafts={drafts} onChange={setDrafts} />
         {error && <p role="alert" className="text-sm text-red-600" data-testid="text-tier-error-active">{error}</p>}
-        <MarkupExamples tiers={tiers} error={error} idPrefix="active" />
+        <MarkupExamples tiers={tiers} minimumMarkupDollars={Number(minimum)} error={error} idPrefix="active" />
         <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-gray-500">Saving creates a new active version. Catalog prices are not bulk-updated.</p>
           <Button onClick={save} disabled={!!error || !!nameError || update.isPending} data-testid="button-save-schedule">
@@ -355,25 +358,28 @@ function CreateScheduleDialog({
   const create = useCreateMarkupSchedule();
   const today = format(new Date(), "yyyy-MM-dd");
   const [name, setName] = useState("");
+  const [minimum, setMinimum] = useState("2.00");
   const [effectiveDate, setEffectiveDate] = useState(today);
   const [drafts, setDrafts] = useState<TierDraft[]>(() => tiersToDrafts(DEFAULT_MARKUP_TIERS));
 
   useEffect(() => {
     if (open) {
       setName("");
+      setMinimum("2.00");
       setEffectiveDate(today);
       setDrafts(tiersToDrafts(DEFAULT_MARKUP_TIERS));
     }
   }, [open, today]);
 
-  const { tiers, error } = useMemo(() => draftsToTiers(drafts), [drafts]);
+  const { tiers, error: tierError } = useMemo(() => draftsToTiers(drafts), [drafts]);
+  const error = tierError ?? minimumMarkupError(minimum);
   const nameError = name.trim() === "" ? "Name is required" : null;
   const dateError = /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) ? null : "Choose an effective date";
 
   const submit = () => {
     if (error || nameError || dateError) return;
     create.mutate(
-      { data: { name: name.trim(), effectiveDate, tiers }, params },
+      { data: { name: name.trim(), effectiveDate, tiers, minimumMarkupDollars: Number(minimum) }, params },
       {
         onSuccess: () => {
           toast({ title: "Schedule created", description: "It is inactive until you activate it from Schedule History." });
@@ -405,9 +411,10 @@ function CreateScheduleDialog({
               {dateError && <p className="mt-1 text-sm text-red-600">{dateError}</p>}
             </div>
           </div>
+          <MinimumMarkupInput idPrefix="new" value={minimum} onChange={setMinimum} />
           <TierEditor idPrefix="new" drafts={drafts} onChange={setDrafts} />
           {error && <p role="alert" className="text-sm text-red-600" data-testid="text-tier-error-new">{error}</p>}
-          <MarkupExamples tiers={tiers} error={error} idPrefix="new" />
+          <MarkupExamples tiers={tiers} minimumMarkupDollars={Number(minimum)} error={error} idPrefix="new" />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -454,8 +461,9 @@ function ScheduleDetailDialog({
           <p className="text-sm text-red-700">{errorMessage(detail.error, "Could not load this schedule.")}</p>
         ) : detail.data ? (
           <div className="space-y-4">
+            <p className="text-sm" data-testid={`minimum-detail-${id}`}>Minimum markup: ${Number(detail.data.schedule.minimumMarkupDollars).toFixed(2)}</p>
             <TierEditor idPrefix={`detail-${id}`} drafts={drafts} readOnly />
-            <MarkupExamples tiers={tiers} error={error} idPrefix={`detail-${id}`} />
+            <MarkupExamples tiers={tiers} minimumMarkupDollars={Number(detail.data.schedule.minimumMarkupDollars)} error={error} idPrefix={`detail-${id}`} />
           </div>
         ) : null}
       </DialogContent>

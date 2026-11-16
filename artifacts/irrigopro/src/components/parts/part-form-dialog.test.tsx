@@ -43,24 +43,24 @@ beforeEach(() => {
 describe("part form tiered pricing", () => {
   it("shows a read-only shared-engine price that follows cost edits and saves it", async () => {
     mount();
-    await waitFor(() => expect(price().value).toBe("288.25"));
+    await waitFor(() => expect(price().value).toBe("252.00"));
     expect(price()).toHaveAttribute("readonly");
     expect(status()).toHaveTextContent("Standard 2026");
-    expect(status()).toHaveTextContent("$108.25");
-    expect(status()).toHaveTextContent("60.1% effective");
+    expect(status()).toHaveTextContent("$72.00");
+    expect(status()).toHaveTextContent("40.0% effective");
     fireEvent.change(screen.getByLabelText("Cost ($)"), { target: { value: "1.75" } });
     await waitFor(() => expect(price().value).toBe("4.38"));
     fireEvent.change(screen.getByLabelText("Cost ($)"), { target: { value: "1150" } });
-    await waitFor(() => expect(price().value).toBe("1491.25"));
+    await waitFor(() => expect(price().value).toBe("1380.00"));
     fireEvent.click(save());
     await waitFor(() => expect(state.apiRequest).toHaveBeenCalledTimes(1));
     expect(state.apiRequest.mock.calls[0][0]).toBe("/api/parts/77");
-    expect(state.apiRequest.mock.calls[0][2]).toMatchObject({ cost: 1150, price: 1491.25 });
+    expect(state.apiRequest.mock.calls[0][2]).toMatchObject({ cost: 1150, price: 1380 });
   });
 
   it("switches to manual price when cost is blank or zero, preserving the blank cost", async () => {
     mount();
-    await waitFor(() => expect(price().value).toBe("288.25"));
+    await waitFor(() => expect(price().value).toBe("252.00"));
     fireEvent.change(screen.getByLabelText("Cost ($)"), { target: { value: "0" } });
     await waitFor(() => expect(status()).toHaveTextContent("Manual price. No positive cost recorded."));
     fireEvent.change(screen.getByLabelText("Cost ($)"), { target: { value: "" } });
@@ -69,6 +69,16 @@ describe("part form tiered pricing", () => {
     fireEvent.click(save());
     await waitFor(() => expect(state.apiRequest).toHaveBeenCalledTimes(1));
     expect(state.apiRequest.mock.calls[0][2]).toMatchObject({ cost: null, price: 42.5 });
+  });
+  it("shows minimum and never-less checks using the full active schedule", async () => {
+    activeReply = { status: 200, body: { ...activeContext, schedule: { ...activeContext.schedule, minimumMarkupDollars: "4.50" } } };
+    mount({ ...part, cost: ".25" } as Part);
+    await waitFor(() => expect(price().value).toBe("4.75"));
+    expect(screen.getByTestId("part-calculation-checks")).toHaveTextContent("Flat-tier price: $0.63");
+    expect(screen.getByTestId("part-calculation-checks")).toHaveTextContent("Minimum check: $4.75");
+    fireEvent.change(screen.getByLabelText("Cost ($)"), { target: { value: "5.01" } });
+    await waitFor(() => expect(price().value).toBe("12.50"));
+    expect(screen.getByTestId("part-calculation-checks")).toHaveTextContent("Never-less check: $12.50");
   });
 
   it("uses manual price for excluded categories", async () => {
@@ -98,14 +108,14 @@ describe("part form tiered pricing", () => {
     expect(state.apiRequest).not.toHaveBeenCalled();
     activeReply = { status: 200, body: activeContext };
     fireEvent.click(screen.getByTestId("button-retry-pricing"));
-    await waitFor(() => expect(price().value).toBe("288.25"));
+    await waitFor(() => expect(price().value).toBe("252.00"));
     expect(save()).toBeEnabled();
   });
 
   it("scopes the schedule read to the part's company for super admins", async () => {
     state.role = "super_admin";
     const calls = mount({ ...part, companyId: 9 } as Part);
-    await waitFor(() => expect(price().value).toBe("288.25"));
+    await waitFor(() => expect(price().value).toBe("252.00"));
     expect(calls[0].search).toBe("?companyId=9");
   });
 });

@@ -38,7 +38,7 @@ import { shouldInvalidateAfterEstimateWrite, submitEstimate, type SubmitMode } f
 import { isDraft, estimateSubmitStatusFields } from "@workspace/shared";
 import { getCurrentUser } from "@/lib/impersonation";
 import { useGetActiveMarkupSchedule } from "@workspace/api-client-react";
-import { computeCustomerPrice, isMaterialMarkupEligible } from "@workspace/shared";
+import { computeCustomerPrice, isMaterialMarkupEligible, markupScheduleParams } from "@workspace/shared";
 
 interface EstimateApiPayloadEstimate {
   customerId: number;
@@ -1132,7 +1132,7 @@ export function EstimateWizard({ open, onOpenChange, estimateId }: EstimateWizar
             ) : step === 3 ? (
               <EstimateWizardLineItemsStep
                 pricingError={markupError}
-                catalogPrice={part => markup.data && isMaterialMarkupEligible(part) ? computeCustomerPrice(Number(part.cost), markup.data.tiers) : Number(part.price)}
+                catalogPrice={part => markup.data && isMaterialMarkupEligible(part) ? computeCustomerPrice(Number(part.cost), markupScheduleParams(markup.data)) : Number(part.price)}
                 customerName={customerStep.customer?.name ?? ""}
                 projectName={customerStep.projectName}
                 laborRate={laborRate}

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { computeCustomerPrice, DEFAULT_MARKUP_TIERS } from "@workspace/shared";
+import { computeCustomerPrice, markupScheduleParams } from "@workspace/shared";
 import type { Part } from "@workspace/db/schema";
 import { activeContext, installFetch, polyfillDom, renderWithClient, type Route } from "@/test/markup-fetch-harness";
 
@@ -26,13 +26,21 @@ describe("PendingPartRow pricing", () => {
   it("shows the shared-engine price read-only and follows cost edits", async () => {
     const { onApprove } = mount(part(), ok);
     const price = screen.getByTestId("input-pending-price-3");
-    await waitFor(() => expect(price).toHaveValue(computeCustomerPrice(180, DEFAULT_MARKUP_TIERS)));
+    await waitFor(() => expect(price).toHaveValue(computeCustomerPrice(180, markupScheduleParams(activeContext))));
     expect(price).toHaveAttribute("readonly");
     fireEvent.change(screen.getByTestId("input-pending-cost-3"), { target: { value: "42.5" } });
-    const expected = computeCustomerPrice(42.5, DEFAULT_MARKUP_TIERS).toFixed(2);
+    const expected = computeCustomerPrice(42.5, markupScheduleParams(activeContext)).toFixed(2);
     expect(price).toHaveValue(Number(expected));
     fireEvent.click(screen.getByTestId("button-approve-part-3"));
     expect(onApprove).toHaveBeenCalledWith(3, expected, "42.5");
+  });
+  it("uses a custom schedule minimum in the read-only approval preview", async () => {
+    const { onApprove } = mount(part({ cost: ".25" }), () => ({ status: 200, body: {
+      ...activeContext, schedule: { ...activeContext.schedule, minimumMarkupDollars: "4.50" },
+    } }));
+    await waitFor(() => expect(screen.getByTestId("input-pending-price-3")).toHaveValue(4.75));
+    fireEvent.click(screen.getByTestId("button-approve-part-3"));
+    expect(onApprove).toHaveBeenCalledWith(3, "4.75", ".25");
   });
 
   it("scopes the schedule read to the part's company for super admins", async () => {

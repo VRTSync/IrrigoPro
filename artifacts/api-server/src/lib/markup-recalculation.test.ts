@@ -6,7 +6,7 @@ import { companies, customers, users, parts, pricingAuditEvents, materialMarkupS
 import { DEFAULT_MARKUP_TIERS } from "@workspace/shared";
 import { db, pool } from "../db";
 import { storage } from "../storage";
-import { createMarkupSchedule, activateMarkupSchedule, getActiveMarkupSchedule } from "../storage/markup-schedules";
+import { createMarkupSchedule, activateMarkupSchedule, getActiveMarkupSchedule, updateMarkupSchedule } from "../storage/markup-schedules";
 import { previewMarkupRecalculation, runMarkupRecalculation, repriceMarkupPart } from "./markup-recalculation";
 
 test("confirmed 100-part batches, accurate counts, repeatability, atomic audits and frozen documents", async () => {
@@ -20,7 +20,7 @@ test("confirmed 100-part batches, accurate counts, repeatability, atomic audits 
     await assert.rejects(previewMarkupRecalculation(actor), /No active/);
     await activateMarkupSchedule(schedule.id, companyId);
     const catalog = await db.insert(parts).values([
-      ...Array.from({ length: 205 }, (_, i) => ({ companyId, name: `Valve ${i}`, sku: `VALVE-${i}`, cost: "180.00", price: "1.00", category: "Valve" })),
+      ...Array.from({ length: 205 }, (_, i) => ({ companyId, name: `Valve ${i}`, sku: `VALVE-${i}`, cost: i === 204 ? ".25" : "180.00", price: "1.00", category: "Valve" })),
       ...["Rental", "Service", "Labor"].map(category => ({ companyId, name: category, sku: category, cost: "180.00", price: "70.00", category })),
       { companyId, name: "No cost", sku: "NO-COST", cost: null, price: "20.00", category: "Valve" },
       { companyId, name: "Zero cost", sku: "ZERO", cost: "0", price: "21.00", category: "Valve" },
@@ -50,11 +50,12 @@ test("confirmed 100-part batches, accurate counts, repeatability, atomic audits 
     assert.deepEqual(result, { total: 205, processed: 205, updated: 205, unchanged: 0, excluded: 6, errors: [], done: true });
     const audits = await db.select().from(pricingAuditEvents).where(eq(pricingAuditEvents.companyId, companyId)).orderBy(pricingAuditEvents.id);
     assert.equal(audits.length, 205);
-    assert.deepEqual(audits[0].details, { beforePrice: "1.00", afterPrice: "288.25", cost: "180.00", scheduleId: schedule.id, scheduleName: schedule.name, effectiveMarkupPercent: (288.25 - 180) / 180 * 100 });
+    assert.deepEqual(audits[0].details, { beforePrice: "1.00", afterPrice: "252.00", cost: "180.00", scheduleId: schedule.id, scheduleName: schedule.name, effectiveMarkupPercent: 40 });
+    assert.equal((audits[204].details as any).afterPrice, "2.25");
     assert.equal(audits[0].source, "catalog_part"); assert.equal(audits[0].kind, "markup_schedule_reprice");
     assert.equal(audits[0].parentNumber, "VALVE-0"); assert.equal(audits[0].itemCount, 1);
     assert.equal(audits[0].actorUserId, user.id); assert.equal(audits[0].actorName, user.name);
-    assert.equal(audits[0].delta, "287.25");
+    assert.equal(audits[0].delta, "251.00");
     const second = await previewMarkupRecalculation(actor);
     let repeated = await runMarkupRecalculation(actor, second.confirmationToken, 0);
     while (!repeated.done) repeated = await runMarkupRecalculation(actor, second.confirmationToken, repeated.processed);
@@ -88,6 +89,21 @@ test("confirmed 100-part batches, accurate counts, repeatability, atomic audits 
       await assert.rejects(repriceMarkupPart(expected, { ...context, tiers: context.tiers.map(t => ({ ...t, markupPercent: 1 })) }, actor), /audit failure/);
     } finally { spy.mock.restore(); }
     assert.equal((await storage.getPart(expected.id))?.price, expected.price);
+
+    // Changing only the minimum invalidates a preview and drives the next
+    // confirmed run, without duplicating unchanged-part audit events.
+    const beforeMinimum = await previewMarkupRecalculation(actor);
+    const custom = await updateMarkupSchedule(schedule.id, companyId, { minimumMarkupDollars: 5.5 });
+    await assert.rejects(runMarkupRecalculation(actor, beforeMinimum.confirmationToken, 0), /changed/);
+    const customPreview = await previewMarkupRecalculation(actor);
+    let customResult = await runMarkupRecalculation(actor, customPreview.confirmationToken, 0);
+    while (!customResult.done) customResult = await runMarkupRecalculation(actor, customPreview.confirmationToken, customResult.processed);
+    assert.equal(customResult.updated, 2); // the approved $1.75 part and the $0.25 part
+    assert.equal(customResult.unchanged, 203);
+    assert.equal((await storage.getPart(catalog[204].id))?.price, "5.75");
+    const customAudits = await db.select().from(pricingAuditEvents).where(eq(pricingAuditEvents.companyId, companyId)).orderBy(pricingAuditEvents.id);
+    assert.equal(customAudits.length, 207);
+    assert.equal((customAudits[206].details as any).scheduleId, custom.id);
 
     const stale = await previewMarkupRecalculation(actor);
     await db.update(parts).set({ cost: "2" }).where(eq(parts.id, expected.id));

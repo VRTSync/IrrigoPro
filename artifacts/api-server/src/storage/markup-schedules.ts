@@ -1,6 +1,6 @@
 import { and, eq, asc, sql } from "drizzle-orm";
 import { companies, customers, materialMarkupSchedules as schedules, materialMarkupTiers as tiers, customerMarkupScheduleOverrides as overrides } from "@workspace/db";
-import { validateMarkupTiers, type MarkupTier } from "@workspace/shared";
+import { validateMarkupTiers, validateMinimumMarkup, DEFAULT_MINIMUM_MARKUP_DOLLARS, type MarkupTier } from "@workspace/shared";
 import { db } from "../db";
 
 export type MarkupScheduleContext = NonNullable<Awaited<ReturnType<typeof getMarkupSchedule>>>;
@@ -23,25 +23,27 @@ export async function getActiveMarkupSchedule(companyId: number) {
 export async function getMarkupSchedules(companyId: number) {
   return db.select().from(schedules).where(eq(schedules.companyId, companyId)).orderBy(asc(schedules.id));
 }
-export async function insertSchedule(tx: Tx, data: { companyId: number; name: string; effectiveDate: string; tiers: MarkupTier[] }, active = false) {
+export async function insertSchedule(tx: Tx, data: { companyId: number; name: string; effectiveDate: string; tiers: MarkupTier[]; minimumMarkupDollars?: number }, active = false) {
   validateMarkupTiers(data.tiers);
+  const minimumMarkupDollars = data.minimumMarkupDollars ?? DEFAULT_MINIMUM_MARKUP_DOLLARS;
+  validateMinimumMarkup(minimumMarkupDollars);
   if (!data.name.trim() || data.name.length > 200) throw new Error("Schedule name is required (maximum 200 characters)");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data.effectiveDate) || new Date(data.effectiveDate).toISOString().slice(0, 10) !== data.effectiveDate) throw new Error("Invalid effective date");
-  const [schedule] = await tx.insert(schedules).values({ companyId: data.companyId, name: data.name.trim(), effectiveDate: data.effectiveDate, isActive: active }).returning();
+  const [schedule] = await tx.insert(schedules).values({ companyId: data.companyId, name: data.name.trim(), minimumMarkupDollars: minimumMarkupDollars.toFixed(2), effectiveDate: data.effectiveDate, isActive: active }).returning();
   await tx.insert(tiers).values(data.tiers.map(t => ({ scheduleId: schedule.id, tierOrder: t.tierOrder, minCost: t.minCost.toFixed(2), maxCost: t.maxCost?.toFixed(2) ?? null, markupPercent: t.markupPercent.toFixed(2) })));
   return schedule;
 }
 export async function createMarkupSchedule(data: Parameters<typeof insertSchedule>[1]) {
   return db.transaction(async tx => { await lockMarkupCompany(tx, data.companyId); return insertSchedule(tx, data); });
 }
-export async function updateMarkupSchedule(id: number, companyId: number, data: { name?: string; tiers?: MarkupTier[] }) {
+export async function updateMarkupSchedule(id: number, companyId: number, data: { name?: string; tiers?: MarkupTier[]; minimumMarkupDollars?: number }) {
   return db.transaction(async tx => {
     await lockMarkupCompany(tx, companyId);
     const old = await getMarkupSchedule(id, companyId);
     if (!old) throw new MarkupNotFound();
     await tx.update(schedules).set({ isActive: false }).where(and(eq(schedules.companyId, companyId), eq(schedules.isActive, true)));
     // Historical tiers/name/date are immutable. Overrides deliberately remain pinned to their contracted version.
-    return insertSchedule(tx, { companyId, name: data.name ?? old.schedule.name, effectiveDate: new Date().toISOString().slice(0, 10), tiers: data.tiers ?? old.tiers }, true);
+    return insertSchedule(tx, { companyId, name: data.name ?? old.schedule.name, minimumMarkupDollars: data.minimumMarkupDollars ?? Number(old.schedule.minimumMarkupDollars), effectiveDate: new Date().toISOString().slice(0, 10), tiers: data.tiers ?? old.tiers }, true);
   });
 }
 export async function activateMarkupSchedule(id: number, companyId: number) {

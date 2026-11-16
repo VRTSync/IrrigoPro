@@ -164,7 +164,7 @@ export function registerPartRoutes(
         approvalStatus: 'pending',
       });
       if (!await storage.getCompany(partData.companyId)) { res.status(404).json({ message: "Company not found" }); return; }
-      partData.price = materialUnitPrice({ ...partData, cost: partData.cost ?? null }, (await resolveMaterialSchedule(partData.companyId))?.tiers);
+      partData.price = materialUnitPrice({ ...partData, cost: partData.cost ?? null }, await resolveMaterialSchedule(partData.companyId));
 
       const part = await storage.createPart(partData);
 
@@ -236,7 +236,7 @@ export function registerPartRoutes(
       validatePartMoney(req.body);
       const partData = insertPartSchema.partial().parse(req.body);
       partData.companyId = existingPart.companyId;
-      partData.price = materialUnitPrice({ ...existingPart, ...partData }, (await resolveMaterialSchedule(existingPart.companyId))?.tiers);
+      partData.price = materialUnitPrice({ ...existingPart, ...partData }, await resolveMaterialSchedule(existingPart.companyId));
       const part = await storage.updatePart(id, partData);
       if (!part) {
         res.status(404).json({ message: "Part not found" });
@@ -337,7 +337,7 @@ export function registerPartRoutes(
 
       // Perform the update with explicit error handling
       partData.companyId = existingPart.companyId;
-      partData.price = materialUnitPrice({ ...existingPart, ...partData }, (await resolveMaterialSchedule(existingPart.companyId))?.tiers);
+      partData.price = materialUnitPrice({ ...existingPart, ...partData }, await resolveMaterialSchedule(existingPart.companyId));
       let part;
       try {
         part = await storage.updatePart(id, partData);
@@ -633,7 +633,7 @@ export function registerPartRoutes(
           partData.companyId = importCompanyId;
           validatePartMoney(partData);
           const validatedData = insertPartSchema.parse(partData);
-          validatedData.price = materialUnitPrice({ ...validatedData, cost: validatedData.cost ?? null }, importSchedule?.tiers);
+          validatedData.price = materialUnitPrice({ ...validatedData, cost: validatedData.cost ?? null }, importSchedule);
 
           // Create part
           await storage.createPart(validatedData);
