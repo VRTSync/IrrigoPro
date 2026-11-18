@@ -107,6 +107,10 @@
   ],
   "api-field": [
     {
+      "name": "quickbooks-void-document-release",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/qb-payment-sync.test.ts src/routes/qb-void-release.test.ts src/routes/qb-void-editability.test.ts src/lib/migrations/unlink-voided-ranch-invoices.test.ts src/routes/invoice-editability.test.ts"
+    },
+    {
       "name": "material-markup-recalculation",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 src/lib/markup-recalculation.test.ts src/routes/parts-material-pricing.test.ts"
     },

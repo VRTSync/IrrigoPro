@@ -86,6 +86,14 @@ test("Document System shared rules and backfill stay in the bounded field lane",
   assert.ok(commands.some(command => command.includes("src/routes/system-documentation-routes.test.ts") && command.includes("--test-concurrency=1")));
 });
 
+test("QuickBooks void release stays in the bounded serial field lane", () => {
+  const entry = manifest["api-field"].find(e => e.name === "quickbooks-void-document-release");
+  assert.ok(entry);
+  assert.match(entry.command, /--test-concurrency=1/);
+  for (const path of ["qb-payment-sync.test.ts", "qb-void-release.test.ts", "qb-void-editability.test.ts", "unlink-voided-ranch-invoices.test.ts", "invoice-editability.test.ts"])
+    assert.ok(entry.command.includes(path), path);
+});
+
 test("guard rejects duplicates and unexpected lanes", () => {
   for (const property of ["name", "command"]) {
     const bad = structuredClone(manifest);

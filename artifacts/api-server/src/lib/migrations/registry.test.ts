@@ -253,6 +253,12 @@ describe("bind-ticket-controllers-v1 — acknowledged migration", () => {
 // ── Static registry shape ──────────────────────────────────────────────────────
 
 describe("migration registry — static shape", () => {
+  it("includes the guarded Ranch void release", () => {
+    const migration = getMigration("unlink-voided-ranch-invoices");
+    assert.ok(migration);
+    assert.equal(migration.appSettingsKey, "unlinkVoidedRanchInvoices.done");
+    for (const method of ["check", "preview", "run"] as const) assert.equal(typeof migration[method], "function");
+  });
   it("includes confirmed zone type backfill with the required shape and unique ids", () => {
     const migrations = listMigrations();
     assert.equal(new Set(migrations.map(m => m.id)).size, migrations.length);

@@ -9,6 +9,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
+import { invoices } from "@workspace/db/schema";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 import {
   derivePaymentStatus,
@@ -170,6 +172,24 @@ function makeFakeDb(rows: any[]) {
       }),
     }),
   };
+}
+
+function makeVoidSpyDb(row: any, updates: any[]) {
+  const db = {
+    select: () => ({ from: () => ({ where: async () => [row] }) }),
+    transaction: async (fn: any) => fn(db),
+    update: (table: any) => ({
+      set: (values: any) => ({
+        where: () => {
+          updates.push({ table, ...values });
+          const result = Promise.resolve();
+          return Object.assign(result, { returning: async () => [{ id: row.id }] });
+        },
+      }),
+    }),
+    execute: async () => ({ rows: [] }),
+  };
+  return db;
 }
 
 function makeRequest(overrides: Partial<{
@@ -372,24 +392,10 @@ describe("syncPaymentStatusForCompany", () => {
 
   it("sets qbVoidDetectedAt on first detection; does NOT change paymentStatus or status", async () => {
     const updates: any[] = [];
-    const fakeDb = {
-      select: () => ({
-        from: () => ({
-          where: () =>
-            Promise.resolve([
-              { id: 10, quickbooksInvoiceId: "QB-V1", totalAmount: "500.00", paymentStatus: "unpaid", status: "sent", qbVoidDetectedAt: null },
-            ]),
-        }),
-      }),
-      update: () => ({
-        set: (vals: any) => ({
-          where: () => {
-            updates.push(vals);
-            return Promise.resolve();
-          },
-        }),
-      }),
-    };
+    const fakeDb = makeVoidSpyDb(
+      { id: 10, quickbooksInvoiceId: "QB-V1", totalAmount: "500.00", paymentStatus: "unpaid", status: "sent", qbVoidDetectedAt: null },
+      updates,
+    );
 
     const result = await syncPaymentStatusForCompany("99", {
       makeRequest: makeRequest({
@@ -406,8 +412,9 @@ describe("syncPaymentStatusForCompany", () => {
 
     assert.equal(result.qbVoided, 1, "qbVoided counter should be 1");
     assert.equal(result.paid, 0, "paid counter must not increment for voided invoices");
-    assert.ok(updates.length === 1, "should have exactly one DB update");
-    assert.ok(updates[0].qbVoidDetectedAt instanceof Date, "qbVoidDetectedAt should be set to a Date");
+    assert.equal(updates.length, 4, "invoice stamp and three document tables");
+    assert.equal(updates[0].table, invoices);
+    assert.match(new PgDialect().sqlToQuery(updates[0].qbVoidDetectedAt).sql, /coalesce/);
     assert.equal(updates[0].paymentStatus, undefined, "paymentStatus must not be changed");
     assert.equal(updates[0].status, undefined, "status must not be changed");
   });
@@ -415,21 +422,10 @@ describe("syncPaymentStatusForCompany", () => {
   it("preserves existing qbVoidDetectedAt on repeat detection (first-detection semantics)", async () => {
     const originalDate = new Date("2026-01-15T10:00:00Z");
     const updates: any[] = [];
-    const fakeDb = {
-      select: () => ({
-        from: () => ({
-          where: () =>
-            Promise.resolve([
-              { id: 11, quickbooksInvoiceId: "QB-V2", totalAmount: "200.00", paymentStatus: "unpaid", status: "sent", qbVoidDetectedAt: originalDate },
-            ]),
-        }),
-      }),
-      update: () => ({
-        set: (vals: any) => ({
-          where: () => { updates.push(vals); return Promise.resolve(); },
-        }),
-      }),
-    };
+    const fakeDb = makeVoidSpyDb(
+      { id: 11, quickbooksInvoiceId: "QB-V2", totalAmount: "200.00", paymentStatus: "unpaid", status: "sent", qbVoidDetectedAt: originalDate },
+      updates,
+    );
 
     await syncPaymentStatusForCompany("99", {
       makeRequest: makeRequest({
@@ -441,7 +437,7 @@ describe("syncPaymentStatusForCompany", () => {
     });
 
     // qbVoidDetectedAt should preserve the original timestamp (not be overwritten)
-    assert.deepEqual(updates[0].qbVoidDetectedAt, originalDate);
+    assert.match(new PgDialect().sqlToQuery(updates[0].qbVoidDetectedAt).sql, /coalesce\("invoices"\."qb_void_detected_at"/);
   });
 
   it("clears qbVoidDetectedAt when invoice is no longer voided on re-sync", async () => {

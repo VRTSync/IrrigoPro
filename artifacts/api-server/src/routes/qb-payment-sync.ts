@@ -16,7 +16,7 @@
 
 import type { Express, RequestHandler } from "express";
 import { db as dbModule } from "../db";
-import { invoices } from "@workspace/db/schema";
+import { invoices, billingSheets, workOrders, wetCheckBillings, wetChecks } from "@workspace/db/schema";
 import { eq, and, isNotNull, notInArray, sql } from "drizzle-orm";
 import type { QbMakeRequestFn } from "./qb-invoice-ops";
 import { logger } from "../lib/logger";
@@ -362,11 +362,30 @@ async function _syncImpl(
       // Surface for human review: stamp the detection timestamp on first
       // detection; do NOT change status or paymentStatus so the invoice stays
       // in AR and remains editable. Managers see a warning badge instead.
-      const voidUpdates: Record<string, unknown> = {
-        qbVoidDetectedAt: row.qbVoidDetectedAt ? row.qbVoidDetectedAt : now,
-        paymentSyncedAt: now,
-      };
-      await db.update(invoices).set(voidUpdates).where(eq(invoices.id, row.id));
+      await db.transaction(async (tx: any) => {
+        // COALESCE on the locked database row preserves the first detection even
+        // if another process stamped it after the candidate read.
+        const stamped = await tx.update(invoices).set({
+          qbVoidDetectedAt: sql`coalesce(${invoices.qbVoidDetectedAt}, ${now})`,
+          paymentSyncedAt: now,
+        }).where(and(eq(invoices.id, row.id), eq(invoices.companyId, companyIdNum)))
+          .returning({ id: invoices.id });
+        if (stamped.length !== 1) throw new Error("Voided invoice no longer belongs to syncing company");
+        // Current links, not historical invoice items, own the release decision.
+        // Reset status as well: edit guards independently lock status='billed'.
+        for (const table of [billingSheets, workOrders]) {
+          await tx.update(table).set({
+            invoiceId: null, billedAt: null,
+            status: "approved_passed_to_billing", updatedAt: now,
+          }).where(and(eq(table.invoiceId, row.id), eq(table.companyId, companyIdNum)));
+        }
+        await tx.update(wetCheckBillings).set({
+          invoiceId: null, billedAt: null,
+          status: "approved_passed_to_billing", updatedAt: now,
+        }).where(and(eq(wetCheckBillings.invoiceId, row.id),
+          sql`exists (select 1 from ${wetChecks} where ${wetChecks.id} = ${wetCheckBillings.wetCheckId}
+            and ${wetChecks.companyId} = ${companyIdNum})`));
+      });
       summary.qbVoided++;
       continue;
     }

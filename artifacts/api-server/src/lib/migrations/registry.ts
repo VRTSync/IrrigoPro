@@ -1,4 +1,5 @@
 import type { MigrationDefinition } from './types';
+import { unlinkVoidedRanchInvoicesMigration } from './unlink-voided-ranch-invoices';
 import { seedDefaultMarkupScheduleMigration } from './seed-default-markup-schedule';
 import { bindTicketControllersMigration } from './bind-ticket-controllers';
 import { backfillZoneTypeConfirmedMigration } from './backfill-zone-type-confirmed';
@@ -18,6 +19,7 @@ import { repairWorkOrderPartsMigration } from './repair-work-order-parts';
 import { backfillControllerZoneRecordsMigration } from './backfill-controller-zone-records';
 
 const REGISTRY = new Map<string, MigrationDefinition>([
+  [unlinkVoidedRanchInvoicesMigration.id, unlinkVoidedRanchInvoicesMigration],
   [seedDefaultMarkupScheduleMigration.id, seedDefaultMarkupScheduleMigration],
   [bindTicketControllersMigration.id, bindTicketControllersMigration],
   [backfillZoneTypeConfirmedMigration.id, backfillZoneTypeConfirmedMigration],
