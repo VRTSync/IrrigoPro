@@ -13295,9 +13295,9 @@ export declare const insertWorkOrderItemSchema: z.ZodObject<{
 }>;
 export declare const insertFieldWorkTypeSchema: z.ZodObject<{
     code: z.ZodString;
+    label: z.ZodString;
     requiresController: z.ZodOptional<z.ZodBoolean>;
     requiresZone: z.ZodOptional<z.ZodBoolean>;
-    label: z.ZodString;
     requiresDetails: z.ZodOptional<z.ZodBoolean>;
     sortOrder: z.ZodOptional<z.ZodInt>;
     active: z.ZodOptional<z.ZodBoolean>;
