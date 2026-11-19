@@ -1,5 +1,4 @@
 import sgMail from '@sendgrid/mail';
-import { ObjectStorageService } from './objectStorage';
 import { storage } from './storage';
 import { formatEstimateNumber } from '@workspace/shared';
 import { resolveCompanyLogoUrl } from './logo-url';
@@ -1169,8 +1168,8 @@ ${companyName}
   /**
    * Task #1887 — caller-supplied wording for {@link sendInvoiceDetailPdf}.
    *
-   * The invoice mailer is one code path: fetch the stored PDF out of object
-   * storage, base64 it, attach it, send. What it *says* is now the caller's
+    * The invoice mailer is one code path: base64 the supplied PDF bytes,
+    * attach them, send. What it *says* is now the caller's
    * business, so a payment reminder can go out with its own subject, body and
    * company branding without a second invoice mailer existing to drift.
    *
@@ -1182,7 +1181,7 @@ ${companyName}
     customerEmail: string,
     customerName: string,
     invoiceNumber: string,
-    pdfUrl: string,
+    pdfBuffer: Buffer,
     overrides?: {
       subject?: string;
       html?: string;
@@ -1201,23 +1200,6 @@ ${companyName}
     }
 
     try {
-      // Download PDF from object storage
-      const objectStorageService = new ObjectStorageService();
-      const file = await objectStorageService.searchPublicObject(pdfUrl);
-      
-      if (!file) {
-        return { success: false, error: 'PDF file not found in storage' };
-      }
-
-      // Read file content as buffer
-      const chunks: Buffer[] = [];
-      const stream = file.createReadStream();
-      
-      for await (const chunk of stream) {
-        chunks.push(Buffer.from(chunk));
-      }
-      
-      const pdfBuffer = Buffer.concat(chunks);
       const pdfBase64 = pdfBuffer.toString('base64');
 
       const {

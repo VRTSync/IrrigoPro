@@ -337,6 +337,13 @@ export class ObjectStorageService {
     });
   }
 
+  async deleteFromFirstSearchPath(objectKey: string): Promise<void> {
+    const publicSearchPaths = this.getPublicObjectSearchPaths();
+    if (publicSearchPaths.length === 0) throw new Error("No public search paths configured");
+    const { bucketName, objectName } = parseObjectPath(`${publicSearchPaths[0]}/${objectKey}`);
+    await objectStorageClient.bucket(bucketName).file(objectName).delete({ ignoreNotFound: true });
+  }
+
   // Generate the thumb + medium variants for a photo and preserve the
   // untouched bytes under the originals/ prefix. Idempotent: skips work
   // when targets already exist.

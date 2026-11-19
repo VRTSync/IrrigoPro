@@ -68,12 +68,13 @@ interface SentEmail {
   to: string;
   customerName: string;
   invoiceNumber: string;
-  pdfUrl: string;
+  pdfBuffer: Buffer;
   subject: string;
   html: string;
   text: string;
   replyTo?: string | null;
   categories?: string[];
+  filename?: string;
 }
 
 function invoice(overrides: Record<string, any> = {}) {
@@ -112,27 +113,29 @@ interface HarnessOptions {
   now?: () => Date;
   throttleDays?: number;
   paymentTerms?: string | null;
+  missingSavedFile?: boolean;
 }
 
 function harness(opts: HarnessOptions = {}) {
   const sent: SentEmail[] = [];
   const created: any[] = [];
   const rows: Record<number, any> = opts.invoices ?? { 1: invoice() };
-  const pdfs: Record<number, any> = opts.pdfs ?? { 1: { id: 9, pdfUrl: "/pdf/1.pdf" } };
+  const pdfs: Record<number, any> = opts.pdfs ?? { 1: { id: 9, pdfUrl: "/pdf/1.pdf", filename: "Saved invoice.pdf" } };
   const reminders: any[] = opts.reminders ? [...opts.reminders] : [];
   let nextReminderId = 500;
 
-  const mailer: ReminderMailer = async (to, customerName, invoiceNumber, pdfUrl, o) => {
+  const mailer: ReminderMailer = async (to, customerName, invoiceNumber, pdfBuffer, o) => {
     sent.push({
       to,
       customerName,
       invoiceNumber,
-      pdfUrl,
+      pdfBuffer,
       subject: o.subject,
       html: o.html,
       text: o.text,
       replyTo: o.replyTo,
       categories: o.categories,
+      filename: o.filename,
     });
     return opts.sendResult ?? { success: true };
   };
@@ -144,7 +147,7 @@ function harness(opts: HarnessOptions = {}) {
       if (companyId !== null && row.companyId !== companyId) return undefined;
       return row;
     },
-    async getInvoicePdfByInvoiceId(id: number) {
+    async getLatestInvoiceSentCopy(id: number) {
       return pdfs[id];
     },
     async getUser(_id: number) {
@@ -187,6 +190,7 @@ function harness(opts: HarnessOptions = {}) {
     requireReminderHistoryRead,
     _storageApi: storageApi,
     _mailer: mailer,
+    _readSentCopy: async (key) => opts.missingSavedFile ? null : Buffer.from(`saved bytes:${key}`),
     _loadPaymentTerms: async () => opts.paymentTerms ?? "net_30",
     _now: opts.now ?? (() => NOW),
     _baseUrl: () => "https://irrigopro.test",
@@ -224,6 +228,15 @@ async function request(
 
 const send = (app: Express, body: unknown = { templateKey: "firm" }) =>
   request(app, "POST", "/api/invoices/1/reminders", body);
+
+it("a missing saved object refuses without sending or recording a reminder", async () => {
+  const h = harness({ missingSavedFile: true });
+  const result = await send(h.app);
+  assert.equal(result.status, 422);
+  assert.equal(result.body.reason, "no_pdf");
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.created.length, 0);
+});
 
 // ── (a) The refusal matrix ──────────────────────────────────────────────────
 //
@@ -427,7 +440,8 @@ describe("POST /api/invoices/:id/reminders — sending", () => {
     assert.equal(h.sent.length, 1);
     const mail = h.sent[0];
     assert.equal(mail.to, "ap@acme.test");
-    assert.equal(mail.pdfUrl, "/pdf/1.pdf", "the stored invoice PDF is what gets attached");
+    assert.deepEqual(mail.pdfBuffer, Buffer.from("saved bytes:/pdf/1.pdf"), "the saved invoice bytes are attached");
+    assert.equal(mail.filename, "Saved invoice.pdf");
     assert.match(mail.subject, /final notice/i);
     assert.match(mail.subject, /INV-1/);
     // Branding and reply-to come from the company profile.

@@ -37,7 +37,7 @@ import { EmailService } from "../email-service";
 import { SmsService } from "../sms-service";
 import twilio from "twilio";
 import { ObjectStorageService } from "../objectStorage";
-import { InvoicePdfService } from "../invoice-pdf-service";
+import { registerInvoicePdfRoutes } from "./invoice-pdf-routes";
 import { resolveTicketPartsSubtotal, ticketItemRowTotal } from "../pdf-view-model";
 import { buildWorkDescriptionPrompt, buildExpandDescriptionPrompt, TEMPLATE_VERSION, CRITICAL_FIELDS, type WorkDescriptionInputs } from "../ai-prompt-templates";
 import { makeRequireSameCompanyAsWorkOrder } from "./work-order-tenant-guard";
@@ -978,7 +978,7 @@ import { db, pool } from "../db";
 import { 
   customers, estimates, workOrders, estimateItems, parts, billingSheets, billingSheetItems, 
   users, invoices, invoiceItems, notifications, quickbooksIntegration,
-  companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers, invoicePdfs,
+  companies, siteMaps, controllers, irrigationZones, partUsage, utilityMarkers,
   wetCheckPhotos, wetChecks, wetCheckFindings, wetCheckBillings,
   workOrderZonePhotos,
   irrigationControllers,
@@ -7109,17 +7109,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       })();
 
-      // Generate invoice detail PDF automatically in background
-      const pdfService = new InvoicePdfService(storage);
-      pdfService.generateAndSaveInvoicePdf(invoice.id).then(result => {
-        if (result.success) {
-          console.log(`Invoice PDF generated successfully for invoice ${invoice.id}`);
-        } else {
-          console.error(`Failed to generate PDF for invoice ${invoice.id}:`, result.error);
-        }
-      }).catch(error => {
-        console.error(`Error generating PDF for invoice ${invoice.id}:`, error);
-      });
 
       res.json({
         message: "Monthly invoice created successfully and synced to QuickBooks",
@@ -7411,11 +7400,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       })();
 
-      // ── PDF generation (background) ──────────────────────────────────────
-      const pdfService = new InvoicePdfService(storage);
-      pdfService.generateAndSaveInvoicePdf(invoice.id).catch(err =>
-        logger.error({ err, invoiceId: invoice.id }, "Standalone invoice PDF generation failed")
-      );
 
       res.json({
         message: "Standalone invoice created successfully",
@@ -11843,22 +11827,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Task #224 — when photos change on a billing sheet that's already linked
-      // to an invoice, invalidate the cached invoice_pdfs row so the next view,
-      // download, or send regenerates a fresh PDF that includes the new photos.
-      if (
-        billingSheetData.photos !== undefined &&
-        existingBsForLockCheck?.invoiceId
-      ) {
-        const cachedInvoicePdf = await storage.getInvoicePdfByInvoiceId(existingBsForLockCheck.invoiceId);
-        if (cachedInvoicePdf) {
-          await db.delete(invoicePdfs).where(eq(invoicePdfs.id, cachedInvoicePdf.id));
-          console.log(
-            `[AUDIT] invoice_pdf_invalidated reason=billing_sheet_photos_patch ` +
-            `billingSheetId=${id} invoiceId=${existingBsForLockCheck.invoiceId} cachedPdfId=${cachedInvoicePdf.id}`
-          );
-        }
-      }
 
       // Task #195: photo-after-billing audit. If this was a photos-only PATCH
       // applied to a sheet that had already reached billing (status `billed`
@@ -12318,205 +12286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ./invoice-sync-quickbooks-route.ts, wired up at the merge-route register
   // site below with createQuickBooksInvoiceForInvoice injected.
 
-  app.get("/api/invoices/:invoiceId/pdf", requireAuthentication, requireInvoiceRead, async (req, res) => {
-    try {
-      const invoiceId = parseInt(req.params.invoiceId);
-      const callerCompanyId11217 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
-      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11217);
-      if (!invoice) {
-        res.status(404).json({ message: "Invoice not found" });
-        return;
-      }
-
-      const customer = await storage.getCustomerById(invoice.customerId);
-      const periodStart = new Date(invoice.periodStart);
-      const periodEnd = new Date(invoice.periodEnd);
-      const fmtDateShort = (d: Date) => `${d.getMonth()+1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
-      const propertyName = customer?.irrigoName ?? customer?.name ?? 'Unknown';
-      const newFilename = `${propertyName} - Irrigation Billing Detail - (${fmtDateShort(periodStart)}_${fmtDateShort(periodEnd)}).pdf`;
-
-      let pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
-      if (!pdf) {
-        const companyId = customer?.companyId ?? 1;
-
-        const pdfService = new InvoicePdfService(storage);
-        const result = await pdfService.generatePdfBuffer(invoiceId);
-
-        if (!result.success) {
-          if (result.validationFailure) {
-            res.status(422).json({
-              message: result.error || "Invoice totals validation failed",
-              validationFailure: result.validationFailure,
-            });
-            return;
-          }
-          res.status(500).json({ message: "PDF generation failed", error: result.error });
-          return;
-        }
-
-        pdf = await storage.createInvoicePdf({
-          invoiceId: invoice.id,
-          customerId: invoice.customerId,
-          companyId,
-          pdfUrl: 'generated-on-demand',
-          filename: newFilename,
-          status: 'generated',
-        });
-      }
-      
-      res.json({ ...pdf, filename: newFilename });
-    } catch (error) {
-      console.error('Error fetching invoice PDF:', error);
-      res.status(500).json({ message: "Failed to fetch invoice PDF" });
-    }
-  });
-
-  app.get("/api/invoices/:invoiceId/pdf/download", requireAuthentication, requireInvoiceRead, async (req, res) => {
-    try {
-      const invoiceId = parseInt(req.params.invoiceId);
-
-      const pdfService = new InvoicePdfService(storage);
-      const result = await pdfService.generatePdfBuffer(invoiceId);
-
-      if (!result.success || !result.pdfBuffer) {
-        if (result.validationFailure) {
-          res.status(422).json({
-            message: result.error || "Invoice totals validation failed",
-            validationFailure: result.validationFailure,
-          });
-          return;
-        }
-        res.status(500).json({ message: result.error || "Failed to generate PDF" });
-        return;
-      }
-
-      const callerCompanyId11278 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
-      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11278);
-      const customer = invoice ? await storage.getCustomerById(invoice.customerId) : null;
-      const periodStart = invoice ? new Date(invoice.periodStart) : new Date();
-      const periodEnd = invoice ? new Date(invoice.periodEnd) : new Date();
-      const fmtDateShort = (d: Date) => `${d.getMonth()+1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
-      const propertyName = customer?.irrigoName ?? customer?.name ?? 'Unknown';
-      const filename = invoice
-        ? `${propertyName} - Irrigation Billing Detail - (${fmtDateShort(periodStart)}_${fmtDateShort(periodEnd)}).pdf`
-        : `Irrigation Billing Detail - ${invoiceId}.pdf`;
-
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${filename}"`,
-        'Content-Length': result.pdfBuffer.length.toString(),
-      });
-
-      res.end(result.pdfBuffer);
-    } catch (error) {
-      console.error('Error downloading invoice PDF:', error);
-      res.status(500).json({ message: "Failed to download invoice PDF" });
-    }
-  });
-
-  app.post("/api/invoices/:invoiceId/pdf/send", requireAuthentication, requireInvoiceSend, async (req, res) => {
-    try {
-      const invoiceId = parseInt(req.params.invoiceId);
-      const callerCompanyId11304 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
-      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11304);
-      
-      if (!invoice) {
-        res.status(404).json({ message: "Invoice not found" });
-        return;
-      }
-
-      const pdfService = new InvoicePdfService(storage);
-      const validationResult = await pdfService.generatePdfBuffer(invoiceId);
-      if (!validationResult.success) {
-        if (validationResult.validationFailure) {
-          res.status(422).json({
-            message: validationResult.error || "Invoice totals validation failed",
-            validationFailure: validationResult.validationFailure,
-          });
-          return;
-        }
-        res.status(500).json({ message: validationResult.error || "Failed to validate invoice PDF" });
-        return;
-      }
-
-      const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
-      if (!pdf) {
-        res.status(404).json({ message: "PDF not found for this invoice" });
-        return;
-      }
-
-      // Send email to customer with PDF attachment
-      const emailResult = await EmailService.sendInvoiceDetailPdf(
-        invoice.customerEmail,
-        invoice.customerName,
-        invoice.invoiceNumber,
-        pdf.pdfUrl
-      );
-
-      if (emailResult.success) {
-        const now = new Date();
-        // Update PDF status to mark it as sent
-        await storage.updateInvoicePdf(pdf.id, {
-          status: 'sent',
-          sentAt: now,
-        });
-        // Task #1847 — sentAt on the invoice row is the single source of
-        // delivery truth. Stamp it when a PDF is emailed so the Sent badge
-        // appears without requiring a separate manual mark-sent action.
-        // Preserve an existing sentAt (e.g. a prior manual mark-sent) — only
-        // fill in when it is currently null.
-        if (!invoice.sentAt) {
-          await storage.updateInvoice(invoiceId, { sentAt: now });
-        }
-        
-        res.json({ 
-          message: "PDF sent successfully to customer",
-          email: invoice.customerEmail 
-        });
-      } else {
-        res.status(500).json({ 
-          message: "Failed to send PDF",
-          error: emailResult.error 
-        });
-      }
-    } catch (error) {
-      console.error('Error sending invoice PDF:', error);
-      res.status(500).json({ message: "Failed to send invoice PDF" });
-    }
-  });
-
-  app.post("/api/invoices/:invoiceId/pdf/regenerate", requireAuthentication, requireInvoiceWrite, async (req, res) => {
-    try {
-      const invoiceId = parseInt(req.params.invoiceId);
-      const callerCompanyId11380 = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
-      const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId11380);
-      
-      if (!invoice) {
-        res.status(404).json({ message: "Invoice not found" });
-        return;
-      }
-
-      const existingPdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
-      if (existingPdf) {
-        await db.delete(invoicePdfs).where(eq(invoicePdfs.id, existingPdf.id));
-      }
-
-      const pdfService = new InvoicePdfService(storage);
-      const result = await pdfService.generateAndSaveInvoicePdf(invoiceId);
-
-      if (result.success) {
-        res.json({ message: "PDF regenerated successfully" });
-      } else {
-        res.status(500).json({ 
-          message: "Failed to regenerate PDF",
-          error: result.error 
-        });
-      }
-    } catch (error) {
-      console.error('Error regenerating invoice PDF:', error);
-      res.status(500).json({ message: "Failed to regenerate invoice PDF" });
-    }
-  });
+  registerInvoicePdfRoutes(app, { requireAuthentication, requireInvoiceRead, requireInvoiceSend });
 
 
   // Work Order routes - Enhanced
@@ -13215,22 +12985,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Task #224 — when photos change on a work order that's already linked
-      // to an invoice, invalidate the cached invoice_pdfs row so the next view,
-      // download, or send regenerates a fresh PDF that includes the new photos.
-      if (
-        workOrderData.photos !== undefined &&
-        existingForLockCheck?.invoiceId
-      ) {
-        const cachedInvoicePdf = await storage.getInvoicePdfByInvoiceId(existingForLockCheck.invoiceId);
-        if (cachedInvoicePdf) {
-          await db.delete(invoicePdfs).where(eq(invoicePdfs.id, cachedInvoicePdf.id));
-          console.log(
-            `[AUDIT] invoice_pdf_invalidated reason=work_order_photos_patch ` +
-            `workOrderId=${id} invoiceId=${existingForLockCheck.invoiceId} cachedPdfId=${cachedInvoicePdf.id}`
-          );
-        }
-      }
 
       // Task #195: photo-after-billing audit. If this was a photos-only PATCH
       // applied to a work order that had already reached billing (status

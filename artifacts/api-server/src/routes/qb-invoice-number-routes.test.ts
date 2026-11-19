@@ -82,7 +82,6 @@ function fixture(integration: unknown = { realmId: "test-realm", accessToken: "f
       buildAndPostQbInvoice: async () => { posts++; return { quickbooksId: "500", qbDocNumber: "1034" }; },
       recordLifecycleAudit: async () => {},
       logger: { warn() {}, error() {} },
-      InvoicePdfService: class { async generateAndSaveInvoicePdf() { return { success: true }; } },
       buildBsLineDescription: () => "Fixture",
       wcbIsEligible: () => false,
     },

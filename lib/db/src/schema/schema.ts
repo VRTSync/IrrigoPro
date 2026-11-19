@@ -1116,16 +1116,22 @@ export const invoiceItems = pgTable("invoice_items", {
   laborTotal: decimal("labor_total", { precision: 10, scale: 2 }).default("0"),
 });
 
-// Invoice PDFs - auto-generated detailed breakdowns for customer sharing
+// Invoice PDFs - exact saved copies emailed to customers
 export const invoicePdfs = pgTable("invoice_pdfs", {
   id: serial("id").primaryKey(),
   invoiceId: integer("invoice_id").references(() => invoices.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
   companyId: integer("company_id").references(() => companies.id).notNull(),
-  pdfUrl: text("pdf_url").notNull(), // Google Cloud Storage URL
+  pdfUrl: text("pdf_url").notNull(), // Object key of the exact PDF bytes emailed (invoice-sent-copies/<companyId>/<invoiceId>/<stamp>.pdf)
   filename: text("filename").notNull(), // Format: "Invoice_12345_Jan2025-Jan2025_Detail.pdf"
-  status: text("status").notNull().default("generated"), // generated, sent, failed
+  status: text("status").notNull().default("generated"), // 'sent', or 'superseded' after merge; one row per emailed copy
   sentAt: timestamp("sent_at"), // When PDF was sent to customer
+  sentToEmail: text("sent_to_email"),
+  ccEmails: jsonb("cc_emails").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  bccEmails: jsonb("bcc_emails").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  subject: text("subject"),
+  sentByUserId: integer("sent_by_user_id").references(() => users.id),
+  byteSize: integer("byte_size"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

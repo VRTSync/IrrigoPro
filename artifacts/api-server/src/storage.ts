@@ -817,7 +817,7 @@ export interface IStorage {
   
   // Invoice PDFs - detailed breakdowns
   createInvoicePdf(pdf: InsertInvoicePdf): Promise<InvoicePdf>;
-  getInvoicePdfByInvoiceId(invoiceId: number): Promise<InvoicePdf | undefined>;
+  getLatestInvoiceSentCopy(invoiceId: number): Promise<InvoicePdf | undefined>;
   updateInvoicePdf(id: number, pdf: Partial<InsertInvoicePdf>): Promise<InvoicePdf | undefined>;
 
   // Task #1887 — invoice payment reminders.
@@ -7636,8 +7636,10 @@ export class DatabaseStorage implements IStorage {
     return newPdf;
   }
 
-  async getInvoicePdfByInvoiceId(invoiceId: number): Promise<InvoicePdf | undefined> {
-    const [pdf] = await db.select().from(invoicePdfs).where(eq(invoicePdfs.invoiceId, invoiceId));
+  async getLatestInvoiceSentCopy(invoiceId: number): Promise<InvoicePdf | undefined> {
+    const [pdf] = await db.select().from(invoicePdfs)
+      .where(and(eq(invoicePdfs.invoiceId, invoiceId), eq(invoicePdfs.status, 'sent')))
+      .orderBy(sql`${invoicePdfs.sentAt} desc nulls last`, desc(invoicePdfs.id)).limit(1);
     return pdf;
   }
 
@@ -7780,8 +7782,8 @@ export class DatabaseStorage implements IStorage {
   // customer + billing period into one surviving invoice. Local-only: no
   // QuickBooks calls. Re-points line items + source records (work orders,
   // billing sheets, wet check billings) onto the survivor, sums totals,
-  // marks the merged invoices `cancelled` (kept for audit), and drops the
-  // survivor's stale cached PDF row so it regenerates. All in one
+  // marks the absorbed invoices `merged` (kept for audit), and retires the
+  // survivor's pre-merge sent copies from reminder selection. All in one
   // transaction; validation is re-checked inside the txn so a concurrent
   // change can't slip a bad merge through.
   async mergeInvoices(params: {
@@ -7877,9 +7879,13 @@ export class DatabaseStorage implements IStorage {
         .set({ status: "merged", mergedIntoInvoiceId: survivingId, updatedAt: new Date() } as any)
         .where(inArray(invoices.id, mergedOnlyIds));
 
-      // Drop the survivor's stale cached PDF metadata so the next view
-      // regenerates against the merged line items.
-      await tx.delete(invoicePdfs).where(eq(invoicePdfs.invoiceId, survivingId));
+      // Keep the earlier delivery evidence, but never attach a pre-merge
+      // document to a reminder for the merged invoice.
+      await tx.update(invoicePdfs).set({ status: "superseded" }).where(and(
+        eq(invoicePdfs.invoiceId, survivingId),
+        eq(invoicePdfs.companyId, survivingInvoice.companyId),
+        eq(invoicePdfs.status, "sent"),
+      ));
 
       // Task #1756 — clear the QB ids from absorbed invoices and stamp a
       // qbNote so billing managers know what to clean up manually. The "never-

@@ -40,6 +40,7 @@ import {
   type ReminderTemplateKey,
 } from "../invoice-reminder-templates";
 import { EmailService } from "../email-service";
+import { readInvoiceSentCopy } from "../invoice-pdf-service";
 import { resolveCompanyLogoUrl } from "../logo-url";
 
 // ── The refusal matrix ──────────────────────────────────────────────────────
@@ -298,7 +299,7 @@ export type ReminderMailer = (
   customerEmail: string,
   customerName: string,
   invoiceNumber: string,
-  pdfUrl: string,
+  pdfBuffer: Buffer,
   overrides: {
     subject: string;
     html: string;
@@ -341,8 +342,8 @@ function emailBaseUrl(): string {
   return "https://irrigopro.com";
 }
 
-const defaultMailer: ReminderMailer = (to, name, number, pdfUrl, overrides) =>
-  EmailService.sendInvoiceDetailPdf(to, name, number, pdfUrl, overrides);
+const defaultMailer: ReminderMailer = (to, name, number, pdfBuffer, overrides) =>
+  EmailService.sendInvoiceDetailPdf(to, name, number, pdfBuffer, overrides);
 
 // ── The shared core ─────────────────────────────────────────────────────────
 //
@@ -357,6 +358,7 @@ const defaultMailer: ReminderMailer = (to, name, number, pdfUrl, overrides) =>
 // per invoice.
 
 export interface ReminderCoreDeps {
+  _readSentCopy?: (key: string) => Promise<Buffer | null>;
   /** Test seams. Production passes none of these. */
   _storageApi?: any;
   _mailer?: ReminderMailer;
@@ -495,7 +497,7 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
   ): Promise<ReminderContext | null> {
     const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId(req));
     if (!invoice) return null;
-    const pdf = await storage.getInvoicePdfByInvoiceId(invoiceId);
+    const pdf = await storage.getLatestInvoiceSentCopy(invoiceId);
     const paymentTerms = await loadPaymentTerms(invoice.customerId);
     const now = nowFn();
     const effectiveDueDate = computeEffectiveDueDate(
@@ -649,19 +651,24 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
       },
     });
 
+    const buf = await (deps._readSentCopy ?? readInvoiceSentCopy)(ctx.pdf!.pdfUrl);
+    if (!buf) {
+      const refusal = evaluateReminderEligibility({ invoice: ctx.invoice, hasStoredPdf: false })!;
+      return { ...head, outcome: "skipped", reason: refusal.reason, message: refusal.message, refusal, throttle: null };
+    }
     const recipientEmail = String(ctx.invoice.customerEmail);
     const sendResult = await mailer(
       recipientEmail,
       ctx.invoice.customerName,
       ctx.invoice.invoiceNumber,
       // Non-null by construction: the no_pdf refusal above returned early.
-      ctx.pdf!.pdfUrl,
+      buf,
       {
         subject: rendered.subject,
         html: rendered.html,
         text: rendered.text,
         replyTo: company?.email ?? null,
-        filename: `Invoice_${ctx.invoice.invoiceNumber}.pdf`,
+        filename: ctx.pdf!.filename,
         categories: ["invoice-payment-reminder"],
       },
     );

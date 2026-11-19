@@ -71,7 +71,7 @@ interface SentEmail {
   to: string;
   customerName: string;
   invoiceNumber: string;
-  pdfUrl: string;
+  pdfBuffer: Buffer;
   subject: string;
 }
 
@@ -125,8 +125,8 @@ function harness(opts: HarnessOptions = {}) {
   const reminders: any[] = opts.reminders ? [...opts.reminders] : [];
   let nextReminderId = 500;
 
-  const mailer: ReminderMailer = async (to, customerName, invoiceNumber, pdfUrl, o) => {
-    sent.push({ to, customerName, invoiceNumber, pdfUrl, subject: o.subject });
+  const mailer: ReminderMailer = async (to, customerName, invoiceNumber, pdfBuffer, o) => {
+    sent.push({ to, customerName, invoiceNumber, pdfBuffer, subject: o.subject });
     return opts.sendResultFor?.(invoiceNumber) ?? { success: true };
   };
 
@@ -137,7 +137,7 @@ function harness(opts: HarnessOptions = {}) {
       if (companyId !== null && row.companyId !== companyId) return undefined;
       return row;
     },
-    async getInvoicePdfByInvoiceId(id: number) {
+    async getLatestInvoiceSentCopy(id: number) {
       return pdfs[id];
     },
     async getUser(_id: number) {
@@ -180,6 +180,7 @@ function harness(opts: HarnessOptions = {}) {
   const core = createReminderCore({
     _storageApi: storageApi,
     _mailer: mailer,
+    _readSentCopy: async (key) => Buffer.from(`saved bytes:${key}`),
     _loadPaymentTerms: async () => "net_30",
     _now: () => clock.current,
     _baseUrl: () => "https://irrigopro.test",

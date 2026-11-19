@@ -14,3 +14,9 @@ Invoice sent-copy records must represent the exact bytes emailed. Batch invoice 
 **Why:** The office must be able to show what customers received, and automatic retries of uncertain delivery could send duplicates.
 
 **How to apply:** Keep reply capture, QuickBooks invoice email, reminder wording, Command Center, and site maps outside this feature family. Acceptance evidence includes the specified grep results, live screenshots, and test results, not merely a passing-test summary. New tests use validation commands, never new workflows.
+
+Merging invoices must preserve the prior emailed PDFs and delivery metadata. Retire pre-merge copies from reminder selection without deleting the evidence. The merged invoice needs a fresh send before reminders resume.
+
+**Why:** The user approved retaining the audit trail rather than following the original deletion instruction; a merged invoice is still a different document.
+
+**How to apply:** Keep historical copies available for auditing only. A reminder for the survivor must use a copy sent for the merged document.

@@ -215,7 +215,7 @@ function remindersHarness(opts: {
       if (companyId !== null && row.companyId !== companyId) return undefined;
       return row;
     },
-    async getInvoicePdfByInvoiceId(id: number) {
+    async getLatestInvoiceSentCopy(id: number) {
       return { id: 9, pdfUrl: `/pdf/${id}.pdf` };
     },
     async getUser(_id: number) {

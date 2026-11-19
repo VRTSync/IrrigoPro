@@ -7,6 +7,29 @@ import type { IStorage } from './storage';
 import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem, WetCheckBilling } from '@workspace/db';
 import type { WetCheckBillingView } from './wet-check-billing-view';
 import { buildWcbZonePhotoGroups } from './wcb-zone-photo-groups';
+import { ObjectStorageService } from './objectStorage';
+
+export function buildInvoicePdfFilename(
+  invoice: { periodStart: Date | string; periodEnd: Date | string } | null | undefined,
+  customer: { irrigoName?: string | null; name?: string | null } | null | undefined,
+  invoiceIdFallback: number,
+): string {
+  if (!invoice) return `Irrigation Billing Detail - ${invoiceIdFallback}.pdf`;
+  const fmtDateShort = (value: Date | string) => {
+    const d = new Date(value);
+    return `${d.getMonth() + 1}-${d.getDate()}-${String(d.getFullYear()).slice(-2)}`;
+  };
+  const label = customer?.irrigoName ?? customer?.name ?? 'Unknown';
+  return `${label} - Irrigation Billing Detail - (${fmtDateShort(invoice.periodStart)}_${fmtDateShort(invoice.periodEnd)}).pdf`;
+}
+
+export async function readInvoiceSentCopy(objectKey: string): Promise<Buffer | null> {
+  const file = await new ObjectStorageService().searchPublicObject(objectKey);
+  if (!file) return null;
+  const chunks: Buffer[] = [];
+  for await (const chunk of file.createReadStream()) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
 
 async function extractBrandColorsFromDataUri(dataUri: string): Promise<PdfBrandColors> {
   try {
@@ -453,49 +476,4 @@ export class InvoicePdfService {
     }
   }
 
-  async generateAndSaveInvoicePdf(invoiceId: number): Promise<InvoicePdfGenerationResult> {
-    const result = await this.generatePdfBuffer(invoiceId);
-    if (!result.success) {
-      return result;
-    }
-
-    try {
-      const invoice = await this.storage.getInvoiceById(invoiceId, null);
-      if (!invoice) {
-        return { success: false, error: 'Invoice not found' };
-      }
-
-      const customer = await this.storage.getCustomerById(invoice.customerId);
-      if (!customer) {
-        return { success: false, error: 'Customer not found' };
-      }
-
-      const periodStart = new Date(invoice.periodStart);
-      const periodEnd = new Date(invoice.periodEnd);
-      const formatDate = (date: Date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-      const filename = `Invoice_${invoice.invoiceNumber}_${formatDate(periodStart)}-${formatDate(periodEnd)}_Detail.pdf`;
-
-      await this.storage.createInvoicePdf({
-        invoiceId: invoice.id,
-        customerId: invoice.customerId,
-        companyId: customer.companyId,
-        pdfUrl: 'generated-on-demand',
-        filename,
-        status: 'generated',
-      });
-
-      return { success: true, pdfBuffer: result.pdfBuffer };
-    } catch (error) {
-      console.error('Error saving invoice PDF record:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
-      };
-    }
-  }
 }

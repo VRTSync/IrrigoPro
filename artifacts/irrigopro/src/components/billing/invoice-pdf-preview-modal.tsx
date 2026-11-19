@@ -180,10 +180,10 @@ export function InvoicePdfPreviewModal({
     mutationFn: async () => {
       return apiRequest(`/api/invoices/${invoiceId}/pdf/send`, 'POST');
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       toast({
         title: "Email Sent",
-        description: `Invoice detail PDF has been sent to ${customerEmail}`,
+        description: `Invoice detail PDF has been sent to ${data?.email ?? customerEmail}`,
       });
       setShowEmailConfirm(false);
       queryClient.invalidateQueries({ queryKey: ["/api/invoices", invoiceId, "pdf"] });

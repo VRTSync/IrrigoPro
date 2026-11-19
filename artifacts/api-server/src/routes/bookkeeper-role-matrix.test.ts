@@ -404,7 +404,7 @@ describe("invoice payment reminders — real routes, real guards", () => {
             totalAmount: "100.00",
           };
         },
-        async getInvoicePdfByInvoiceId() {
+        async getLatestInvoiceSentCopy() {
           return { id: 5, pdfUrl: "/pdf/x.pdf" };
         },
         async getUser() {
@@ -427,6 +427,7 @@ describe("invoice payment reminders — real routes, real guards", () => {
         mailed.push(to);
         return { success: true };
       },
+      _readSentCopy: async () => Buffer.from("%PDF saved invoice"),
       _loadPaymentTerms: async () => "net_30",
       _now: () => new Date("2026-08-11T12:00:00.000Z"),
     });
@@ -591,12 +592,16 @@ describe("routes.ts wiring", () => {
   });
 
   it("invoice PDF routes are gated on invoice read", () => {
+    const pdfSource = readFileSync(join(import.meta.dirname, "invoice-pdf-routes.ts"), "utf8");
     for (const decl of [
       'app.get("/api/invoices/:invoiceId/pdf"',
       'app.get("/api/invoices/:invoiceId/pdf/download"',
     ]) {
-      assert.match(guardFor(decl), /requireInvoiceRead/, decl);
+      const start = pdfSource.indexOf(decl);
+      assert.notEqual(start, -1, decl);
+      assert.match(pdfSource.slice(start, pdfSource.indexOf("async", start)), /requireAuthentication.*requireInvoiceRead/, decl);
     }
+    assert.match(ROUTES_SRC, /registerInvoicePdfRoutes\(app, \{ requireAuthentication, requireInvoiceRead, requireInvoiceSend \}\)/);
   });
 
   it("both previously-ungated QuickBooks routes now carry the allowlist", () => {

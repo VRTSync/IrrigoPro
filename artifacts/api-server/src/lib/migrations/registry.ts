@@ -12,6 +12,7 @@ import { repairQbVoidMispaidMigration } from './repair-qb-void-mispaid';
 import { repairWoodglennWoHoursMigration } from './repair-woodglenn-wo-hours';
 import { retireFollowupWorkOrdersMigration } from './retire-followup-work-orders';
 import { invoiceSentStatusBackfillMigration } from './invoice-sent-status-backfill';
+import { deleteOnDemandInvoicePdfRowsMigration } from './delete-on-demand-invoice-pdf-rows';
 import { normalizeUsernamesMigration } from './normalize-usernames';
 import { seedFieldWorkTypesMigration } from './seed-field-work-types';
 import { backfillSeasonalBudgetsMigration } from './backfill-seasonal-budgets';
@@ -33,6 +34,7 @@ const REGISTRY = new Map<string, MigrationDefinition>([
   [repairWoodglennWoHoursMigration.id, repairWoodglennWoHoursMigration],
   [retireFollowupWorkOrdersMigration.id, retireFollowupWorkOrdersMigration],
   [invoiceSentStatusBackfillMigration.id, invoiceSentStatusBackfillMigration],
+  [deleteOnDemandInvoicePdfRowsMigration.id, deleteOnDemandInvoicePdfRowsMigration],
   [normalizeUsernamesMigration.id, normalizeUsernamesMigration],
   [seedFieldWorkTypesMigration.id, seedFieldWorkTypesMigration],
   [backfillSeasonalBudgetsMigration.id, backfillSeasonalBudgetsMigration],
