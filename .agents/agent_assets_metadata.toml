@@ -963,3 +963,45 @@ mtime_ms = 1794438923658
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9d8ba916-25ae-44c0-84da-ba014b59691d/8e4a89f4-df3a-4f74-a340-7856e027814b"
 storage_version_token = "1794439033321977"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "JnTkslSwqAc9vz1mQ6wJd"
+uri = "file://generated-artifacts/outgoing-email/card-375.png"
+type = "image"
+title = "Outgoing email card — 375 px"
+description = "Real signed-in development UI. No horizontal overflow; unauthenticated domain safely uses the platform address."
+logical_id = "61ae883d-8e4c-436c-ac88-a1e4340dca8e"
+content_hash = "sha256:520dc8b1f63853fd734283146bcdf3fad2a4b5e0a4a3746a0e795fccb7d73cde"
+size = 81165
+mtime_ms = 1795041655298
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/61ae883d-8e4c-436c-ac88-a1e4340dca8e/9ed1e1ca-edeb-4252-a85c-d639e606e776"
+storage_version_token = "1795041691877686"
+content_type = "image/png"
+
+[[outputs]]
+id = "8NpVexar7WCoP4E_gfqoM"
+uri = "file://generated-artifacts/outgoing-email/card-1280.png"
+type = "image"
+title = "Outgoing email card — 1280 px"
+description = "Real signed-in development UI with two-column fields and the effective From and Reply-To summary."
+logical_id = "bf148189-0c8d-4c27-a74d-92f62710436e"
+content_hash = "sha256:4d2431eafd3850fe72dda719ab33e6bac8f81875e0706b3d6ae12f3b02e06346"
+size = 78475
+mtime_ms = 1795041655762
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/bf148189-0c8d-4c27-a74d-92f62710436e/46588c80-83c9-446c-990b-0af0b0244509"
+storage_version_token = "1795041692660980"
+content_type = "image/png"
+
+[[outputs]]
+id = "JcASBP6WiUYUHiMqTxe_V"
+uri = "file://generated-artifacts/outgoing-email/api-startup-last-50.txt"
+type = "text"
+title = "Development API startup log"
+description = "Complete startup log available at the time of the stall, before the API recovered."
+logical_id = "ca51623d-473f-4ac2-afdd-07d3b76721de"
+content_hash = "sha256:801027b85c09628d6990c6808cfbb718f116fa1b4cbe6d7b0d8baf087ad2aa3d"
+size = 851
+mtime_ms = 1795107930774
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ca51623d-473f-4ac2-afdd-07d3b76721de/58dbe5ef-6a23-4de3-889a-8bdd4206bff8"
+storage_version_token = "1795108181882182"
+content_type = "text/plain"

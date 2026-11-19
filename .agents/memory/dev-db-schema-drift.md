@@ -14,8 +14,9 @@ exist` for a table that is plainly defined in the schema module, while that
 feature's own test suite passes (integration suites create the tables they
 need, and can drop them again on teardown).
 
-**Rule: a 42P01 for a recently merged feature's table is environment drift,
-not evidence that your change broke something.** Do not adopt it into your
+**Rule: a 42P01 for a recently merged table or 42703 for a recently merged
+column is environment drift when that object exists in the checked-out schema
+but is missing in the database.** Do not adopt the missing DDL into your
 task's diff.
 
 **Why:** it is invisible in a code review of your branch, and it will reappear
@@ -30,3 +31,8 @@ sides. If you need the endpoint working to finish your own verification,
 create only the specific missing objects, and never run a full push whose diff
 also drops or recreates constraints on unrelated tables. Then say plainly, in
 the completion notes, that production still needs the same DDL.
+
+If the same column is also missing in an artifact typecheck, treat that as a
+separate dependency problem: PostgreSQL DDL does not rebuild the generated
+workspace declarations, and rebuilding the declarations does not update the
+database.

@@ -2,15 +2,9 @@ import sgMail from '@sendgrid/mail';
 import { storage } from './storage';
 import { formatEstimateNumber } from '@workspace/shared';
 import { resolveCompanyLogoUrl } from './logo-url';
+import { DEFAULT_FROM_EMAIL, SENDGRID_FROM_NAME, type CompanySender } from './lib/company-sender';
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const DEFAULT_FROM_EMAIL =
-  process.env.SENDGRID_FROM_EMAIL ||
-  process.env.FROM_EMAIL ||
-  process.env.POSTMARK_FROM_EMAIL ||
-  'estimates@highplainsprop.com';
-const SENDGRID_FROM_NAME =
-  process.env.SENDGRID_FROM_NAME || 'High Plains Irrigation Team';
 
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
@@ -25,6 +19,7 @@ function isEmailConfigured(): boolean {
 }
 
 export interface EstimateEmailData {
+  sender: CompanySender;
   estimateId: number;
   estimateNumber: string;
   customerName: string;
@@ -237,20 +232,10 @@ export class EmailService {
     const ccList = (data.cc ?? []).filter((s) => s && s.trim().length > 0);
     const bccList = (data.bcc ?? []).filter((s) => s && s.trim().length > 0);
 
-    // Task #703 — SendGrid rejects any send whose `from` is not a
-    // verified sender identity. Use the verified DEFAULT_FROM_EMAIL
-    // as the envelope From and set the company's profile email as
-    // Reply-To so customer replies still route to the company
-    // (mirrors `sendMarketingLeadNotification`).
-    const replyToAddr =
-      companyInfo.email && companyInfo.email.trim().length > 0
-        ? companyInfo.email
-        : undefined;
-
     try {
       await sgMail.send({
-        from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME },
-        ...(replyToAddr ? { replyTo: replyToAddr } : {}),
+        from: data.sender.from,
+        ...(data.sender.replyTo ? { replyTo: data.sender.replyTo } : {}),
         to: toAddr,
         ...(ccList.length ? { cc: ccList } : {}),
         ...(bccList.length ? { bcc: bccList } : {}),
@@ -849,7 +834,7 @@ Questions? Reply to this email or call us directly.
     }
   }
 
-  static async sendApprovalConfirmation(customerEmail: string, estimateNumber: string, approved: boolean): Promise<void> {
+  static async sendApprovalConfirmation(customerEmail: string, estimateNumber: string, approved: boolean, sender: CompanySender): Promise<void> {
     if (!isEmailConfigured()) {
       console.error('SENDGRID_API_KEY not configured');
       return;
@@ -862,7 +847,8 @@ Questions? Reply to this email or call us directly.
 
     try {
       await sgMail.send({
-        from: DEFAULT_FROM_EMAIL,
+        from: sender.from,
+        ...(sender.replyTo ? { replyTo: sender.replyTo } : {}),
         to: customerEmail,
         subject: `Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}`,
         html: `
@@ -1173,21 +1159,19 @@ ${companyName}
    * business, so a payment reminder can go out with its own subject, body and
    * company branding without a second invoice mailer existing to drift.
    *
-   * Every field is optional and every default is exactly what the PDF-send
-   * route sent before this parameter existed — passing nothing is byte-for-byte
-   * the old email.
+   * The resolved sender is required; callers may override the default wording,
+   * filename and SendGrid categories.
    */
   static async sendInvoiceDetailPdf(
     customerEmail: string,
     customerName: string,
     invoiceNumber: string,
     pdfBuffer: Buffer,
-    overrides?: {
+    options: {
+      sender: CompanySender;
       subject?: string;
       html?: string;
       text?: string;
-      /** Company profile email, so customer replies reach the company. */
-      replyTo?: string | null;
       /** Attachment filename. Defaults to `Invoice_<number>_Detail.pdf`. */
       filename?: string;
       /** SendGrid categories, for per-send reporting. */
@@ -1208,28 +1192,23 @@ ${companyName}
         text: defaultText,
       } = buildInvoiceDetailEmailBody(customerName, invoiceNumber);
 
-      const replyTo =
-        overrides?.replyTo && overrides.replyTo.trim().length > 0
-          ? overrides.replyTo.trim()
-          : undefined;
-
       // Send email with PDF attachment
       await sgMail.send({
-        from: DEFAULT_FROM_EMAIL,
-        ...(replyTo ? { replyTo } : {}),
+        from: options.sender.from,
+        ...(options.sender.replyTo ? { replyTo: options.sender.replyTo } : {}),
         to: customerEmail,
-        subject: overrides?.subject ?? defaultSubject,
-        html: overrides?.html ?? defaultHtml,
-        text: overrides?.text ?? defaultText,
+        subject: options.subject ?? defaultSubject,
+        html: options.html ?? defaultHtml,
+        text: options.text ?? defaultText,
         attachments: [
           {
-            filename: overrides?.filename ?? `Invoice_${invoiceNumber}_Detail.pdf`,
+            filename: options.filename ?? `Invoice_${invoiceNumber}_Detail.pdf`,
             content: pdfBase64,
             type: 'application/pdf',
             disposition: 'attachment',
           },
         ],
-        categories: overrides?.categories ?? ['invoice-detail-pdf'],
+        categories: options.categories ?? ['invoice-detail-pdf'],
       });
 
       console.log(`Invoice detail PDF sent to ${customerEmail} for invoice ${invoiceNumber}`);
@@ -1471,6 +1450,7 @@ The signed PDF is attached to this email for your records.
    * Subject: "Your Irrigation Inspection Results — {propertyAddress}"
    */
   static async sendWetCheckReport(args: {
+    sender: CompanySender;
     to: string;
     customerName: string;
     propertyAddress: string | null;
@@ -1490,11 +1470,6 @@ The signed PDF is attached to this email for your records.
     const property = args.propertyAddress || args.customerName;
     const subject = `Your Irrigation Inspection Results — ${property}`;
     const filename = `${property.replace(/[/\\:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()} - Inspection Report.pdf`;
-
-    const replyToAddr =
-      args.companyEmail && args.companyEmail.trim().length > 0
-        ? args.companyEmail
-        : undefined;
 
     const noteBlock = args.note && args.note.trim()
       ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 20px;margin:20px 0;color:#92400e;font-size:14px;line-height:1.5;white-space:pre-wrap;">${this.escapeHtml(args.note)}</div>`
@@ -1554,8 +1529,8 @@ ${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.co
 
     try {
       await sgMail.send({
-        from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME },
-        ...(replyToAddr ? { replyTo: replyToAddr } : {}),
+        from: args.sender.from,
+        ...(args.sender.replyTo ? { replyTo: args.sender.replyTo } : {}),
         to: args.to,
         subject,
         html,
@@ -1590,6 +1565,7 @@ ${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.co
    * Subject: "Your Irrigation System Profile — {property}"
    */
   static async sendIrrigationProfileReport(args: {
+    sender: CompanySender;
     to: string;
     customerName: string;
     propertyAddress: string | null;
@@ -1611,11 +1587,6 @@ ${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.co
       .replace(/[/\\:*?"<>|]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()} - Irrigation Profile.pdf`;
-
-    const replyToAddr =
-      args.companyEmail && args.companyEmail.trim().length > 0
-        ? args.companyEmail
-        : undefined;
 
     const html = `<!DOCTYPE html>
 <html>
@@ -1664,8 +1635,8 @@ ${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.co
 
     try {
       await sgMail.send({
-        from: { email: DEFAULT_FROM_EMAIL, name: SENDGRID_FROM_NAME },
-        ...(replyToAddr ? { replyTo: replyToAddr } : {}),
+        from: args.sender.from,
+        ...(args.sender.replyTo ? { replyTo: args.sender.replyTo } : {}),
         to: args.to,
         subject,
         html,

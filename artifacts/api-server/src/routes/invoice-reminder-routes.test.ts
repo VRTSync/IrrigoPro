@@ -133,7 +133,7 @@ function harness(opts: HarnessOptions = {}) {
       subject: o.subject,
       html: o.html,
       text: o.text,
-      replyTo: o.replyTo,
+      replyTo: o.sender.replyTo,
       categories: o.categories,
       filename: o.filename,
     });
@@ -189,6 +189,11 @@ function harness(opts: HarnessOptions = {}) {
     requireInvoiceSend,
     requireReminderHistoryRead,
     _storageApi: storageApi,
+    _resolveSender: async () => ({
+      from: { email: "platform@example.com", name: "Acme Irrigation" },
+      replyTo: (await storageApi.getCompanyProfile(1)).email,
+      usingCompanyAddress: false,
+    }),
     _mailer: mailer,
     _readSentCopy: async (key) => opts.missingSavedFile ? null : Buffer.from(`saved bytes:${key}`),
     _loadPaymentTerms: async () => opts.paymentTerms ?? "net_30",

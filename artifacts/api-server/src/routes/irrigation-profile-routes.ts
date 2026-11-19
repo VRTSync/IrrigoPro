@@ -1,3 +1,4 @@
+import { resolveCompanySender } from "../lib/company-sender";
 // Irrigation System Profile — Build 1 + Build 3: Route module.
 //
 // All routes are company-scoped (companyId from req.authenticatedUserCompanyId).
@@ -1390,6 +1391,7 @@ export function registerIrrigationProfileRoutes(
 
         const { EmailService } = await import("../email-service");
         await EmailService.sendIrrigationProfileReport({
+          sender: await resolveCompanySender(companyId),
           to: toEmail,
           customerName: customer.name,
           propertyAddress: (customer as any).address ?? null,

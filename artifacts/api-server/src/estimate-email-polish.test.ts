@@ -70,6 +70,7 @@ async function renderText(data: EstimateEmailData): Promise<string> {
 
 function makeStandardData(overrides: Partial<EstimateEmailData> = {}): EstimateEmailData {
   return {
+    sender: { from: { email: "billing@example.com", name: "Acme Irrigation" }, replyTo: undefined, usingCompanyAddress: false },
     estimateId: 1,
     estimateNumber: '00001',
     customerName: 'Jane Doe',
@@ -113,6 +114,7 @@ function makeStandardData(overrides: Partial<EstimateEmailData> = {}): EstimateE
 
 function makeInspectionData(): EstimateEmailData {
   return {
+    sender: { from: { email: "billing@example.com", name: "Acme Irrigation" }, replyTo: undefined, usingCompanyAddress: false },
     estimateId: 2,
     estimateNumber: '00002',
     customerName: 'John Smith',

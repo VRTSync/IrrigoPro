@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,13 @@ import { buildAuthHeaders, formatRelative } from "./shared";
 import { HealthScoreBar, bucketLabel, type HealthBucket } from "./health-score-bar";
 import type { CompanyHealth } from "./companies-tab";
 import { beginImpersonation } from "@/lib/impersonation";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
+import {
+  DomainStatus,
+  emailSenderQueryKey,
+  useCheckEmailDomain,
+  type EmailSenderResponse,
+} from "@/components/company/outgoing-email-card";
 
 type DetailResponse = {
   company: CompanyHealth;
@@ -182,6 +189,8 @@ export function CompanyDetailDrawer({
                 onSaved={() => refetch()}
               />
             )}
+
+            <CompanyEmailDomainSettings companyId={data.company.id} />
 
             <CompanyContactActions companyId={data.company.id} companyName={data.company.name} />
 
@@ -687,4 +696,84 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+// Task #2188 — super_admin assigns the company's SendGrid sending domain.
+function CompanyEmailDomainSettings({ companyId }: { companyId: number }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const query = useQuery<EmailSenderResponse>({
+    queryKey: emailSenderQueryKey(companyId),
+    queryFn: () => apiRequest(`/api/company/email-sender?companyId=${companyId}`, "GET"),
+    staleTime: 10_000,
+  });
+  const [domain, setDomain] = useState("");
+  useEffect(() => {
+    if (query.data) setDomain(query.data.sendingDomain ?? "");
+  }, [query.data]);
+
+  const save = useMutation({
+    mutationFn: () => {
+      const d = domain.trim().toLowerCase();
+      return apiRequest(`/api/admin/companies/${companyId}/email-sending-domain`, "PUT", { domain: d === "" ? null : d });
+    },
+    onSuccess: async () => {
+      toast({ title: "Sending domain saved" });
+      await qc.invalidateQueries({ queryKey: ["/api/company/email-sender"] });
+    },
+    onError: (e) => toast({ title: "Couldn't save domain", description: parseApiError(e, "Try again"), variant: "destructive" }),
+  });
+  const check = useCheckEmailDomain(companyId);
+
+  const trimmed = domain.trim().toLowerCase();
+  const valid = trimmed === "" || /^(?=.{3,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/.test(trimmed);
+  const changed = trimmed !== (query.data?.sendingDomain ?? "");
+  const busy = save.isPending || check.isPending;
+
+  return (
+    <Section title="Email sending domain">
+      <div className="rounded-md border bg-gray-50 p-3 space-y-2" data-testid="drawer-email-domain">
+        {query.isLoading ? (
+          <div className="skeleton-shimmer h-8" />
+        ) : query.isError || !query.data ? (
+          <div className="flex items-center justify-between gap-2 text-xs text-red-700">
+            <span>{parseApiError(query.error, "Couldn't load sender settings.")}</span>
+            <Button size="sm" variant="ghost" onClick={() => query.refetch()} data-testid="button-email-domain-retry">Retry</Button>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+              <Input
+                placeholder="highplainsprop.com"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value)}
+                className="h-8 text-sm font-mono"
+                disabled={busy}
+                data-testid="input-email-sending-domain"
+              />
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => save.mutate()} disabled={busy || !changed || !valid} data-testid="button-save-email-domain">
+                  {save.isPending ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : null}Save
+                </Button>
+                {query.data.sendingDomain && (
+                  <Button size="sm" variant="ghost" onClick={() => check.mutate()} disabled={busy} data-testid="button-check-email-domain">
+                    <RefreshCw className={`h-3 w-3 mr-2 ${check.isPending ? "animate-spin" : ""}`} />Check again
+                  </Button>
+                )}
+              </div>
+            </div>
+            {!valid && <div className="text-[11px] text-red-700">Enter a bare domain like example.com.</div>}
+            {query.data.sendingDomain ? (
+              <DomainStatus data={query.data} />
+            ) : (
+              <div className="text-xs text-gray-500">No sending domain assigned. Mail goes from the platform address with the company's name.</div>
+            )}
+            <div className="text-[10px] text-gray-500">
+              A domain can belong to one company only. Clearing or changing it removes a From address that no longer matches.
+            </div>
+          </>
+        )}
+      </div>
+    </Section>
+  );
 }

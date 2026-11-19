@@ -343,6 +343,8 @@ import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manage
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerCustomerRecordsRoutes, resolveExternalCustomer } from "./customer-records-routes";
+import { registerCompanyEmailSenderRoutes, updateCompanyHandler } from "./company-email-sender-routes";
+import { resolveCompanySender } from "../lib/company-sender";
 import { registerCustomerReviewRoutes, type QbReadIntegration, type QbReadError } from "./customer-review-routes";
 import { getCustomerRecordsLock } from "../lib/customer-records-lock";
 import { registerBudgetRoutes } from "./budget-routes";
@@ -4489,25 +4491,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Super admin routes for companies
-  app.put("/api/companies/:id", requireAuthentication, async (req, res) => {
-    try {
-      const userRole = req.authenticatedUserRole;
-      if (userRole !== 'super_admin' && userRole !== 'company_admin') {
-        res.status(403).json({ message: "Access denied." });
-        return;
-      }
-      const companyId = parseInt(req.params.id);
-      const updatedCompany = await storage.updateCompany(companyId, req.body);
-      if (!updatedCompany) {
-        res.status(404).json({ message: "Company not found" });
-        return;
-      }
-      res.json(updatedCompany);
-    } catch (error) {
-      console.error("Error updating company:", error instanceof Error ? error.message : error);
-      res.status(500).json({ message: "Failed to update company" });
-    }
-  });
+  app.put("/api/companies/:id", requireAuthentication, updateCompanyHandler);
 
   app.delete("/api/companies/:id", requireAuthentication, async (req, res) => {
     try {
@@ -4649,6 +4633,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   registerCustomerRecordsRoutes(app, { requireAuthentication });
+  registerCompanyEmailSenderRoutes(app, { requireAuthentication });
   registerCustomerReviewRoutes(app, { requireAuthentication, requireQuickBooksAccess,
     integrationFor, fetchAllQbCustomers, fetchQbCustomerById, fetchQbTermNames });
 
@@ -16588,6 +16573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : "—";
 
       await EmailService.sendWetCheckReport({
+        sender: await resolveCompanySender(cid),
         to: toEmail,
         customerName: wc.customerName ?? "",
         propertyAddress: wc.propertyAddress ?? null,

@@ -32,12 +32,21 @@ export const companies = pgTable("companies", {
   // invoice. Enforced on the server, not in the UI. Configurable per company
   // because a 7-day cadence is a policy, not a law; 7 is the default.
   invoiceReminderThrottleDays: integer("invoice_reminder_throttle_days").notNull().default(7),
+  emailSendingDomain: text("email_sending_domain"),
+  emailDomainVerifiedAt: timestamp("email_domain_verified_at"),
+  emailDomainCheckedAt: timestamp("email_domain_checked_at"),
+  emailDomainCheckError: text("email_domain_check_error"),
+  emailFromName: text("email_from_name"),
+  emailFromAddress: text("email_from_address"),
+  emailReplyTo: text("email_reply_to"),
   budgetSeasonCurve: jsonb("budget_season_curve")
     .$type<{ month: number; percent: number }[]>()
     .default(sql`'[{"month":4,"percent":0},{"month":5,"percent":10},{"month":6,"percent":20},{"month":7,"percent":20},{"month":8,"percent":20},{"month":9,"percent":20},{"month":10,"percent":10}]'::jsonb`),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  emailSendingDomainUnique: uniqueIndex("companies_email_sending_domain_unique").on(table.emailSendingDomain),
+}));
 
 // Company-scoped field work types drive the location requirements for field
 // tickets. Codes are unique within a company so each tenant can customize its
@@ -1301,6 +1310,13 @@ export const apiKeys = pgTable("api_keys", {
 // Drizzle insert schemas
 // Zod schemas for validation
 export const insertCompanySchema = createInsertSchema(companies).omit({
+  emailSendingDomain: true,
+  emailDomainVerifiedAt: true,
+  emailDomainCheckedAt: true,
+  emailDomainCheckError: true,
+  emailFromName: true,
+  emailFromAddress: true,
+  emailReplyTo: true,
   customerRecordsLocked: true,
   customerRecordsSystemName: true,
   id: true,

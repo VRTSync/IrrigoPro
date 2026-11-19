@@ -111,6 +111,10 @@
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/invoice-pdf-send.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts"
     },
     {
+      "name": "company-email-sender",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/lib/company-sender.test.ts src/routes/company-email-sender-routes.test.ts src/company-sender-mailers.test.ts"
+    },
+    {
       "name": "quickbooks-void-document-release",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/qb-payment-sync.test.ts src/routes/qb-void-release.test.ts src/routes/qb-void-editability.test.ts src/lib/migrations/unlink-voided-ranch-invoices.test.ts src/routes/invoice-editability.test.ts"
     },
@@ -212,6 +216,10 @@
     }
   ],
   "web": [
+    {
+      "name": "outgoing-email-card",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/company/outgoing-email-card.test.tsx"
+    },
     {
       "name": "unsupported-role-routing",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/App.unsupported-role.test.tsx --maxWorkers=1 --minWorkers=1"

@@ -179,6 +179,10 @@ function harness(opts: HarnessOptions = {}) {
   // One core for both registrations, exactly as production wires it.
   const core = createReminderCore({
     _storageApi: storageApi,
+    _resolveSender: async () => ({
+      from: { email: "platform@example.com", name: "Acme Irrigation" },
+      replyTo: undefined, usingCompanyAddress: false,
+    }),
     _mailer: mailer,
     _readSentCopy: async (key) => Buffer.from(`saved bytes:${key}`),
     _loadPaymentTerms: async () => "net_30",

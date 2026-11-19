@@ -5,6 +5,7 @@ import { EmailService, buildInvoiceDetailEmailBody } from "../email-service";
 import { ObjectStorageService } from "../objectStorage";
 import { logger } from "../lib/logger";
 import type { InvoicePdfGenerationResult } from "../invoice-pdf-service";
+import { resolveCompanySender } from "../lib/company-sender";
 
 interface Deps {
   requireAuthentication: RequestHandler;
@@ -14,6 +15,7 @@ interface Deps {
   _generatePdf?: (invoiceId: number) => Promise<InvoicePdfGenerationResult>;
   _objectStorage?: Pick<ObjectStorageService, "writeBufferToFirstSearchPath" | "deleteFromFirstSearchPath">;
   _mailer?: typeof EmailService.sendInvoiceDetailPdf;
+  _resolveSender?: typeof resolveCompanySender;
 }
 
 export function registerInvoicePdfRoutes(app: Express, deps: Deps): void {
@@ -103,7 +105,7 @@ export function registerInvoicePdfRoutes(app: Express, deps: Deps): void {
       const buf = result.pdfBuffer;
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const key = `invoice-sent-copies/${invoice.companyId}/${invoice.id}/${stamp}.pdf`;
-      const company = await storage.getCompanyProfile(invoice.companyId);
+      const sender = await (deps._resolveSender ?? resolveCompanySender)(invoice.companyId);
       const filename = buildInvoicePdfFilename(invoice, customer, invoice.id);
       try {
         await objects.writeBufferToFirstSearchPath(key, buf, "application/pdf", "private, no-store");
@@ -114,7 +116,7 @@ export function registerInvoicePdfRoutes(app: Express, deps: Deps): void {
       }
       let emailResult;
       try {
-        emailResult = await mailer(to, invoice.customerName, invoice.invoiceNumber, buf, { replyTo: company?.email ?? null, filename });
+        emailResult = await mailer(to, invoice.customerName, invoice.invoiceNumber, buf, { sender, filename });
       } catch (err) {
         emailResult = { success: false, error: err instanceof Error ? err.message : "Unknown error" };
       }

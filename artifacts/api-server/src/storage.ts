@@ -498,7 +498,7 @@ export interface IStorage {
   getCompanies(): Promise<Company[]>;
   getCompany(id: number): Promise<Company | undefined>;
   createCompany(company: InsertCompany): Promise<Company>;
-  updateCompany(id: number, company: Partial<InsertCompany>): Promise<Company | undefined>;
+  updateCompany(id: number, company: Partial<Company>): Promise<Company | undefined>;
   deleteCompany(id: number): Promise<boolean>;
   
   // Users
@@ -2078,7 +2078,7 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async updateCompany(id: number, company: Partial<InsertCompany>): Promise<Company | undefined> {
+  async updateCompany(id: number, company: Partial<Company>): Promise<Company | undefined> {
     // Task #669 — when the super-admin raises `startingEstimateNumber`
     // we also bump `nextEstimateNumber` to keep the configured seed
     // and the live allocator in sync. Policy: `nextEstimateNumber`
@@ -2087,7 +2087,7 @@ export class DatabaseStorage implements IStorage {
     // If the caller passed an explicit `nextEstimateNumber` we honor
     // it verbatim and skip the auto-sync — that's the explicit override
     // path super-admin uses on the edit form.
-    const patch: Partial<InsertCompany> = { ...company };
+    const patch: Partial<Company> = { ...company };
     const newStart = patch.startingEstimateNumber;
     const explicitNext = patch.nextEstimateNumber;
     if (typeof newStart === "number" && explicitNext == null) {

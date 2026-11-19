@@ -83,3 +83,4 @@
 - [Composite tenant FK rollout](composite-fk-schema-order.md) — schema push may add a foreign key before its required unique index; preserve tenant constraints and prepare indexes first.
 - [Unwired controller slots](unwired-controller-slots.md) — physical unused slots need Not Wired, distinct from Other or a wired zone at zero minutes; preserve numbering.
 - [Outgoing Email decisions](outgoing-email-decisions.md) — locked sender, review, sent-copy and batch-delivery rules; assigned slice text controls implementation and evidence.
+- [Runtime email readiness](runtime-email-readiness.md) — a secret-existence listing can disagree with the running service; use the domain-check response without reading credentials.

@@ -37,3 +37,13 @@ exact small logo files from the pre-merge history made the unchanged test pass.
 **How to apply:** Check missing-asset warnings and compare runtime inputs before
 rewriting a snapshot. Restore known original assets locally for evidence and
 report the environment repair; do not change PDF presentation or assertions.
+
+A development startup timeout is not by itself an application regression.
+
+**Why:** Both the baseline and changed Node processes were observed in disk
+sleep during startup; both later answered health checks without a code change.
+
+**How to apply:** Compare pre-change and changed processes on the same
+development database without restarting the stalled process. Distinguish the
+proxy's response from the actual listener, and check whether both processes
+are blocked on I/O before attributing a difference to code.

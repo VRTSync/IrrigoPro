@@ -1,3 +1,4 @@
+import { resolveCompanySender, type CompanySender } from "../lib/company-sender";
 // Task #1887 — invoice payment reminders.
 //
 //   GET  /api/invoices/:id/reminders  — history + whether a reminder can be
@@ -304,7 +305,7 @@ export type ReminderMailer = (
     subject: string;
     html: string;
     text: string;
-    replyTo?: string | null;
+    sender: CompanySender;
     filename?: string;
     categories?: string[];
   },
@@ -358,8 +359,9 @@ const defaultMailer: ReminderMailer = (to, name, number, pdfBuffer, overrides) =
 // per invoice.
 
 export interface ReminderCoreDeps {
-  _readSentCopy?: (key: string) => Promise<Buffer | null>;
   /** Test seams. Production passes none of these. */
+  _readSentCopy?: (key: string) => Promise<Buffer | null>;
+  _resolveSender?: typeof resolveCompanySender;
   _storageApi?: any;
   _mailer?: ReminderMailer;
   _loadPaymentTerms?: (customerId: number) => Promise<string | null>;
@@ -667,7 +669,7 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
         subject: rendered.subject,
         html: rendered.html,
         text: rendered.text,
-        replyTo: company?.email ?? null,
+        sender: await (deps._resolveSender ?? resolveCompanySender)(ctx.invoice.companyId),
         filename: ctx.pdf!.filename,
         categories: ["invoice-payment-reminder"],
       },

@@ -1,3 +1,4 @@
+import { resolveCompanySender } from "../lib/company-sender";
 // All `/api/estimates*` HTTP route handlers (Task #640).
 //
 // Previously most of these routes lived in the 16k-line `routes.ts`
@@ -1748,6 +1749,7 @@ export function registerEstimateRoutes(
     }
 
     await EmailService.sendEstimateApprovalEmail({
+      sender: await resolveCompanySender(estimateWithItems.companyId),
       estimateId: estimateWithItems.id,
       estimateNumber: estimateWithItems.estimateNumber,
       customerName: estimateWithItems.customerName,
@@ -2661,6 +2663,7 @@ export function registerEstimateRoutes(
         estimate.customerEmail,
         estimate.estimateNumber,
         true,
+        await resolveCompanySender(estimate.companyId),
       );
 
       // ── Pre-sign photos for the confirmation screen ──────────────────────────────
@@ -2882,6 +2885,7 @@ export function registerEstimateRoutes(
         auditEmail,
         estimate.estimateNumber,
         false,
+        await resolveCompanySender(estimate.companyId),
       );
 
       res.json({

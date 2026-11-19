@@ -12,6 +12,11 @@ const { ObjectStorageService } = await import("../objectStorage");
 
 const bytes = Buffer.from("%PDF-1.7\nexact generated invoice bytes");
 const filename = "The Ranch - Irrigation Billing Detail - (10-1-26_10-31-26).pdf";
+const sender = {
+  from: { name: "Test company", email: "billing@example.invalid" },
+  replyTo: "office@example.invalid",
+  usingCompanyAddress: true,
+};
 
 function harness(opts: {
   companyId?: number | null; role?: string; email?: string | null; oldEmail?: string | null;
@@ -49,11 +54,14 @@ function harness(opts: {
         return { id: 42, companyId: opts.customerCompany ?? 1, name: "QB customer", irrigoName: "The Ranch",
           email: opts.email === undefined ? " current@example.invalid " : opts.email };
       },
-      async getCompanyProfile() { return { email: "office@example.invalid" }; },
       async createInvoicePdf(row: any) { events.push("insert"); copies.push(row); return row; },
       async updateInvoice(id: number, data: any) { stamps.push({ id, ...data }); },
       async getLatestInvoiceSentCopy() { return copies.at(-1); },
     } as any,
+    _resolveSender: async (companyId) => {
+      assert.equal(companyId, invoice.companyId);
+      return sender;
+    },
     _generatePdf: async () => {
       generated++;
       return opts.validationFailure
@@ -100,7 +108,7 @@ it("uploads and emails identical nonempty bytes, then records the current recipi
     assert.deepEqual(h.uploaded[0].buf, h.sent[0][3]);
     assert.equal(h.uploaded[0].cacheControl, "private, no-store");
     assert.equal(h.uploaded[0].contentType, "application/pdf");
-    assert.deepEqual(h.sent[0][4], { replyTo: "office@example.invalid", filename });
+    assert.deepEqual(h.sent[0][4], { sender, filename });
     assert.equal(h.copies.length, 1);
     const row = h.copies[0];
     assert.equal(row.pdfUrl, h.uploaded[0].key);
