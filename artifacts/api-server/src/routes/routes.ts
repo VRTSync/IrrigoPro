@@ -372,6 +372,7 @@ import {
   registerInvoiceReminderRoutes,
 } from "./invoice-reminder-routes";
 import { registerInvoiceReminderBatchRoutes } from "./invoice-reminder-batch-routes";
+import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
 import { registerInvoiceArNoteRoutes } from "./invoice-ar-note-routes";
 import { applyArNoteVisibility } from "./ar-note-visibility";
 import { registerInvoiceCorrectionRoutes } from "./invoice-correction-routes";
@@ -7444,6 +7445,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireInvoiceSend,
     _core: reminderCore,
   });
+  registerOutgoingEmailRoutes(app, { requireAuthentication });
   // Task #1889 — internal A/R notes. GET + POST only; there is deliberately no
   // update or delete route in that module and there must never be one.
   // Gated on requireArNotesAccess (CAN_READ_AR_NOTES), which is NARROWER than
@@ -12271,7 +12273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ./invoice-sync-quickbooks-route.ts, wired up at the merge-route register
   // site below with createQuickBooksInvoiceForInvoice injected.
 
-  registerInvoicePdfRoutes(app, { requireAuthentication, requireInvoiceRead, requireInvoiceSend });
+  registerInvoicePdfRoutes(app, { requireAuthentication, requireInvoiceRead });
 
 
   // Work Order routes - Enhanced

@@ -11,6 +11,46 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /outgoing-email/{kind}/{id}/preview:
+    parameters:
+      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice] } }
+      - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: previewOutgoingEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OutgoingEmailDraftInput" }
+      responses:
+        "200":
+          description: Rendered email and single-use confirmation for the reviewed content
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OutgoingEmailPreview" }
+        "400": { description: Invalid draft }
+        "404": { description: Unknown email kind or document not available }
+  /outgoing-email/{kind}/{id}/send:
+    parameters:
+      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice] } }
+      - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: sendOutgoingEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OutgoingEmailSendInput" }
+      responses:
+        "200":
+          description: Email accepted for delivery
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OutgoingEmailSent" }
+        "400": { description: Invalid draft or review required }
+        "404": { description: Unknown email kind or document not available }
+        "409": { description: "Review changed, expired, or was already used" }
+        "422": { description: Missing recipient or PDF totals do not reconcile }
   /markup-schedules/recalculate-prices/preview:
     post:
       operationId: previewMarkupRecalculation
@@ -436,6 +476,70 @@ components:
       description: Required explicit company context for an unscoped super administrator
       schema: { type: integer, minimum: 1 }
   schemas:
+    OutgoingEmailDraftInput:
+      type: object
+      properties:
+        to: { type: string, description: Email address; blank uses the default }
+        cc: { type: array, maxItems: 5, items: { type: string, format: email } }
+        bcc: { type: array, maxItems: 5, items: { type: string, format: email } }
+        subject: { type: string, maxLength: 200, description: Blank uses the default }
+        note: { type: string, maxLength: 1000 }
+        options: { type: object, additionalProperties: { type: boolean } }
+    OutgoingEmailSendInput:
+      allOf:
+        - $ref: "#/components/schemas/OutgoingEmailDraftInput"
+        - type: object
+          required: [confirmationToken]
+          properties:
+            confirmationToken: { type: string }
+    OutgoingEmailPreview:
+      type: object
+      required: [kind, id, from, replyTo, usingCompanyAddress, to, cc, bcc, subject, note, options, optionDefs, html, text, attachments, warnings, confirmationToken, expiresAt]
+      properties:
+        kind: { type: string, enum: [invoice] }
+        id: { type: integer }
+        from:
+          type: object
+          required: [email, name]
+          properties:
+            email: { type: string }
+            name: { type: string }
+        replyTo: { type: [string, "null"] }
+        usingCompanyAddress: { type: boolean }
+        to: { type: string }
+        cc: { type: array, items: { type: string } }
+        bcc: { type: array, items: { type: string } }
+        subject: { type: string }
+        note: { type: string }
+        options: { type: object, additionalProperties: { type: boolean } }
+        optionDefs:
+          type: array
+          items:
+            type: object
+            required: [key, label, default]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              default: { type: boolean }
+        html: { type: string }
+        text: { type: string }
+        attachments:
+          type: array
+          items:
+            type: object
+            required: [filename, viewUrl]
+            properties:
+              filename: { type: string }
+              viewUrl: { type: string }
+        warnings: { type: array, items: { type: string } }
+        confirmationToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+    OutgoingEmailSent:
+      type: object
+      required: [sentTo, sentAt]
+      properties:
+        sentTo: { type: string }
+        sentAt: { type: string, format: date-time }
     MarkupRecalculationPreview:
       type: object
       required: [confirmationToken, eligible, excluded, scheduleId, scheduleName, expiresAt]

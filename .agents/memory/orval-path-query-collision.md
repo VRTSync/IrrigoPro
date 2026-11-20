@@ -14,3 +14,9 @@ Inherited, referenced query parameters also need expansion before generation. A 
 **Why:** Orval generated empty URL-parameter loops for referenced company scope even though hooks accepted a params object. Only a request-boundary test exposed the lost scope.
 
 **How to apply:** Resolve parameter references and inherit them into operations in the source transformer, then test the actual generated URL for every scoped read and mutation.
+
+Inline composed request bodies can cause the same collision under `*Body`, even without query parameters.
+
+**Why:** Orval may emit both a Zod operation validator and a TypeScript type with the operation's body name.
+
+**How to apply:** Put the composition in a distinctly named `components/schemas` entry and reference it from the operation. Run both generation and the composite library typecheck.

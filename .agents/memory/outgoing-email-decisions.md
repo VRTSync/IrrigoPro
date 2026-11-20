@@ -20,3 +20,9 @@ Merging invoices must preserve the prior emailed PDFs and delivery metadata. Ret
 **Why:** The user approved retaining the audit trail rather than following the original deletion instruction; a merged invoice is still a different document.
 
 **How to apply:** Keep historical copies available for auditing only. A reminder for the survivor must use a copy sent for the merged document.
+
+A review of a live attachment binds the data the renderer consumes, not just the document header.
+
+**Why:** An equal-price ticket swap or a source detail edit can change a PDF without changing the invoice total or timestamp.
+
+**How to apply:** Compare the reviewed source version to the version actually rendered and to the current data before delivery. Review need not render a PDF.

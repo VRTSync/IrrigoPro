@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { PDFGenerator, fetchLogoAsBase64 } from './pdf-generator';
 import { resolveCompanyLogoUrl, pdfLogoBaseUrl } from './logo-url';
 import { buildPdfViewModel, resolveTicketPartsSubtotal, ticketItemRowTotal } from './pdf-view-model';
@@ -8,6 +9,29 @@ import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem, WetCheck
 import type { WetCheckBillingView } from './wet-check-billing-view';
 import { buildWcbZonePhotoGroups } from './wcb-zone-photo-groups';
 import { ObjectStorageService } from './objectStorage';
+import type { Customer, Invoice } from '@workspace/db';
+
+const invoiceMonth = new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" });
+const invoiceMonthAndYear = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+
+export function invoiceBillingPeriod(invoice: { periodStart: Date | string; periodEnd: Date | string }): string {
+  const start = new Date(invoice.periodStart);
+  const end = new Date(invoice.periodEnd);
+  if (start.getUTCFullYear() !== end.getUTCFullYear()) {
+    return `${invoiceMonthAndYear.format(start)}–${invoiceMonthAndYear.format(end)}`;
+  }
+  if (start.getUTCMonth() !== end.getUTCMonth()) {
+    return `${invoiceMonth.format(start)}–${invoiceMonthAndYear.format(end)}`;
+  }
+  return invoiceMonthAndYear.format(start);
+}
+
+export function buildInvoiceEmailSubject(
+  invoice: Pick<Invoice, "invoiceNumber"> & { periodStart: Date | string; periodEnd: Date | string },
+  customer: Pick<Customer, "name" | "irrigoName">,
+): string {
+  return `Irrigation Invoice ${invoice.invoiceNumber} – ${customer.irrigoName ?? customer.name} – ${invoiceBillingPeriod(invoice)}`;
+}
 
 export function buildInvoicePdfFilename(
   invoice: { periodStart: Date | string; periodEnd: Date | string } | null | undefined,
@@ -133,6 +157,7 @@ export interface InvoicePdfValidationFailure {
 export interface InvoicePdfGenerationResult {
   success: boolean;
   pdfBuffer?: Buffer;
+  documentVersion?: string;
   error?: string;
   validationFailure?: InvoicePdfValidationFailure;
 }
@@ -316,99 +341,97 @@ export class InvoicePdfService {
     this.storage = storage;
   }
 
-  async generatePdfBuffer(invoiceId: number): Promise<InvoicePdfGenerationResult> {
+  /** A review binds the same source snapshot that PDF rendering consumes,
+   * without fetching image bytes or starting Chromium during preview. */
+  async getDocumentVersion(invoiceId: number, companyId: number): Promise<string> {
+    return this.documentVersion(await this.loadSource(invoiceId, companyId));
+  }
+
+  private documentVersion(source: Awaited<ReturnType<InvoicePdfService['loadSource']>>): string {
+    const json = JSON.stringify(source, (_key, value) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
+        : value,
+    );
+    return createHash('sha256').update(json).digest('base64url');
+  }
+
+  private async loadSource(invoiceId: number, companyId: number | null) {
+    const row = await this.storage.getInvoiceById(invoiceId, companyId);
+    if (!row) throw new Error('Invoice not found');
+    const invoice = { ...row, items: [...row.items].sort((a, b) => a.id - b.id) };
+    const customer = await this.storage.getCustomerById(invoice.customerId);
+    if (!customer || customer.companyId !== invoice.companyId) throw new Error('Customer not found');
+    const tenant = customer.companyId;
+    const company = await this.storage.getCompany(tenant);
+    if (!company) throw new Error('Company not found');
+
+    const workOrders: Array<{ workOrder: WorkOrder; items: WorkOrderItem[] }> = [];
+    const billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[]; wetCheckView?: WetCheckBillingView }> = [];
+    const wetCheckBillingRows: PdfWetCheckBillingRow[] = [];
+    const seenTickets = new Set<string>();
+    for (const item of invoice.items) {
+      if (item.sourceType === 'work_order' && item.workOrderId) {
+        const key = `wo:${item.workOrderId}`;
+        if (seenTickets.has(key)) continue;
+        seenTickets.add(key);
+        const workOrder = await this.storage.getWorkOrder(item.workOrderId, tenant);
+        if (!workOrder) continue;
+        const items = await this.storage.getWorkOrderItems(workOrder.id);
+        workOrders.push({ workOrder, items: [...items].sort((a, b) => a.id - b.id) });
+      } else if (item.sourceType === 'billing_sheet' && item.billingSheetId) {
+        const key = `bs:${item.billingSheetId}`;
+        if (seenTickets.has(key)) continue;
+        seenTickets.add(key);
+        const sheet = await this.storage.getBillingSheetById(item.billingSheetId, tenant);
+        if (!sheet) continue;
+        const { items: sheetItems, ...billingSheet } = sheet;
+        const wetCheckView = await this.storage.getBillingSheetWetCheckView(billingSheet.id, tenant).catch(() => null);
+        const items = [...sheetItems].sort((a, b) => a.id - b.id);
+        billingSheets.push({ billingSheet, items, wetCheckView: wetCheckView ?? undefined });
+      } else if (item.sourceType === 'wet_check_billing' && item.wetCheckBillingId) {
+        const key = `wcb:${item.wetCheckBillingId}`;
+        if (seenTickets.has(key)) continue;
+        seenTickets.add(key);
+        const wcb = await this.storage.getWetCheckBillingById(item.wetCheckBillingId, tenant);
+        if (!wcb) continue;
+        const wetCheckView = await this.storage.getWetCheckBillingViewById(wcb.id, tenant).catch(() => null);
+        if (!wetCheckView) continue;
+        const photosWithMeta = await this.storage.getWetCheckPhotosGrouped(wcb.wetCheckId);
+        const photoUrls = photosWithMeta.map(p => p.url);
+        // Group photos where possible and retain legacy photos for the flat fallback.
+        const zonePhotoGroups = buildWcbZonePhotoGroups(photosWithMeta, wetCheckView);
+        const legacyUrls = Array.isArray(wcb.photos) ? (wcb.photos as string[]).filter(Boolean) : [];
+        wetCheckBillingRows.push({
+          wetCheckBillingId: wcb.id,
+          wetCheckBilling: wcb,
+          wetCheckView,
+          photoUrls,
+          zonePhotoGroups: zonePhotoGroups.length > 0 ? zonePhotoGroups : undefined,
+          mergedPhotoUrls: [...new Set([...photoUrls, ...legacyUrls])],
+        });
+      }
+    }
+
+    return {
+      invoice, workOrders, billingSheets, wetCheckBillingRows,
+      company: {
+        name: company.name,
+        logo: company.logo || undefined,
+        address: company.address || undefined,
+        phone: company.phone || undefined,
+        email: company.email || undefined,
+      },
+      laborRate: customer.laborRate || '0',
+      customerHasBranches: Array.isArray(customer.branches) && customer.branches.length > 0,
+    };
+  }
+
+  async generatePdfBuffer(invoiceId: number, companyId: number | null = null): Promise<InvoicePdfGenerationResult> {
     try {
-      const invoice = await this.storage.getInvoiceById(invoiceId, null);
-      if (!invoice) {
-        return { success: false, error: 'Invoice not found' };
-      }
-
-      const customer = await this.storage.getCustomerById(invoice.customerId);
-      if (!customer) {
-        return { success: false, error: 'Customer not found' };
-      }
-
-      const company = await this.storage.getCompany(customer.companyId);
-      if (!company) {
-        return { success: false, error: 'Company not found' };
-      }
-
-      const workOrders: Array<{ workOrder: WorkOrder; items: WorkOrderItem[] }> = [];
-      const billingSheets: Array<{ billingSheet: BillingSheet; items: BillingSheetItem[]; wetCheckView?: WetCheckBillingView }> = [];
-      const wetCheckBillingRows: PdfWetCheckBillingRow[] = [];
-
-      for (const item of invoice.items) {
-        if (item.sourceType === 'work_order' && item.workOrderId) {
-          const workOrder = await this.storage.getWorkOrder(item.workOrderId, null);
-          if (workOrder) {
-            const existingWo = workOrders.find(wo => wo.workOrder.id === workOrder.id);
-            if (!existingWo) {
-              const items = await this.storage.getWorkOrderItems(workOrder.id);
-              workOrders.push({ workOrder, items });
-            }
-          }
-        } else if (item.sourceType === 'billing_sheet' && item.billingSheetId) {
-          const billingSheet = await this.storage.getBillingSheetById(item.billingSheetId, null);
-          if (billingSheet) {
-            const existingBs = billingSheets.find(bs => bs.billingSheet.id === billingSheet.id);
-            if (!existingBs) {
-              const wetCheckView = await this.storage.getBillingSheetWetCheckView(
-                billingSheet.id,
-                customer.companyId,
-              ).catch(() => null);
-              billingSheets.push({
-                billingSheet: billingSheet,
-                items: billingSheet.items || [],
-                wetCheckView: wetCheckView ?? undefined,
-              });
-            }
-          }
-        } else if (item.sourceType === 'wet_check_billing' && item.wetCheckBillingId) {
-          const existing = wetCheckBillingRows.find(r => r.wetCheckBillingId === item.wetCheckBillingId);
-          if (!existing) {
-            const wcb = await this.storage.getWetCheckBillingById(item.wetCheckBillingId, null);
-            if (wcb) {
-              const wetCheckView = await this.storage.getWetCheckBillingViewById(
-                wcb.id,
-                customer.companyId,
-              ).catch(() => null);
-              if (wetCheckView) {
-                const photosWithMeta = await this.storage.getWetCheckPhotosGrouped(wcb.wetCheckId);
-                const photoUrls = photosWithMeta.map(p => p.url);
-
-                // Task #843 — build per-zone photo grouping so ticketPageWCB can
-                // render photos under the zone/finding they belong to.
-                const zonePhotoGroups = buildWcbZonePhotoGroups(photosWithMeta, wetCheckView);
-
-                wetCheckBillingRows.push({
-                  wetCheckBillingId: wcb.id,
-                  wetCheckBilling: wcb,
-                  wetCheckView,
-                  photoUrls,
-                  zonePhotoGroups: zonePhotoGroups.length > 0 ? zonePhotoGroups : undefined,
-                });
-              }
-            }
-          }
-        }
-      }
-
-      // ── Merge wet_check_photos (new system) with legacy wcb.photos ─────────
-      // photoUrls was fetched per-row above via getWetCheckPhotosGrouped.
-      // Merge with the legacy snapshot (wcb.photos) for the flat fallback.
-      for (const r of wetCheckBillingRows) {
-        const newSystemUrls = r.photoUrls ?? [];
-        const legacyUrls = Array.isArray(r.wetCheckBilling.photos)
-          ? (r.wetCheckBilling.photos as string[]).filter(Boolean)
-          : [];
-        const seen = new Set<string>();
-        const merged: string[] = [];
-        for (const url of [...newSystemUrls, ...legacyUrls]) {
-          if (!seen.has(url)) { seen.add(url); merged.push(url); }
-        }
-        r.mergedPhotoUrls = merged;
-      }
-
+      const source = await this.loadSource(invoiceId, companyId);
+      const documentVersion = this.documentVersion(source);
+      const { invoice, company, workOrders, billingSheets, wetCheckBillingRows, laborRate, customerHasBranches } = source;
       // Keep this as one packet-level informational summary rather than
       // emitting a warning or a PDF placeholder for every incomplete row.
       logInvoiceTicketMetadataSummary(invoice.invoiceNumber, {
@@ -428,11 +451,9 @@ export class InvoicePdfService {
 
       if (validationFailure) {
         if (validationFailure.rowErrors.length > 0 || validationFailure.totalsError) {
-          return { success: false, error: 'Invoice totals validation failed', validationFailure };
+          return { success: false, error: 'Invoice totals validation failed', validationFailure, documentVersion };
         }
       }
-
-      const laborRate = customer.laborRate || '0';
 
       let logoDataUri: string | null = null;
       if (company.logo) {
@@ -444,18 +465,9 @@ export class InvoicePdfService {
         ? await extractBrandColorsFromDataUri(logoDataUri)
         : DEFAULT_BRAND_COLORS;
 
-      const customerHasBranches = Array.isArray(customer.branches) && customer.branches.length > 0;
-
       const { viewModel } = buildPdfViewModel({
         invoice,
-        company: {
-          name: company.name,
-          logo: company.logo || undefined,
-          logoDataUri,
-          address: company.address || undefined,
-          phone: company.phone || undefined,
-          email: company.email || undefined,
-        },
+        company: { ...company, logoDataUri },
         workOrders,
         billingSheets,
         wetCheckBillings: wetCheckBillingRows,
@@ -466,7 +478,7 @@ export class InvoicePdfService {
 
       const pdfBuffer = await PDFGenerator.generateInvoiceDetailPDF(viewModel);
 
-      return { success: true, pdfBuffer };
+      return { success: true, pdfBuffer, documentVersion };
     } catch (error) {
       console.error('Error generating invoice PDF:', error);
       return { 

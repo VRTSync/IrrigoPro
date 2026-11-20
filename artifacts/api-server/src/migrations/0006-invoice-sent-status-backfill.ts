@@ -21,7 +21,7 @@
  *
  *   2. For invoices where sent_at IS NULL and a matching invoice_pdfs row has
  *      status='sent', copy invoice_pdfs.sent_at onto invoices.sent_at
- *      (covers invoices emailed via the pdf/send endpoint).
+ *      (covers invoices emailed via the legacy PDF delivery endpoint).
  *
  *   3. Set status='generated' for every row still at status='sent' (after the
  *      above backfills, sentAt records the delivery fact independently).
@@ -69,7 +69,7 @@ async function main() {
   }
 
   // ── Step 2: Back-fill sent_at from invoice_pdfs for emailed invoices ─────
-  // Invoices whose PDF was sent via the pdf/send endpoint only have delivery
+  // Invoices whose PDF was sent via the legacy endpoint only have delivery
   // recorded on invoice_pdfs.sent_at. Copy that timestamp onto the invoice row.
   if (!DRY_RUN) {
     const step2 = await db.execute(sql`

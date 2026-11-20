@@ -1005,3 +1005,59 @@ mtime_ms = 1795107930774
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ca51623d-473f-4ac2-afdd-07d3b76721de/58dbe5ef-6a23-4de3-889a-8bdd4206bff8"
 storage_version_token = "1795108181882182"
 content_type = "text/plain"
+
+[[outputs]]
+id = "qPT6jOq5QrSHwl3BpDCKr"
+uri = "file://generated-artifacts/outgoing-email-review/dialog-1280.jpg"
+type = "image"
+title = "Invoice review at 1280 px"
+description = "Signed-in desktop view using an isolated test invoice. The CC, note, email preview, and PDF filename are visible."
+logical_id = "a02b0cd9-8017-495c-a712-fe9869fb90f2"
+content_hash = "sha256:7719c27f3a93cc8f0eea42f17b13425ad8520f7e49afbd6c0baf90806a287c1e"
+size = 138625
+mtime_ms = 1795127641952
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/a02b0cd9-8017-495c-a712-fe9869fb90f2/7d8d1191-5773-4e80-9323-118be9dfaa44"
+storage_version_token = "1795127710356584"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "5mM-82RQtlDRb8SQH_k_E"
+uri = "file://generated-artifacts/outgoing-email-review/dialog-375.jpg"
+type = "image"
+title = "Invoice review at 375 px"
+description = "Signed-in mobile view with the sender and editable fields. No horizontal scrolling."
+logical_id = "91cd6f59-6c9e-4847-a3b8-2817ccb7dc9e"
+content_hash = "sha256:8582ece1c2da3be7dc17ef65e2fe4fb10670daea87fd9cbd886d60515ba202b6"
+size = 65313
+mtime_ms = 1795127648788
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/91cd6f59-6c9e-4847-a3b8-2817ccb7dc9e/6f4c4820-eeb5-43cd-810e-cbbce16ece89"
+storage_version_token = "1795127710870305"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "IAjnVUYTT9nwZf8QECbG-"
+uri = "file://generated-artifacts/outgoing-email-review/dialog-375-preview.jpg"
+type = "image"
+title = "Email preview at 375 px"
+description = "The same mobile dialog scrolled to its attachment, email preview, and send button. No email was sent."
+logical_id = "7f286f62-9d46-4c89-854d-3082948df9f5"
+content_hash = "sha256:1902eab8b5678f005cf98cccc24a1d638d71b70507ceae1ad767c1168b0e0589"
+size = 59981
+mtime_ms = 1795127648860
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/7f286f62-9d46-4c89-854d-3082948df9f5/153bedce-e884-4403-b172-ac639f49743e"
+storage_version_token = "1795127711368014"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "aVsTGliPR8Drq5WbCYUTp"
+uri = "file://generated-artifacts/outgoing-email-review/development-send-review.jpg"
+type = "image"
+title = "Review dialog before the development send"
+description = "The actual approved test message immediately before Send was clicked. This is the app preview, not the received email."
+logical_id = "b5a2b88e-e64d-47b3-bdb4-cf45479578a2"
+content_hash = "sha256:33d8bbf24f0738597ccf132e84b03a3c04bc5480f38aae3b4491c86a02eff737"
+size = 135867
+mtime_ms = 1795129777751
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b5a2b88e-e64d-47b3-bdb4-cf45479578a2/fe3283d5-e8d9-4fbc-a590-ffb710b15d9e"
+storage_version_token = "1795129793412147"
+content_type = "image/jpeg"

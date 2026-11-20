@@ -49,7 +49,10 @@ describe("customer-facing mailers use the resolved identity", () => {
       await EmailService.sendEstimateApprovalEmail({ ...estimate, sender });
       await EmailService.sendApprovalConfirmation("customer@example.com", "50000", true, sender);
       await EmailService.sendApprovalConfirmation("customer@example.com", "50000", false, sender);
-      assert.equal((await EmailService.sendInvoiceDetailPdf("customer@example.com", "Customer", "IR-1008", Buffer.from("test-pdf"), { sender })).success, true);
+      assert.equal((await EmailService.sendInvoiceDetailPdf("customer@example.com", "Customer", "IR-1008", Buffer.from("test-pdf"), {
+        sender, subject: "Reviewed invoice", html: "<p>Reviewed body</p>", text: "Reviewed body",
+        cc: ["cc@example.com"], bcc: ["bcc@example.com"], filename: "Reviewed invoice.pdf",
+      })).success, true);
       await EmailService.sendWetCheckReport({ ...report, sender, wetCheckId: 1, technicianName: null, inspectionDate: "November 18, 2026" });
       await EmailService.sendIrrigationProfileReport({ ...report, sender, customerId: 1 });
       assert.equal(sent.length, 6);
@@ -59,6 +62,12 @@ describe("customer-facing mailers use the resolved identity", () => {
         else assert.equal(Object.hasOwn(message, "replyTo"), false);
       }
       for (const index of [3, 4, 5]) assert.equal(sent[index].attachments[0].content, Buffer.from("test-pdf").toString("base64"));
+      assert.equal(sent[3].subject, "Reviewed invoice");
+      assert.equal(sent[3].html, "<p>Reviewed body</p>");
+      assert.equal(sent[3].text, "Reviewed body");
+      assert.deepEqual(sent[3].cc, ["cc@example.com"]);
+      assert.deepEqual(sent[3].bcc, ["bcc@example.com"]);
+      assert.equal(sent[3].attachments[0].filename, "Reviewed invoice.pdf");
       assert.match(sent[0].html, /Company signature/);
       assert.match(sent[4].text, /signature@example.com/);
     });

@@ -37,7 +37,7 @@ export function createSingleUseConfirmation(options: {
         expiresAt: new Date(expiry),
       };
     },
-    verify(token: unknown, fingerprint: string, now: Date): ConfirmationCheck {
+    verify(token: unknown, fingerprint: string, now: Date, { consume = true } = {}): ConfirmationCheck {
       if (typeof token !== "string" || token.length === 0) {
         return { ok: false, status: 400, reason: "confirmation_required", message: options.messages.required };
       }
@@ -68,7 +68,7 @@ export function createSingleUseConfirmation(options: {
       if (spent.has(nonce)) {
         return { ok: false, status: 409, reason: "confirmation_used", message: options.messages.used };
       }
-      spent.set(nonce, expiry);
+      if (consume) spent.set(nonce, expiry);
       return { ok: true };
     },
   };

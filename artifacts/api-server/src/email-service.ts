@@ -80,90 +80,52 @@ export interface EstimateEmailData {
   }>;
 }
 
-/**
- * The default subject/HTML/text of the invoice-detail email.
- *
- * Task #1889 extracted this from inside `sendInvoiceDetailPdf` so the body can
- * be *generated* in a test and inspected, rather than only reasoned about. The
- * copy is unchanged, byte for byte.
- *
- * It takes exactly two inputs — the customer's name and the invoice number —
- * and that is the point: this is a customer-facing email, so nothing internal
- * can reach it. In particular the internal A/R note thread
- * (`invoice_ar_notes`) must never be passed in or interpolated here. See the
- * comment at that table's definition.
- */
-export function buildInvoiceDetailEmailBody(
-  customerName: string,
-  invoiceNumber: string,
-): { subject: string; html: string; text: string } {
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Only customer-facing fields go in this renderer, never internal A/R notes.
+export function buildInvoiceEmailBody({
+  companyName, companyPhone, companyEmail, customerLabel, invoiceNumber, periodLabel, amountDue, dueDateLabel, note,
+}: {
+  companyName: string; companyPhone: string | null; companyEmail: string | null;
+  customerLabel: string; invoiceNumber: string; periodLabel: string;
+  amountDue: string; dueDateLabel: string | null; note: string;
+}): { html: string; text: string } {
+  const signature = [companyName, companyPhone, companyEmail].filter((line): line is string => Boolean(line));
+  const questions = "Questions? Just reply to this email.";
   return {
-    subject: `Invoice Detail Report - ${invoiceNumber}`,
-    html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Invoice Detail Report</title>
-          </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #1E5A99, #0E3B6B); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-              <h1 style="margin: 0; font-size: 28px;">Invoice Detail Report</h1>
-              <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">IrrigoPro</p>
-            </div>
-            
-            <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 30px;">
-              <h2 style="color: #1f2937; margin-top: 0;">Hello ${customerName},</h2>
-              
-              <p style="font-size: 16px; color: #4b5563;">
-                Please find attached the detailed work order breakdown for invoice <strong>${invoiceNumber}</strong>.
-              </p>
-              
-              <p style="font-size: 16px; color: #4b5563;">
-                This report provides a complete itemization of all work performed, parts used, labor hours, and associated costs for the billing period.
-              </p>
-
-              <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <p style="margin: 0; color: #1e40af; font-size: 14px;">
-                  <strong>📎 Attachment:</strong> The detailed PDF report is attached to this email.
-                </p>
-              </div>
-
-              <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
-                <p style="color: #6b7280; font-size: 14px; margin: 0;">
-                  If you have any questions about this invoice or the attached detail report, please don't hesitate to contact us.
-                </p>
-                <p style="color: #6b7280; font-size: 14px; margin: 8px 0 0 0;">
-                  Thank you for your business!
-                </p>
-              </div>
-
-              <div style="text-align: center; margin-top: 30px;">
-                <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-                  This is an automated email from IrrigoPro
-                </p>
-              </div>
-            </div>
-          </body>
-          </html>
-        `,
-    text: `
-Invoice Detail Report - ${invoiceNumber}
-
-Hello ${customerName},
-
-Please find attached the detailed work order breakdown for invoice ${invoiceNumber}.
-
-This report provides a complete itemization of all work performed, parts used, labor hours, and associated costs for the billing period.
-
-If you have any questions about this invoice or the attached detail report, please don't hesitate to contact us.
-
-Thank you for your business!
-
----
-This is an automated email from IrrigoPro
-        `,
+    html: `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:12px;overflow-wrap:anywhere;">
+  <div style="background:#1E5A99;background:linear-gradient(135deg,#1E5A99,#0E3B6B);color:white;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
+    <h1 style="margin:0;font-size:24px;">${escapeHtml(companyName)}</h1>
+  </div>
+  <div style="background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:20px;">
+    <p style="margin-top:0;">Hello ${escapeHtml(customerLabel)},</p>
+    ${note ? `<div style="border-left:3px solid #1E5A99;background:#eff6ff;padding:12px;white-space:pre-wrap;">${escapeHtml(note)}</div>` : ""}
+    <p>Your irrigation invoice <strong>${escapeHtml(invoiceNumber)}</strong> for ${escapeHtml(periodLabel)} is attached.</p>
+    <table style="width:100%;text-align:left;background:#f1f5f9;border-radius:8px;border-spacing:0;">
+      <tr><th scope="row" style="padding:8px 12px;">Amount due</th><td style="padding:8px 12px;">${escapeHtml(amountDue)}</td></tr>
+      ${dueDateLabel ? `<tr><th scope="row" style="padding:8px 12px;">Due</th><td style="padding:8px 12px;">${escapeHtml(dueDateLabel)}</td></tr>` : ""}
+    </table>
+    <p>${questions}</p>
+    <p style="border-top:1px solid #e5e7eb;padding-top:12px;margin-bottom:0;">${signature.map(escapeHtml).join("<br>")}</p>
+  </div>
+</body>
+</html>`,
+    text: [
+      companyName, `Hello ${customerLabel},`, ...(note ? [note] : []),
+      `Your irrigation invoice ${invoiceNumber} for ${periodLabel} is attached.`,
+      [`Amount due: ${amountDue}`, ...(dueDateLabel ? [`Due: ${dueDateLabel}`] : [])].join("\n"),
+      questions, signature.join("\n"),
+    ].join("\n\n"),
   };
 }
 
@@ -284,14 +246,7 @@ export class EmailService {
     }
   }
 
-  private static escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+  private static escapeHtml = escapeHtml;
 
   private static getCompanyLogoUrl(logoPath: string): string | null {
     return resolveCompanyLogoUrl(logoPath, this.baseUrl);
@@ -1159,19 +1114,21 @@ ${companyName}
    * business, so a payment reminder can go out with its own subject, body and
    * company branding without a second invoice mailer existing to drift.
    *
-   * The resolved sender is required; callers may override the default wording,
-   * filename and SendGrid categories.
+   * Callers supply the exact wording and sender; the filename and categories
+   * have transport defaults.
    */
   static async sendInvoiceDetailPdf(
     customerEmail: string,
-    customerName: string,
+    _customerName: string,
     invoiceNumber: string,
     pdfBuffer: Buffer,
     options: {
       sender: CompanySender;
-      subject?: string;
-      html?: string;
-      text?: string;
+      subject: string;
+      html: string;
+      text: string;
+      cc?: string[];
+      bcc?: string[];
       /** Attachment filename. Defaults to `Invoice_<number>_Detail.pdf`. */
       filename?: string;
       /** SendGrid categories, for per-send reporting. */
@@ -1186,20 +1143,16 @@ ${companyName}
     try {
       const pdfBase64 = pdfBuffer.toString('base64');
 
-      const {
-        subject: defaultSubject,
-        html: defaultHtml,
-        text: defaultText,
-      } = buildInvoiceDetailEmailBody(customerName, invoiceNumber);
-
       // Send email with PDF attachment
       await sgMail.send({
         from: options.sender.from,
         ...(options.sender.replyTo ? { replyTo: options.sender.replyTo } : {}),
         to: customerEmail,
-        subject: options.subject ?? defaultSubject,
-        html: options.html ?? defaultHtml,
-        text: options.text ?? defaultText,
+        ...(options.cc?.length ? { cc: options.cc } : {}),
+        ...(options.bcc?.length ? { bcc: options.bcc } : {}),
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
         attachments: [
           {
             filename: options.filename ?? `Invoice_${invoiceNumber}_Detail.pdf`,

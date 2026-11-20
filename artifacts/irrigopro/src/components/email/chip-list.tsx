@@ -13,11 +13,13 @@ export function ChipList({
   label,
   values,
   onChange,
+  onDraftChange,
   testIdPrefix,
 }: {
   label: string;
   values: string[];
   onChange: (next: string[]) => void;
+  onDraftChange?: (pending: boolean) => void;
   testIdPrefix: string;
 }) {
   const [draft, setDraft] = useState("");
@@ -40,6 +42,7 @@ export function ChipList({
     }
     onChange([...values, v]);
     setDraft("");
+    onDraftChange?.(false);
     setError(null);
   };
 
@@ -47,20 +50,20 @@ export function ChipList({
 
   return (
     <div className="space-y-1.5">
-      <Label className="text-sm font-medium text-gray-700">{label}</Label>
+      <Label htmlFor={`${testIdPrefix}-input`} className="text-sm font-medium text-gray-700">{label}</Label>
       <div className="flex flex-wrap gap-1.5">
         {values.map((v) => (
           <Badge
             key={v}
             variant="secondary"
-            className="gap-1 pl-2 pr-1 py-0.5"
+            className="max-w-full min-w-0 gap-1 pl-2 pr-1 py-0.5"
             data-testid={`${testIdPrefix}-chip-${v}`}
           >
-            {v}
+            <span className="min-w-0 [overflow-wrap:anywhere]">{v}</span>
             <button
               type="button"
               onClick={() => remove(v)}
-              className="ml-0.5 text-gray-500 hover:text-gray-900"
+              className="ml-0.5 shrink-0 text-gray-500 hover:text-gray-900"
               aria-label={`Remove ${v}`}
             >
               <X className="w-3 h-3" />
@@ -70,10 +73,12 @@ export function ChipList({
       </div>
       <Input
         type="email"
+        id={`${testIdPrefix}-input`}
         placeholder="name@example.com — press Enter to add"
         value={draft}
         onChange={(e) => {
           setDraft(e.target.value);
+          onDraftChange?.(!!e.target.value.trim());
           if (error) setError(null);
         }}
         onKeyDown={(e) => {
@@ -88,7 +93,7 @@ export function ChipList({
         disabled={values.length >= MAX_RECIPIENTS}
         data-testid={`${testIdPrefix}-input`}
       />
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="break-all text-xs text-red-600">{error}</p>}
     </div>
   );
 }

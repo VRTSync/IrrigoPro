@@ -107,8 +107,8 @@
   ],
   "api-field": [
     {
-      "name": "invoice-pdf-send",
-      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/invoice-pdf-send.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts"
+      "name": "invoice-email-review",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/outgoing-email-routes.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts"
     },
     {
       "name": "company-email-sender",
@@ -216,6 +216,10 @@
     }
   ],
   "web": [
+    {
+      "name": "review-and-send-dialog",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/email/review-and-send-dialog.test.tsx"
+    },
     {
       "name": "outgoing-email-card",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/company/outgoing-email-card.test.tsx"

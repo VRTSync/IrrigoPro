@@ -5,6 +5,81 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type OutgoingEmailDraftInputOptions = { [key: string]: boolean };
+
+export interface OutgoingEmailDraftInput {
+  /** Email address; blank uses the default */
+  to?: string;
+  /** @maxItems 5 */
+  cc?: string[];
+  /** @maxItems 5 */
+  bcc?: string[];
+  /**
+   * Blank uses the default
+   * @maxLength 200
+   */
+  subject?: string;
+  /** @maxLength 1000 */
+  note?: string;
+  options?: OutgoingEmailDraftInputOptions;
+}
+
+export type OutgoingEmailSendInput = OutgoingEmailDraftInput & {
+  confirmationToken: string;
+};
+
+export type OutgoingEmailPreviewKind =
+  (typeof OutgoingEmailPreviewKind)[keyof typeof OutgoingEmailPreviewKind];
+
+export const OutgoingEmailPreviewKind = {
+  invoice: "invoice",
+} as const;
+
+export type OutgoingEmailPreviewFrom = {
+  email: string;
+  name: string;
+};
+
+export type OutgoingEmailPreviewOptions = { [key: string]: boolean };
+
+export type OutgoingEmailPreviewOptionDefsItem = {
+  key: string;
+  label: string;
+  default: boolean;
+};
+
+export type OutgoingEmailPreviewAttachmentsItem = {
+  filename: string;
+  viewUrl: string;
+};
+
+export interface OutgoingEmailPreview {
+  kind: OutgoingEmailPreviewKind;
+  id: number;
+  from: OutgoingEmailPreviewFrom;
+  /** @nullable */
+  replyTo: string | null;
+  usingCompanyAddress: boolean;
+  to: string;
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  note: string;
+  options: OutgoingEmailPreviewOptions;
+  optionDefs: OutgoingEmailPreviewOptionDefsItem[];
+  html: string;
+  text: string;
+  attachments: OutgoingEmailPreviewAttachmentsItem[];
+  warnings: string[];
+  confirmationToken: string;
+  expiresAt: string;
+}
+
+export interface OutgoingEmailSent {
+  sentTo: string;
+  sentAt: string;
+}
+
 export interface MarkupRecalculationPreview {
   confirmationToken: string;
   eligible: number;

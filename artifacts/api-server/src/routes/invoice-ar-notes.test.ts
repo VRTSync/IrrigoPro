@@ -52,7 +52,7 @@ import { requireInvoiceRead } from "./role-guards";
 import { buildPdfViewModel, type InvoiceDetailData } from "../pdf-view-model";
 import { coverPage, reconciliationPage, ticketPageWO } from "../pdf-helpers";
 import { renderReminderEmail, REMINDER_TEMPLATE_KEYS } from "../invoice-reminder-templates";
-import { buildInvoiceDetailEmailBody } from "../email-service";
+import { buildInvoiceEmailBody } from "../email-service";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -773,8 +773,12 @@ describe("A/R notes never reach a customer — PDF, email, CSV", () => {
 
   // ── Surface 2: every customer-facing email ────────────────────────────────
   it("the invoice-detail email body carries no note text", () => {
-    const body = buildInvoiceDetailEmailBody("Test Customer", "INV-0001");
-    assertNoNotes(`${body.subject}\n${body.html}\n${body.text}`, "invoice-detail email");
+    const body = buildInvoiceEmailBody({
+      companyName: "Test Company", companyEmail: null, companyPhone: null,
+      customerLabel: "Test Customer", invoiceNumber: "INV-0001", periodLabel: "October 2026",
+      amountDue: "$100.00", dueDateLabel: null, note: "",
+    });
+    assertNoNotes(`${body.html}\n${body.text}`, "invoice-detail email");
   });
 
   it("every reminder template carries no note text", () => {

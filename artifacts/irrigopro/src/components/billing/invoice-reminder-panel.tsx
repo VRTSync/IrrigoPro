@@ -88,6 +88,7 @@ export function InvoiceReminderPanel({
   invoiceNumber,
   open,
   historyOnly = false,
+  onSendInvoice,
 }: {
   invoiceId: number;
   invoiceNumber: string;
@@ -105,6 +106,7 @@ export function InvoiceReminderPanel({
    * What remains is the recorded rows, rendered as stored.
    */
   historyOnly?: boolean;
+  onSendInvoice?: () => void;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -196,7 +198,11 @@ export function InvoiceReminderPanel({
           <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-amber-900">
             <p>{refusal.message}</p>
-            {refusal.action && (
+            {refusal.reason === "never_sent" && refusal.action && onSendInvoice ? (
+              <Button type="button" variant="outline" size="sm" className="mt-2" onClick={onSendInvoice} data-testid="reminder-refusal-action">
+                {refusal.action.label}
+              </Button>
+            ) : refusal.action && (
               <p className="mt-1 font-medium" data-testid="reminder-refusal-action">
                 {refusal.action.label}
               </p>

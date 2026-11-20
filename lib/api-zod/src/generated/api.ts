@@ -7,6 +7,119 @@
  */
 import * as zod from "zod";
 
+export const PreviewOutgoingEmailParams = zod.object({
+  kind: zod.enum(["invoice"]),
+  id: zod.coerce.number().min(1),
+});
+
+export const previewOutgoingEmailBodyCcMax = 5;
+
+export const previewOutgoingEmailBodyBccMax = 5;
+
+export const previewOutgoingEmailBodySubjectMax = 200;
+
+export const previewOutgoingEmailBodyNoteMax = 1000;
+
+export const PreviewOutgoingEmailBody = zod.object({
+  to: zod.string().optional().describe("Email address; blank uses the default"),
+  cc: zod
+    .array(zod.string().email())
+    .max(previewOutgoingEmailBodyCcMax)
+    .optional(),
+  bcc: zod
+    .array(zod.string().email())
+    .max(previewOutgoingEmailBodyBccMax)
+    .optional(),
+  subject: zod
+    .string()
+    .max(previewOutgoingEmailBodySubjectMax)
+    .optional()
+    .describe("Blank uses the default"),
+  note: zod.string().max(previewOutgoingEmailBodyNoteMax).optional(),
+  options: zod.record(zod.string(), zod.boolean()).optional(),
+});
+
+export const PreviewOutgoingEmailResponse = zod.object({
+  kind: zod.enum(["invoice"]),
+  id: zod.number(),
+  from: zod.object({
+    email: zod.string(),
+    name: zod.string(),
+  }),
+  replyTo: zod.string().nullable(),
+  usingCompanyAddress: zod.boolean(),
+  to: zod.string(),
+  cc: zod.array(zod.string()),
+  bcc: zod.array(zod.string()),
+  subject: zod.string(),
+  note: zod.string(),
+  options: zod.record(zod.string(), zod.boolean()),
+  optionDefs: zod.array(
+    zod.object({
+      key: zod.string(),
+      label: zod.string(),
+      default: zod.boolean(),
+    }),
+  ),
+  html: zod.string(),
+  text: zod.string(),
+  attachments: zod.array(
+    zod.object({
+      filename: zod.string(),
+      viewUrl: zod.string(),
+    }),
+  ),
+  warnings: zod.array(zod.string()),
+  confirmationToken: zod.string(),
+  expiresAt: zod.coerce.date(),
+});
+
+export const SendOutgoingEmailParams = zod.object({
+  kind: zod.enum(["invoice"]),
+  id: zod.coerce.number().min(1),
+});
+
+export const sendOutgoingEmailBodyOneCcMax = 5;
+
+export const sendOutgoingEmailBodyOneBccMax = 5;
+
+export const sendOutgoingEmailBodyOneSubjectMax = 200;
+
+export const sendOutgoingEmailBodyOneNoteMax = 1000;
+
+export const SendOutgoingEmailBody = zod
+  .object({
+    to: zod
+      .string()
+      .optional()
+      .describe("Email address; blank uses the default"),
+    cc: zod
+      .array(zod.string().email())
+      .max(sendOutgoingEmailBodyOneCcMax)
+      .optional(),
+    bcc: zod
+      .array(zod.string().email())
+      .max(sendOutgoingEmailBodyOneBccMax)
+      .optional(),
+    subject: zod
+      .string()
+      .max(sendOutgoingEmailBodyOneSubjectMax)
+      .optional()
+      .describe("Blank uses the default"),
+    note: zod.string().max(sendOutgoingEmailBodyOneNoteMax).optional(),
+    options: zod.record(zod.string(), zod.boolean()).optional(),
+  })
+  .and(
+    zod.object({
+      confirmationToken: zod.string(),
+    }),
+  );
+
+export const SendOutgoingEmailResponse = zod.object({
+  sentTo: zod.string(),
+  sentAt: zod.coerce.date(),
+});
+
 export const PreviewMarkupRecalculationQueryParams = zod.object({
   companyId: zod.coerce.number().min(1).optional(),
 });

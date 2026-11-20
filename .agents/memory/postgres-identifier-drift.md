@@ -16,3 +16,6 @@ apply partial-table push proposals: the introspector can include unrelated
 sequences and suggest dropping them even with a table filter. Scope any actual
 constraint-name repair explicitly and never broaden a feature into a global
 constraint rewrite without approval.
+
+Drizzle can propose unrelated sequence drops even when its data-loss flag is
+false. Check the exact statements, not just the flag, before any scoped push.

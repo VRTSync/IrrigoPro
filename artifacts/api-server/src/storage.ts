@@ -817,7 +817,8 @@ export interface IStorage {
   
   // Invoice PDFs - detailed breakdowns
   createInvoicePdf(pdf: InsertInvoicePdf): Promise<InvoicePdf>;
-  getLatestInvoiceSentCopy(invoiceId: number): Promise<InvoicePdf | undefined>;
+  getLatestInvoiceSentCopy(invoiceId: number, companyId?: number): Promise<InvoicePdf | undefined>;
+  stampInvoiceSent(invoiceId: number, companyId: number, sentAt: Date): Promise<void>;
   updateInvoicePdf(id: number, pdf: Partial<InsertInvoicePdf>): Promise<InvoicePdf | undefined>;
 
   // Task #1887 — invoice payment reminders.
@@ -7636,11 +7637,17 @@ export class DatabaseStorage implements IStorage {
     return newPdf;
   }
 
-  async getLatestInvoiceSentCopy(invoiceId: number): Promise<InvoicePdf | undefined> {
+  async getLatestInvoiceSentCopy(invoiceId: number, companyId?: number): Promise<InvoicePdf | undefined> {
     const [pdf] = await db.select().from(invoicePdfs)
-      .where(and(eq(invoicePdfs.invoiceId, invoiceId), eq(invoicePdfs.status, 'sent')))
+      .where(and(eq(invoicePdfs.invoiceId, invoiceId), eq(invoicePdfs.status, 'sent'),
+        companyId === undefined ? undefined : eq(invoicePdfs.companyId, companyId)))
       .orderBy(sql`${invoicePdfs.sentAt} desc nulls last`, desc(invoicePdfs.id)).limit(1);
     return pdf;
+  }
+
+  async stampInvoiceSent(invoiceId: number, companyId: number, sentAt: Date): Promise<void> {
+    await db.update(invoices).set({ sentAt })
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.companyId, companyId), isNull(invoices.sentAt)));
   }
 
   async updateInvoicePdf(id: number, pdf: Partial<InsertInvoicePdf>): Promise<InvoicePdf | undefined> {

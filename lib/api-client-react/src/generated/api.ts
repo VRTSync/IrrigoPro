@@ -54,6 +54,10 @@ import type {
   OfflineBackflowInput,
   OfflineControllerInput,
   OfflineProgramInput,
+  OutgoingEmailDraftInput,
+  OutgoingEmailPreview,
+  OutgoingEmailSendInput,
+  OutgoingEmailSent,
   PreviewMarkupRecalculationParams,
   RecalculateMarkupPricesParams,
   RemoveCustomerMarkupOverrideParams,
@@ -69,6 +73,174 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getPreviewOutgoingEmailUrl = (kind: "invoice", id: number) => {
+  return `/api/outgoing-email/${kind}/${id}/preview`;
+};
+
+export const previewOutgoingEmail = async (
+  kind: "invoice",
+  id: number,
+  outgoingEmailDraftInput: OutgoingEmailDraftInput,
+  options?: RequestInit,
+): Promise<OutgoingEmailPreview> => {
+  return customFetch<OutgoingEmailPreview>(
+    getPreviewOutgoingEmailUrl(kind, id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(outgoingEmailDraftInput),
+    },
+  );
+};
+
+export const getPreviewOutgoingEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewOutgoingEmail>>,
+    TError,
+    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewOutgoingEmail>>,
+  TError,
+  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+  TContext
+> => {
+  const mutationKey = ["previewOutgoingEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewOutgoingEmail>>,
+    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> }
+  > = (props) => {
+    const { kind, id, data } = props ?? {};
+
+    return previewOutgoingEmail(kind, id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewOutgoingEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewOutgoingEmail>>
+>;
+export type PreviewOutgoingEmailMutationBody =
+  BodyType<OutgoingEmailDraftInput>;
+export type PreviewOutgoingEmailMutationError = ErrorType<void>;
+
+export const usePreviewOutgoingEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewOutgoingEmail>>,
+    TError,
+    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewOutgoingEmail>>,
+  TError,
+  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+  TContext
+> => {
+  return useMutation(getPreviewOutgoingEmailMutationOptions(options));
+};
+
+export const getSendOutgoingEmailUrl = (kind: "invoice", id: number) => {
+  return `/api/outgoing-email/${kind}/${id}/send`;
+};
+
+export const sendOutgoingEmail = async (
+  kind: "invoice",
+  id: number,
+  outgoingEmailSendInput: OutgoingEmailSendInput,
+  options?: RequestInit,
+): Promise<OutgoingEmailSent> => {
+  return customFetch<OutgoingEmailSent>(getSendOutgoingEmailUrl(kind, id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(outgoingEmailSendInput),
+  });
+};
+
+export const getSendOutgoingEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendOutgoingEmail>>,
+    TError,
+    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendOutgoingEmail>>,
+  TError,
+  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+  TContext
+> => {
+  const mutationKey = ["sendOutgoingEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendOutgoingEmail>>,
+    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> }
+  > = (props) => {
+    const { kind, id, data } = props ?? {};
+
+    return sendOutgoingEmail(kind, id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendOutgoingEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendOutgoingEmail>>
+>;
+export type SendOutgoingEmailMutationBody = BodyType<OutgoingEmailSendInput>;
+export type SendOutgoingEmailMutationError = ErrorType<void>;
+
+export const useSendOutgoingEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendOutgoingEmail>>,
+    TError,
+    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendOutgoingEmail>>,
+  TError,
+  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+  TContext
+> => {
+  return useMutation(getSendOutgoingEmailMutationOptions(options));
+};
 
 export const getPreviewMarkupRecalculationUrl = (
   params?: PreviewMarkupRecalculationParams,

@@ -36,3 +36,14 @@ If the same column is also missing in an artifact typecheck, treat that as a
 separate dependency problem: PostgreSQL DDL does not rebuild the generated
 workspace declarations, and rebuilding the declarations does not update the
 database.
+
+Prefer a disposable local PostgreSQL database when validating against current
+schema would otherwise require changing shared development data.
+
+**Why:** Tests can exercise real queries and browser sign-in without repairing
+or replacing the project's database. A daemon started inside a finite shell
+task can be stopped with that task, even when the shell exits successfully.
+
+**How to apply:** Run PostgreSQL itself as the long-lived test process, push
+the schema only to its loopback connection, and point test commands explicitly
+at that database. Keep external senders disabled for fixture browser runs.
