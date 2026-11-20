@@ -265,3 +265,51 @@ describe("Command Center new estimate entry", () => {
     expect(fetched.filter((key) => key === "/api/estimates/summary").length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("Command Center Approve & Send", () => {
+  it("approves before starting review and can reopen review after cancellation without re-approving", async () => {
+    rows = [{
+      id: 42, estimateNumber: "50123", customerName: "The Ranch",
+      projectName: "Repair", createdBy: "Admin", totalAmount: "200",
+      status: "pending", internalStatus: "pending_approval", lifecycle: "pending_review",
+      createdAt: new Date().toISOString(),
+    }];
+    vi.mocked(apiRequest).mockImplementation(async (url, method) => {
+      expect(url).toBe("/api/estimates/42/internal-approve");
+      expect(method).toBe("PATCH");
+      rows = [{ ...rows[0], internalStatus: "approved_internal" }];
+      return { estimate: rows[0] };
+    });
+    const reviewFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      expect(String(url)).toBe("/api/outgoing-email/estimate/42/preview");
+      expect(init?.method).toBe("POST");
+      expect(rows[0].internalStatus).toBe("approved_internal");
+      return Response.json({
+        kind: "estimate", id: 42, to: "test@example.invalid", cc: [], bcc: [],
+        subject: "Irrigation Estimate #50123 – The Ranch", note: "", options: {}, optionDefs: [],
+        from: { email: "office@example.invalid", name: "Office" }, replyTo: "reply@example.invalid",
+        usingCompanyAddress: true, html: "<p>Rendered estimate</p>", text: "Rendered estimate",
+        attachments: [], warnings: [], confirmationToken: "reviewed", expiresAt: new Date().toISOString(),
+      });
+    });
+    const showReview = async () => {
+      fireEvent.pointerDown(await screen.findByTestId("estimate-row-actions-42"), { button: 0, ctrlKey: false, pointerType: "mouse" });
+      fireEvent.click(await screen.findByTestId("row-approve-42"));
+      await screen.findByRole("dialog", { name: "Send estimate #50123" });
+      await screen.findByTitle("Email preview");
+    };
+    try {
+      mount();
+      await showReview();
+      expect(toastSpy).toHaveBeenCalledWith(expect.objectContaining({ title: "Approved" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await showReview();
+      expect(rows[0].internalStatus).toBe("approved_internal");
+      expect(vi.mocked(apiRequest)).toHaveBeenCalledTimes(1);
+      expect(reviewFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      reviewFetch.mockRestore();
+    }
+  });
+});

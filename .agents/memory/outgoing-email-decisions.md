@@ -26,3 +26,9 @@ A review of a live attachment binds the data the renderer consumes, not just the
 **Why:** An equal-price ticket swap or a source detail edit can change a PDF without changing the invoice total or timestamp.
 
 **How to apply:** Compare the reviewed source version to the version actually rendered and to the current data before delivery. Review need not render a PDF.
+
+An attachment shown in Review and Send is a delivery commitment.
+
+**Why:** Sending after a PDF render failure would deliver a different email from the one the user approved.
+
+**How to apply:** Fail before sending or recording delivery. Let the user retry, or explicitly remove the attachment and review the new draft.

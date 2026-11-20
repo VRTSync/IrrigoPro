@@ -2,7 +2,7 @@ import type { Request, RequestHandler } from "express";
 import { z } from "zod/v4";
 import type { CompanySender } from "../lib/company-sender";
 
-export type OutgoingEmailKind = "invoice";
+export type OutgoingEmailKind = "invoice" | "estimate" | "estimate_resend";
 export interface DraftInput {
   to?: string;
   cc?: string[];
@@ -29,9 +29,11 @@ export interface BuiltDraft {
 export interface OutgoingEmailHandler<E> {
   kind: OutgoingEmailKind;
   capabilities: RequestHandler[];
+  noRecipientMessage?: string;
   options?: { key: string; label: string; default: boolean }[];
   load(req: Request, id: number): Promise<E | null>;
   draft(entity: E, input: DraftInput): Promise<BuiltDraft>;
+  renderAttachment?(entity: E): Promise<{ filename: string; buffer: Buffer }>;
   send(entity: E, draft: BuiltDraft, req: Request): Promise<{ sentTo: string; sentAt: Date }>;
 }
 

@@ -11,4 +11,6 @@ export type OutgoingEmailPreviewKind =
 
 export const OutgoingEmailPreviewKind = {
   invoice: "invoice",
+  estimate: "estimate",
+  estimate_resend: "estimate_resend",
 } as const;

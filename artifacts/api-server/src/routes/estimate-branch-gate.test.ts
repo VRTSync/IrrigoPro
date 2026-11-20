@@ -1,3 +1,4 @@
+import { computeLifecycleStatus } from "@workspace/shared";
 // Task #2010 — regression guard for the estimate branch gate.
 //
 // The estimate builder was the only ticket-creation flow that never
@@ -28,7 +29,7 @@
 // production routes import, so any drift between this file and the real
 // code is a compile error rather than a silently passing test.
 
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import express, { type Express, type RequestHandler } from "express";
 import { createServer, type Server } from "node:http";
@@ -39,6 +40,9 @@ import {
   registerEstimateRoutes,
   type EstimateRoutesStorage,
 } from "./estimate-routes";
+import { createEstimateEmailHandler } from "../outgoing-email/estimate-handlers";
+import { EmailService } from "../email-service";
+import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
 import { requireEstimateBranchForSend } from "./estimate-role-guards";
 import {
   checkEstimateBranchGate,
@@ -172,6 +176,9 @@ function makeEstimate(opts: {
     totalLaborHours: "1.00",
     approvalToken: opts.approvalToken ?? null,
     tokenExpiresAt: null,
+    estimateDate: new Date(),
+    updatedAt: new Date(),
+    totalAmount: "0.00",
     items: [],
   } as unknown as EstimateWithItems;
 }
@@ -342,6 +349,20 @@ async function startServer(
     recordAuditEvent: async (_req, evt) => {
       auditEvents.push(evt);
     },
+  });
+  const emailStorage = {
+    ...stub,
+    getEstimate: async (id: number) => {
+      const estimate = await stub.getEstimate(id);
+      return estimate && { ...estimate, lifecycleStatus: computeLifecycleStatus(estimate) };
+    },
+    getCompany: async () => undefined,
+    getCompanyProfile: async () => undefined,
+    markEstimateSentToCustomer: async () => { throw new Error("Unexpected send in branch guard tests"); },
+  };
+  registerOutgoingEmailRoutes(app, {
+    requireAuthentication: stubAuth,
+    handlers: (["estimate", "estimate_resend"] as const).map((kind) => createEstimateEmailHandler(kind, { storage: emailStorage })),
   });
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -547,16 +568,16 @@ describe("Task #2010 — write gate on the three estimate write paths", () => {
 // it records that a manual send already happened, and blocking it would
 // not stop the send, only make the record wrong.
 const GATED_ROUTES: Array<{ method: string; path: (id: number) => string }> = [
-  { method: "POST", path: (id) => `/api/estimates/${id}/email` },
+  ...["estimate", "estimate_resend"].flatMap(kind => ["preview", "send"].map(action => ({
+    method: "POST", path: (id: number) => `/api/outgoing-email/${kind}/${id}/${action}`,
+  }))),
   { method: "POST", path: (id) => `/api/estimates/${id}/approve` },
   { method: "PATCH", path: (id) => `/api/estimates/${id}/internal-approve` },
   { method: "PATCH", path: (id) => `/api/estimates/${id}/approve` },
-  { method: "POST", path: (id) => `/api/estimates/${id}/send-approval-email` },
-  { method: "POST", path: (id) => `/api/estimates/${id}/resend` },
   { method: "POST", path: (id) => `/api/estimates/${id}/convert-to-work-order` },
 ];
 
-describe("Task #2010 — send/approve gate on all seven authenticated doors", () => {
+describe("Task #2010 — send/approve gate on all authenticated doors", () => {
   let stub: StorageStub;
   let h: Harness;
 
@@ -650,7 +671,6 @@ describe("Task #2010 — send/approve gate on all seven authenticated doors", ()
     // Guard ordering is a security property: the branch guard sits AFTER
     // the approval-access guard on every route that carries one.
     for (const route of GATED_ROUTES) {
-      if (route.path(0).includes("/resend")) continue; // no approval guard today
       const res = await fetch(`${h.baseUrl}${route.path(41)}`, {
         method: route.method,
         headers: { "content-type": "application/json", "x-user-role": "field_tech" },
@@ -882,7 +902,7 @@ describe("Task #2010 — resend authorises before it evaluates the branch", () =
   });
 
   it("an unauthorised role gets 403, not a branch-state-dependent 400", async () => {
-    const res = await fetch(`${h.baseUrl}/api/estimates/70/resend`, {
+    const res = await fetch(`${h.baseUrl}/api/outgoing-email/estimate_resend/70/preview`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-user-role": "technician" },
       body: JSON.stringify({}),
@@ -897,7 +917,7 @@ describe("Task #2010 — resend authorises before it evaluates the branch", () =
   });
 
   it("an authorised role still meets the branch gate", async () => {
-    const res = await fetch(`${h.baseUrl}/api/estimates/70/resend`, {
+    const res = await fetch(`${h.baseUrl}/api/outgoing-email/estimate_resend/70/preview`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-user-role": "irrigation_manager" },
       body: JSON.stringify({}),
@@ -920,7 +940,7 @@ describe("Task #2010 — resend authorises before it evaluates the branch", () =
       }),
     );
     for (const role of ["irrigation_manager", "company_admin", "super_admin"]) {
-      const res = await fetch(`${h.baseUrl}/api/estimates/71/resend`, {
+      const res = await fetch(`${h.baseUrl}/api/outgoing-email/estimate_resend/71/preview`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-user-role": role },
         body: JSON.stringify({}),
@@ -951,7 +971,7 @@ describe("requireEstimateBranchForSend — middleware contract", () => {
         return opts.customer;
       },
     });
-    app.post("/x/:id", guard, (_req, res) => {
+    app.post("/x/:id", (req, _res, next) => { req.authenticatedUserRole = "super_admin"; next(); }, guard, (_req, res) => {
       nextCalled = true;
       res.status(200).json({ ok: true });
     });
@@ -1043,7 +1063,11 @@ describe("Task #2010 — customer token approval tripwire", () => {
     consentText: "I approve this estimate.",
   };
 
+  // These tests exercise token approval, not external mail delivery.
+  let restoreMailer: () => void;
   beforeEach(async () => {
+    const mailer = mock.method(EmailService, "sendApprovalConfirmation", async () => {});
+    restoreMailer = () => mailer.mock.restore();
     stub = makeStorageStub();
     stub.customers.set(1, makeCustomer({ id: 1, branches: null }));
     stub.customers.set(2, makeCustomer({ id: 2, branches: BRANCHES }));
@@ -1051,6 +1075,7 @@ describe("Task #2010 — customer token approval tripwire", () => {
     origUpdate = db.update;
   });
   afterEach(async () => {
+    restoreMailer();
     (db as unknown as { update: unknown }).update = origUpdate;
     await h.close();
   });

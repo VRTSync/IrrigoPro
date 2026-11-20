@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import express, { type Express } from "express";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
+import { registerEstimateRoutes, type EstimateRoutesStorage } from "./estimate-routes";
 
 import {
   registerLegacyEstimateGoneRoutes,
@@ -23,6 +24,7 @@ async function startServer(): Promise<{
   const app: Express = express();
   app.use(express.json());
   registerLegacyEstimateGoneRoutes(app);
+  registerEstimateRoutes(app, {} as EstimateRoutesStorage, (_req, _res, next) => next());
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const port = (server.address() as AddressInfo).port;
@@ -78,11 +80,18 @@ describe("Legacy estimate transition endpoints — 410 Gone (Task #639)", () => 
     });
   }
 
+  for (const path of ["email", "resend", "send-approval-email"]) {
+    it(`returns 404 on the removed ${path} endpoint`, async () => {
+      const res = await fetch(`${baseUrl}/api/estimates/123/${path}`, { method: "POST" });
+      assert.equal(res.status, 404);
+    });
+  }
+
   it("redirect messages point at the canonical replacements", () => {
     assert.match(LEGACY_APPROVE_GONE_MESSAGE, /PATCH \/api\/estimates\/:id\/approve/);
     assert.match(LEGACY_REJECT_GONE_MESSAGE, /PATCH \/api\/estimates\/:id\/reject/);
     assert.match(LEGACY_TRANSITION_GONE_MESSAGE, /submit-for-review/);
-    assert.match(LEGACY_TRANSITION_GONE_MESSAGE, /send-approval-email/);
-    assert.match(LEGACY_TRANSITION_GONE_MESSAGE, /resend/);
+    assert.match(LEGACY_TRANSITION_GONE_MESSAGE, /\/api\/outgoing-email\/\{kind\}\/:id\/preview then \/send/);
+    assert.match(LEGACY_TRANSITION_GONE_MESSAGE, /estimate or estimate_resend/);
   });
 });

@@ -602,7 +602,7 @@ describe("routes.ts wiring", () => {
       assert.match(pdfSource.slice(start, pdfSource.indexOf("async", start)), /requireAuthentication.*requireInvoiceRead/, decl);
     }
     assert.match(ROUTES_SRC, /registerInvoicePdfRoutes\(app, \{ requireAuthentication, requireInvoiceRead \}\)/);
-    assert.match(ROUTES_SRC, /registerOutgoingEmailRoutes\(app, \{ requireAuthentication \}\)/);
+    assert.match(ROUTES_SRC, /registerOutgoingEmailRoutes\(app, \{ requireAuthentication(?:, \w+)* \}\)/);
   });
 
   it("both previously-ungated QuickBooks routes now carry the allowlist", () => {

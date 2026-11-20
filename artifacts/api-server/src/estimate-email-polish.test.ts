@@ -14,57 +14,24 @@
  *      never to /api/estimates/view-via-token/…
  *  (d) Plain-text body includes the subtotals breakdown.
  *
- * All tests operate by calling the private HTML/text generators indirectly
- * via the exported generateEstimateEmailHTML / generateEstimateEmailText
- * surface exposed through the class-level test hook, so no SendGrid I/O
- * happens.
+ * Tests exercise the shared server email builder without any SendGrid I/O.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { EstimateEmailData } from './email-service';
 
-// ── Test-only shim to call private static methods ────────────────────────────
-// We reach into the compiled class without instantiating it.
-
-async function renderHTML(data: EstimateEmailData): Promise<string> {
-  const { EmailService } = await import('./email-service');
-  // Access private static method via bracket notation for test purposes.
-  const cls = EmailService as unknown as {
-    generateEstimateEmailHTML: (
-      data: EstimateEmailData,
-      approveUrl: string,
-      rejectUrl: string,
-      viewUrl: string,
-      companyInfo: { name: string; logo: string | null; email: string; phone: string; website: string },
-    ) => string;
-  };
-  return cls.generateEstimateEmailHTML(
-    data,
-    `https://irrigopro.com/estimate-approval/${data.approvalToken}`,
-    `https://irrigopro.com/api/estimates/reject-via-token/${data.approvalToken}`,
-    `https://irrigopro.com/estimate-approval/${data.approvalToken}`,
-    { name: 'Acme Irrigation', logo: null, email: 'test@acme.com', phone: '555-0100', website: '' },
-  );
+async function render(data: EstimateEmailData) {
+  const { buildEstimateApprovalEmail } = await import('./email-service');
+  const approvalUrl = `https://irrigopro.com/estimate-approval/${data.approvalToken}`;
+  return buildEstimateApprovalEmail(data, {
+    approveUrl: approvalUrl,
+    rejectUrl: `${approvalUrl}?intent=reject`,
+    viewUrl: approvalUrl,
+  });
 }
-
-async function renderText(data: EstimateEmailData): Promise<string> {
-  const { EmailService } = await import('./email-service');
-  const cls = EmailService as unknown as {
-    generateEstimateEmailText: (
-      data: EstimateEmailData,
-      approveUrl: string,
-      rejectUrl: string,
-      companyInfo: { name: string; logo: string | null; email: string; phone: string; website: string },
-    ) => string;
-  };
-  return cls.generateEstimateEmailText(
-    data,
-    `https://irrigopro.com/estimate-approval/${data.approvalToken}`,
-    `https://irrigopro.com/api/estimates/reject-via-token/${data.approvalToken}`,
-    { name: 'Acme Irrigation', logo: null, email: 'test@acme.com', phone: '555-0100', website: '' },
-  );
-}
+const renderHTML = async (data: EstimateEmailData) => (await render(data)).html;
+const renderText = async (data: EstimateEmailData) => (await render(data)).text;
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +41,8 @@ function makeStandardData(overrides: Partial<EstimateEmailData> = {}): EstimateE
     estimateId: 1,
     estimateNumber: '00001',
     customerName: 'Jane Doe',
+    customerLabel: 'Jane Doe',
+    companyProfile: null,
     customerEmail: 'jane@example.com',
     projectName: 'Front Yard Sprinklers',
     totalAmount: '$320.00',
@@ -118,6 +87,8 @@ function makeInspectionData(): EstimateEmailData {
     estimateId: 2,
     estimateNumber: '00002',
     customerName: 'John Smith',
+    customerLabel: 'John Smith',
+    companyProfile: null,
     customerEmail: 'john@example.com',
     projectName: 'Backyard Inspection',
     totalAmount: '$425.00',

@@ -655,6 +655,7 @@ export interface IStorage {
       approvalSentAt: Date;
       newEstimateDate: Date | null;
       isResend: boolean;
+      isSentRedelivery?: boolean;
       // Task #1955 — the approval token read at the start of the send
       // flow. Used as the compare-and-swap value on the resend path.
       previousApprovalToken?: string | null;

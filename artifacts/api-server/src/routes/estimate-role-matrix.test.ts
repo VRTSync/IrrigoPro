@@ -9,7 +9,7 @@
 //
 // What this pins:
 //   • Middleware-gated endpoints (approve / reject / internal-approve /
-//     send-approval-email / email / pending-approval / PDF) return
+//     email review / pending-approval / PDF) return
 //     403 for any role outside the allowed set and 200 for any role
 //     inside it.
 //   • Handler-level role rules inside POST /api/estimates/:id/transition
@@ -66,6 +66,10 @@ import type {
 // ESTIMATE_PDF_READ_ROLES for back-compat but is excluded from
 // approval and transition gates. Both are exercised so a future
 // removal of the alias forces a deliberate update to this test.
+import { createEstimateEmailHandler } from "../outgoing-email/estimate-handlers";
+import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
+import { EmailService } from "../email-service";
+
 const ROLES = [
   "super_admin",
   "company_admin",
@@ -172,16 +176,13 @@ async function startMatrixServer(): Promise<Harness> {
     ok,
   );
 
-  // Approve / reject / internal-approve (POST + PATCH variants) +
-  // send-approval-email + email — all gated by requireEstimateApprovalAccess.
+  // Approve / reject / internal-approve (POST + PATCH variants).
   // Mounted here (before registerEstimateRoutes) so the stub fires and
   // returns 200 for allowed roles; the real handler would return 404
   // (getEstimate → undefined in the stub).
   for (const path of [
     "/api/estimates/:id/approve",
     "/api/estimates/:id/reject",
-    "/api/estimates/:id/send-approval-email",
-    "/api/estimates/:id/email",
   ]) {
     app.post(path, stubAuth, requireEstimateApprovalAccess, ok);
   }
@@ -208,7 +209,28 @@ async function startMatrixServer(): Promise<Harness> {
   // registerEstimateRoutes() so any future role gating added there is
   // observed by this test. Routes for endpoints already stubbed above
   // are also registered here but are shadowed by the earlier stubs.
-  registerEstimateRoutes(app, makeStorageStub(), stubAuth);
+  registerEstimateRoutes(app, makeStorageStub(), stubAuth, { loadMaterialSchedule: async () => null });
+  const emailStorage = {
+    ...makeStorageStub(),
+    async getEstimate(id: number) {
+      return {
+        id, estimateNumber: String(id), companyId: 1, status: "pending",
+        lifecycleStatus: id === 1 ? "pending_review" : "sent",
+        internalStatus: id === 1 ? "pending_approval" : "sent_to_customer",
+        updatedAt: new Date("2026-01-01"), estimateDate: new Date("2026-01-01"), customerName: "C", customerEmail: "c@example.com",
+        projectName: "Test estimate", createdBy: "Office", totalAmount: "0.00", laborRate: "75.00", items: [],
+      } as unknown as EstimateWithItems;
+    },
+    getCompany: async () => undefined,
+    getCompanyProfile: async () => undefined,
+    markEstimateSentToCustomer: async (id: number) => emailStorage.getEstimate(id),
+  };
+  registerOutgoingEmailRoutes(app, {
+    requireAuthentication: stubAuth,
+    handlers: (["estimate", "estimate_resend"] as const).map((kind) => createEstimateEmailHandler(kind, {
+      storage: emailStorage, recordAuditEvent: async () => {},
+    })),
+  });
 
   // ── Routes registered AFTER registerEstimateRoutes() ───────────────────
   //
@@ -293,7 +315,7 @@ function estimateBody() {
       laborMode: "flat",
       totalLaborHours: 0,
     },
-    items: [{ partId: 1, partName: "A", partPrice: 100, quantity: 1 }],
+    items: [{ partId: null, partName: "A", partPrice: 100, quantity: 1 }],
   };
 }
 
@@ -318,7 +340,7 @@ describe("Estimate role × screen matrix (Task #632)", () => {
   });
 
   // ─── Approval-gated endpoints ───────────────────────────────────────────
-  // approve / reject / internal-approve / send-approval-email / email /
+  // approve / reject / internal-approve / email preview /
   // pending-approval list — ESTIMATE_APPROVAL_ROLES (super_admin,
   // company_admin, billing_manager, irrigation_manager) only.
   it("Approval-gated endpoints return 200 for {super_admin, company_admin, billing_manager, irrigation_manager} and 403 for {manager, field_tech}", async () => {
@@ -329,8 +351,7 @@ describe("Estimate role × screen matrix (Task #632)", () => {
       { method: "PATCH", path: "/api/estimates/1/approve" },
       { method: "PATCH", path: "/api/estimates/1/reject" },
       { method: "PATCH", path: "/api/estimates/1/internal-approve" },
-      { method: "POST", path: "/api/estimates/1/send-approval-email" },
-      { method: "POST", path: "/api/estimates/1/email" },
+      { method: "POST", path: "/api/outgoing-email/estimate/1/preview" },
     ];
     for (const { method, path } of cases) {
       for (const role of ROLES) {
@@ -344,6 +365,27 @@ describe("Estimate role × screen matrix (Task #632)", () => {
         401,
         `${method} ${path} unauthenticated`,
       );
+    }
+  });
+
+  it("keeps first-send and resend role gates on reviewed delivery", async (t) => {
+    t.mock.method(EmailService, "sendEstimateApprovalEmail", async () => {});
+    const resendRoles = new Set(["super_admin", "company_admin", "irrigation_manager"]);
+    for (const [path, allowed] of [
+      ["/api/outgoing-email/estimate/1", ESTIMATE_APPROVAL_ROLES],
+      ["/api/outgoing-email/estimate_resend/2", resendRoles],
+    ] as const) {
+      for (const role of ROLES) {
+        const body = { options: { attachPdf: false } };
+        const preview = await fetch(`${baseUrl}${path}/preview`, {
+          method: "POST", headers: { "content-type": "application/json", "x-user-role": role },
+          body: JSON.stringify(body),
+        });
+        const expected = allowed.has(role) ? 200 : 403;
+        assert.equal(preview.status, expected, `${path} preview as ${role}`);
+        const { confirmationToken } = await preview.json() as { confirmationToken?: string };
+        assert.equal(await callAs(baseUrl, "POST", `${path}/send`, role, { ...body, confirmationToken }), expected, `${path} send as ${role}`);
+      }
     }
   });
 
@@ -807,8 +849,10 @@ describe("Estimate role × screen matrix (Task #632)", () => {
       { method: "POST", path: "/api/estimates/1/reject" },
       { method: "PATCH", path: "/api/estimates/1/reject" },
       { method: "PATCH", path: "/api/estimates/1/internal-approve" },
-      { method: "POST", path: "/api/estimates/1/send-approval-email" },
-      { method: "POST", path: "/api/estimates/1/email" },
+      { method: "POST", path: "/api/outgoing-email/estimate/1/preview" },
+      { method: "POST", path: "/api/outgoing-email/estimate/1/send" },
+      { method: "POST", path: "/api/outgoing-email/estimate_resend/2/preview" },
+      { method: "POST", path: "/api/outgoing-email/estimate_resend/2/send" },
       { method: "GET", path: "/api/estimates/1/pdf" },
       { method: "POST", path: "/api/estimates/1/pdf" },
     ];

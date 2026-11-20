@@ -23,14 +23,8 @@ import { buildMapsUrl } from "@/lib/maps-url";
 import type { Estimate } from "@workspace/db/schema";
 import { isInspectionOriginEstimate } from "@/lib/estimate-zone-grouping";
 import { EstimateZoneGroupedView } from "@/components/estimates/estimate-zone-grouped-view";
-import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
+import { ReviewAndSendDialog } from "@/components/email/review-and-send-dialog";
 import { ConvertToWorkOrderModal } from "@/components/estimates/convert-to-work-order-modal";
-import { useEstimateResend } from "@/hooks/use-estimate-resend";
-import {
-  SendEstimateDialog,
-  type SendEstimatePayload,
-} from "@/components/estimates/send-estimate-dialog";
-import { sendEstimateEmail } from "@/lib/email";
 import {
   canDeleteEstimateAs,
   customerResponseLabelOf,
@@ -74,8 +68,6 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const { toast } = useToast();
   const [isConverting, setIsConverting] = useState(false);
   const [showConvertDialog, setShowConvertDialog] = useState(false);
-  const [showResendDialog, setShowResendDialog] = useState(false);
-  const { resendEstimate, isResending } = useEstimateResend();
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isViewingPdf, setIsViewingPdf] = useState(false);
   const [showSendDialog, setShowSendDialog] = useState(false);
@@ -96,6 +88,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   // is loaded so users always see the actions immediately on open.
   useEffect(() => {
     setActionsOpen(true);
+    setShowSendDialog(false);
   }, [estimateId]);
 
   // Compute once per mount — the user's role rarely changes during a
@@ -113,7 +106,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
   const canSendEstimate = currentRole != null && SEND_ROLES.has(currentRole);
   // Task #365 — matches the server's resend role gate (irrigation_manager
   // can resend; billing_manager cannot). Mirrors the backend check in
-  // POST /api/estimates/:id/resend.
+  // POST /api/outgoing-email/estimate_resend/:id/send.
   const RESEND_ROLES = new Set<string>([
     "super_admin",
     "company_admin",
@@ -243,17 +236,6 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
     }
   };
 
-  const handleConfirmResend = async (payload: Parameters<typeof resendEstimate>[1]) => {
-    if (!estimateId) return;
-    try {
-      await resendEstimate(estimateId, payload);
-      setShowResendDialog(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
-    } catch {
-      // Error toast surfaced by hook; keep dialog open for retry.
-    }
-  };
-
   const approveEstimateMutation = useMutation({
     mutationFn: async () => {
       return apiRequest(`/api/estimates/${estimateId}/approve`, 'PATCH');
@@ -270,29 +252,6 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
       toast({
         title: "Error", 
         description: parseApiError(error, "Failed to approve estimate"),
-        variant: "destructive",
-      });
-    },
-  });
-
-  const sendApprovalEmailMutation = useMutation({
-    mutationFn: async (payload: SendEstimatePayload) => {
-      if (!estimateId) throw new Error("Missing estimate id");
-      return sendEstimateEmail(estimateId, payload);
-    },
-    onSuccess: (_data, vars) => {
-      toast({
-        title: "Estimate sent",
-        description: `Sent to ${vars.to}${vars.cc.length ? `, cc ${vars.cc.join(", ")}` : ""}`,
-      });
-      setShowSendDialog(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimateId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
-    },
-    onError: (error) => {
-      toast({
-        title: "Couldn't send estimate",
-        description: parseApiError(error, "Please try again."),
         variant: "destructive",
       });
     },
@@ -1126,7 +1085,7 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                   {(isExpired(estimate) || (isSent(estimate) && isAwaitingCustomerReply(estimate))) &&
                     !isEstimateDeleted && canResendEstimate && (
                     <Button
-                      onClick={() => setShowResendDialog(true)}
+                      onClick={() => setShowSendDialog(true)}
                       variant="outline"
                       className="border-orange-200 text-orange-700 hover:bg-orange-50 w-full sm:w-auto"
                       data-testid="detail-modal-resend"
@@ -1199,12 +1158,11 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
                       {canSendEstimate && isPendingReview(estimate) && (
                         <Button
                           onClick={() => setShowSendDialog(true)}
-                          disabled={sendApprovalEmailMutation?.isPending}
                           className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
                           data-testid="detail-modal-send-email"
                         >
                           <Mail className="w-4 h-4 mr-2" />
-                          {sendApprovalEmailMutation?.isPending ? 'Sending...' : 'Email Customer'}
+                          Email Customer
                         </Button>
                       )}
                       {canSendEstimate && isPendingReview(estimate) && (
@@ -1307,14 +1265,6 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
           </div>
         )}
       </DialogContent>
-      <ResendConfirmDialog
-        estimate={estimate ?? null}
-        open={showResendDialog}
-        onOpenChange={setShowResendDialog}
-        onConfirm={handleConfirmResend}
-        isResending={isResending}
-        isExpiredResend={isExpired(estimate)}
-      />
       <ConvertToWorkOrderModal
         isOpen={showConvertDialog}
         onClose={() => setShowConvertDialog(false)}
@@ -1323,15 +1273,19 @@ export function EstimateDetailModal({ open, onOpenChange, estimateId, onEdit }: 
           void handleConvertToWorkOrder(assignedTechnicianId);
         }}
       />
-      <SendEstimateDialog
-        open={showSendDialog}
-        onOpenChange={setShowSendDialog}
-        estimateNumber={estimate?.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : null}
-        customerName={estimate?.customerName ?? null}
-        customerEmail={estimate?.customerEmail ?? null}
-        isSending={sendApprovalEmailMutation.isPending}
-        onSend={(payload) => sendApprovalEmailMutation.mutate(payload)}
-      />
+      {estimate && (
+        <ReviewAndSendDialog
+          open={open && showSendDialog}
+          onOpenChange={setShowSendDialog}
+          kind={isExpired(estimate) || isSent(estimate) ? "estimate_resend" : "estimate"}
+          entityId={estimate.id}
+          title={`${isExpired(estimate) || isSent(estimate) ? "Resend" : "Send"} estimate #${formatEstimateNumber(estimate.estimateNumber).replace(/^EST-/, "")}`}
+          onSent={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/estimates", estimate.id] });
+            queryClient.invalidateQueries({ queryKey: ["/api/estimates"] });
+          }}
+        />
+      )}
       {/* Task #680 — Mark as Sent confirm + result dialog. Pre-confirm
           shows the warning copy; on success the same dialog flips to
           show the freshly minted customer approval URL with a Copy

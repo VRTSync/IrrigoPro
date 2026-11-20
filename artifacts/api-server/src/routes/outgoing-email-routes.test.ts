@@ -3,12 +3,33 @@ import assert from "node:assert/strict";
 import express from "express";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Company, Customer, EstimateWithItems } from "@workspace/db";
+import { buildEstimateHtml, fmtDate } from "../estimate-pdf-html";
 
 // Storage initialization must not run in this in-memory HTTP suite.
 mock.module("../storage", { namedExports: { storage: {} } });
+const estimateMessages: Array<{ html: string; text: string; to: string; subject: string; attachments?: Array<{ filename: string; content: string }> }> = [];
+const estimateRenders: Array<{ estimate: EstimateWithItems; sentAt: Date; html: string }> = [];
+let failEstimatePdf = false;
+mock.module("@sendgrid/mail", { defaultExport: {
+  setApiKey() {},
+  async send(message: (typeof estimateMessages)[number]) { estimateMessages.push(message); return [{ statusCode: 202 }]; },
+} });
+mock.module("../estimate-pdf", { namedExports: {
+  async renderEstimatePdf(estimate: EstimateWithItems, opts: { sentAt: Date; company?: Company }) {
+    estimateRenders.push({ estimate, sentAt: opts.sentAt, html: buildEstimateHtml(estimate, opts) });
+    if (failEstimatePdf) throw new Error("test PDF unavailable");
+    return Buffer.from("%PDF estimate test");
+  },
+} });
+await import("../db");
+const emailEnv = mock.property(process, "env", { SENDGRID_API_KEY: "test-only-key", APP_BASE_URL: "https://estimates.example.invalid" });
+await import("../email-service");
+emailEnv.mock.restore();
 const { registerInvoicePdfRoutes } = await import("./invoice-pdf-routes");
 const { registerOutgoingEmailRoutes } = await import("./outgoing-email-routes");
 const { createInvoiceEmailHandler } = await import("../outgoing-email/invoice-handler");
+const { createEstimateEmailHandler } = await import("../outgoing-email/estimate-handlers");
 const { buildInvoiceEmailSubject, buildInvoicePdfFilename, InvoicePdfService, readInvoiceSentCopy } = await import("../invoice-pdf-service");
 const { ObjectStorageService } = await import("../objectStorage");
 
@@ -19,6 +40,67 @@ const sender = {
   replyTo: "office@example.invalid",
   usingCompanyAddress: true,
 };
+
+function estimateHarness(opts: { companyId?: number | null; role?: string; missingBranch?: boolean; now?: () => Date } = {}) {
+  const app = express();
+  app.use(express.json());
+  const company = {
+    id: 1, name: "High Plains", email: "office@example.invalid",
+    emailFromName: sender.from.name, emailFromAddress: sender.from.email, emailReplyTo: sender.replyTo,
+    emailSendingDomain: "example.invalid", emailDomainVerifiedAt: new Date(),
+  } as Company;
+  const customer = {
+    id: 42, companyId: 1, irrigoName: "The Ranch", name: "QuickBooks Ranch",
+    email: "current@example.invalid", branches: opts.missingBranch ? ["East", "West"] : null,
+  } as Customer;
+  const baseEstimate = {
+    id: 50123, estimateNumber: "EST-50123", companyId: 1, customerId: 42,
+    customerName: "Ranch snapshot", customerEmail: "snapshot@example.invalid", projectName: "Sprinkler repairs",
+    totalAmount: "150.00", partsSubtotal: "150.00", laborSubtotal: "0.00", totalLaborHours: "0.00", laborRate: "75.00",
+    updatedAt: new Date(), estimateDate: new Date("2026-10-01T12:00:00Z"),
+    createdBy: "Office", approvalSentAt: null, status: "pending",
+    internalStatus: "approved_internal", lifecycleStatus: "pending_review", items: [],
+  } as unknown as EstimateWithItems;
+  const rows = new Map<number, EstimateWithItems>([
+    [50123, baseEstimate],
+    [50124, { ...baseEstimate, id: 50124, lifecycleStatus: "sent", internalStatus: "sent_to_customer", approvalToken: "existing-secret-token" }],
+    [50125, { ...baseEstimate, id: 50125, lifecycleStatus: "draft", internalStatus: "draft" }],
+    [50126, { ...baseEstimate, id: 50126, lifecycleStatus: "expired", internalStatus: "sent_to_customer", approvalToken: "expired-secret-token" }],
+  ]);
+  const audit: string[] = [];
+  const store: NonNullable<Parameters<typeof createEstimateEmailHandler>[1]>["storage"] = {
+    async getEstimate(id) { return rows.get(id); },
+    async getCustomer() { return customer; },
+    async getCompany() { return company; },
+    async getCompanyProfile() { return company; },
+    async markEstimateSentToCustomer(id, stamps) {
+      const row = rows.get(id)!;
+      const saved = {
+        ...row, internalStatus: "sent_to_customer", status: "pending", lifecycle: "sent", lifecycleStatus: "sent" as const,
+        estimateDate: stamps.newEstimateDate ?? row.estimateDate,
+        approvalToken: stamps.approvalToken, tokenExpiresAt: stamps.tokenExpiresAt,
+        approvalSentAt: stamps.approvalSentAt, sentToEmail: stamps.sentToEmail ?? row.sentToEmail,
+      };
+      rows.set(id, saved);
+      return saved;
+    },
+  };
+  registerOutgoingEmailRoutes(app, {
+    requireAuthentication(req, _res, next) {
+      req.authenticatedUserId = 10;
+      req.authenticatedUserCompanyId = opts.companyId === undefined ? 1 : opts.companyId;
+      req.authenticatedUserRole = opts.role ?? "company_admin";
+      next();
+    },
+    handlers: (["estimate", "estimate_resend"] as const).map(kind => createEstimateEmailHandler(kind, {
+      storage: store,
+      now: opts.now,
+      recordAuditEvent: async (_req, event) => { audit.push(event.action); },
+      recordLifecycleAudit: async (_req, event) => { audit.push(event.action); },
+    })),
+  });
+  return { app, rows, customer, company, audit };
+}
 
 function harness(opts: {
   companyId?: number | null; role?: string; email?: string | null; oldEmail?: string | null;
@@ -109,7 +191,7 @@ function harness(opts: {
   return { app, invoice, company, uploaded, deleted, sent, copies, stamps, events, generated: () => generated };
 }
 
-async function withServer(h: ReturnType<typeof harness>, run: (request: (path?: string, method?: string, fields?: Record<string, unknown>) => Promise<{ status: number; body: any }>) => Promise<void>) {
+async function withServer(h: Pick<ReturnType<typeof harness>, "app">, run: (request: (path?: string, method?: string, fields?: Record<string, unknown>) => Promise<{ status: number; body: any }>) => Promise<void>) {
   const server = createServer(h.app);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
@@ -126,12 +208,215 @@ async function withServer(h: ReturnType<typeof harness>, run: (request: (path?: 
         fields = { confirmationToken: draft.confirmationToken };
       }
       const res = method === "POST" ? await post(url, fields ?? {}) : await fetch(url, { method });
-      return { status: res.status, body: await res.json().catch(() => null) };
+      return { status: res.status, body: res.headers.get("content-type")?.includes("application/pdf")
+        ? await res.text()
+        : await res.json().catch(() => null) };
     });
   } finally {
     await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
   }
 }
+
+it("reviews current customer email and placeholder links, then sends the real first-send token and reviewed PDF", async () => {
+  const h = estimateHarness();
+  await withServer(h, async request => {
+    const path = "/outgoing-email/estimate/50123";
+    const priorRenderCount = estimateRenders.length;
+    const priorMessageCount = estimateMessages.length;
+    const missing = await request(`${path}/send`);
+    assert.equal(missing.status, 400);
+    const defaultDraft = await request(`${path}/preview`);
+    assert.equal(defaultDraft.status, 200);
+    assert.equal(defaultDraft.body.to, "current@example.invalid");
+    assert.equal(defaultDraft.body.subject, "Irrigation Estimate #50123 – The Ranch");
+    assert.deepEqual(defaultDraft.body.from, sender.from);
+    assert.equal(defaultDraft.body.replyTo, sender.replyTo);
+    assert.deepEqual(defaultDraft.body.attachments, [{ filename: "Estimate-EST-50123.pdf", viewUrl: `/api${path}/attachment` }]);
+    assert.deepEqual(defaultDraft.body.optionDefs, [{ key: "attachPdf", label: "Attach the estimate as a PDF", default: true }]);
+
+    const fields = { to: "reviewed@example.invalid", subject: "Reviewed estimate", note: "Check <yard>" };
+    const preview = await request(`${path}/preview`, "POST", fields);
+    assert.equal(preview.status, 200);
+    assert.match(preview.body.html, /about:blank#link-created-when-sent/);
+    assert.match(preview.body.html, /\(link created when sent\)/);
+    assert.match(preview.body.html, /Approve Estimate/);
+    assert.match(preview.body.html, /Decline Estimate/);
+    assert.match(preview.body.html, /Check &lt;yard&gt;/);
+    assert.equal(estimateMessages.length, priorMessageCount);
+    assert.equal(estimateRenders.length, priorRenderCount);
+    const sent = await request(`${path}/send`, "POST", { ...fields, confirmationToken: preview.body.confirmationToken });
+    assert.equal(sent.status, 200);
+    const row = h.rows.get(50123)!;
+    assert.equal(row.lifecycleStatus, "sent");
+    assert.equal(row.sentToEmail, fields.to);
+    assert.equal(row.approvalSentAt?.toISOString(), sent.body.sentAt);
+    assert.match(row.approvalToken!, /^[a-f0-9]{64}$/);
+    assert.ok(!preview.body.html.includes(row.approvalToken!));
+    const message = estimateMessages.at(-1)!;
+    assert.match(message.html, new RegExp(`/estimate-approval/${row.approvalToken}\\?intent=reject`));
+    assert.match(message.text, new RegExp(`/estimate-approval/${row.approvalToken}`));
+    assert.doesNotMatch(message.html, /link.created.when.sent/);
+    assert.equal(message.subject, fields.subject);
+    assert.equal(message.to, fields.to);
+    assert.equal(message.attachments?.[0]?.filename, preview.body.attachments[0].filename);
+    assert.equal(Buffer.from(message.attachments![0].content, "base64").toString(), "%PDF estimate test");
+    assert.equal(estimateRenders.at(-1)?.sentAt.toISOString(), sent.body.sentAt);
+    assert.deepEqual(h.audit, ["estimate.email.sent"]);
+  });
+});
+
+it("requires a new review when the PDF checkbox changes, and sends no PDF when unticked", async () => {
+  const h = estimateHarness();
+  await withServer(h, async request => {
+    const path = "/outgoing-email/estimate/50123";
+    const priorRenderCount = estimateRenders.length;
+    const { body: checked } = await request(`${path}/preview`);
+    const fields = { options: { attachPdf: false } };
+    const mismatched = await request(`${path}/send`, "POST", { ...fields, confirmationToken: checked.confirmationToken });
+    assert.equal(mismatched.status, 409);
+    const { body: unchecked } = await request(`${path}/preview`, "POST", fields);
+    assert.deepEqual(unchecked.attachments, []);
+    assert.equal((await request(`${path}/attachment`, "POST", { confirmationToken: unchecked.confirmationToken })).status, 409);
+    assert.notEqual(checked.confirmationToken.split(".")[1], unchecked.confirmationToken.split(".")[1]);
+    assert.equal((await request(`${path}/send`, "POST", { ...fields, confirmationToken: unchecked.confirmationToken })).status, 200);
+    assert.equal(estimateRenders.length, priorRenderCount);
+    assert.equal(estimateMessages.at(-1)?.attachments, undefined);
+  });
+});
+
+it("requires re-review for PDF-only estimate and company edits without an updatedAt change", async () => {
+  const h = estimateHarness();
+  await withServer(h, async request => {
+    const path = "/outgoing-email/estimate/50123";
+    const count = estimateMessages.length;
+    const changes = [
+      () => { h.rows.get(50123)!.accessInstructions = "Use the rear gate."; },
+      () => { h.rows.get(50123)!.photos = ["/objects/new-test-photo"]; },
+      () => { h.company.address = "New office address"; },
+    ];
+    for (const change of changes) {
+      const { body: review } = await request(`${path}/preview`);
+      change();
+      const { body: fresh } = await request(`${path}/preview`);
+      assert.equal(fresh.html, review.html);
+      const payload = { confirmationToken: review.confirmationToken };
+      assert.equal((await request(`${path}/attachment`, "POST", payload)).status, 409);
+      assert.equal((await request(`${path}/send`, "POST", payload)).status, 409);
+      assert.equal(estimateMessages.length, count);
+    }
+  });
+});
+
+it("views and attaches the same printed dates in all three modes without freezing the recorded send time", async () => {
+  let now = new Date(2026, 10, 20, 11);
+  const h = estimateHarness({ now: () => now });
+  await withServer(h, async request => {
+    for (const [kind, id, expired] of [
+      ["estimate", 50123, false], ["estimate_resend", 50124, false], ["estimate_resend", 50126, true],
+    ] as const) {
+      now = new Date(2026, 10, 20, 11);
+      const estimateDate = expired ? now : h.rows.get(id)!.estimateDate;
+      const path = `/outgoing-email/${kind}/${id}`;
+      const fields = { subject: "Test custom subject" };
+      const { body: review } = await request(`${path}/preview`, "POST", fields);
+      assert.equal((await request(`${path}/attachment`)).status, 400);
+      const viewed = await request(`${path}/attachment`, "POST", { confirmationToken: review.confirmationToken });
+      assert.equal(viewed.status, 200);
+      assert.equal(viewed.body, "%PDF estimate test");
+      const html = estimateRenders.at(-1)!.html;
+      assert.ok(html.includes(`<div class="k">Estimate Date</div><div class="v">${fmtDate(estimateDate)}`));
+      assert.ok(html.includes(`<div class="k">Valid Until</div><div class="v">${fmtDate(new Date(2026, 11, 20))}`));
+
+      now = new Date(2026, 10, 20, 11, 5);
+      const sent = await request(`${path}/send`, "POST", { ...fields, confirmationToken: review.confirmationToken });
+      assert.equal(sent.status, 200);
+      assert.equal(sent.body.sentAt, now.toISOString());
+      assert.equal(estimateRenders.at(-1)!.html, html);
+    }
+  });
+});
+
+it("requires a fresh estimate PDF review when the printed validity date changes overnight", async () => {
+  let now = new Date(2026, 10, 20, 23, 58);
+  await withServer(estimateHarness({ now: () => now }), async request => {
+    const path = "/outgoing-email/estimate/50123";
+    const { body: review } = await request(`${path}/preview`);
+    now = new Date(2026, 10, 21, 0, 1);
+    const payload = { confirmationToken: review.confirmationToken };
+    assert.equal((await request(`${path}/attachment`, "POST", payload)).status, 409);
+    assert.equal((await request(`${path}/send`, "POST", payload)).status, 409);
+  });
+});
+
+it("does not deliver an estimate email if its reviewed attachment cannot be rendered", async () => {
+  const h = estimateHarness();
+  await withServer(h, async request => {
+    const path = "/outgoing-email/estimate/50123";
+    const { body: preview } = await request(`${path}/preview`);
+    const priorMessageCount = estimateMessages.length;
+    failEstimatePdf = true;
+    try {
+      const sent = await request(`${path}/send`, "POST", { confirmationToken: preview.confirmationToken });
+      assert.equal(sent.status, 500);
+      assert.match(sent.body.message, /Nothing was sent/);
+      assert.equal(estimateMessages.length, priorMessageCount);
+      assert.equal(h.rows.get(50123)?.lifecycleStatus, "pending_review");
+    } finally {
+      failEstimatePdf = false;
+    }
+  });
+});
+
+it("allows only the correct estimate lifecycle per kind and keeps the sent link and date on re-delivery", async () => {
+  const h = estimateHarness();
+  await withServer(h, async request => {
+    for (const action of ["preview", "send"]) {
+      assert.equal((await request(`/outgoing-email/estimate_resend/50125/${action}`)).status, 404);
+      assert.equal((await request(`/outgoing-email/estimate/50124/${action}`)).status, 404);
+    }
+    for (const [id, expired] of [[50124, false], [50126, true]] as const) {
+      const path = `/outgoing-email/estimate_resend/${id}`;
+      const original = h.rows.get(id)!;
+      const fields = { options: { attachPdf: true } };
+      const { status, body } = await request(`${path}/preview`, "POST", fields);
+      assert.equal(status, 200);
+      assert.doesNotMatch(body.html, /existing-secret-token|expired-secret-token/);
+      assert.deepEqual(body.warnings, [expired
+        ? "The estimate date will be reset and the 30-day window restarted from today's send."
+        : "The estimate date and approval link remain unchanged, and the 30-day window restarts from today's send."]);
+      const sent = await request(`${path}/send`, "POST", { ...fields, confirmationToken: body.confirmationToken });
+      assert.equal(sent.status, 200);
+      const saved = h.rows.get(id)!;
+      assert.equal(saved.lifecycleStatus, "sent");
+      assert.equal(saved.approvalSentAt?.toISOString(), sent.body.sentAt);
+      assert.equal(saved.estimateDate.toISOString(), expired ? sent.body.sentAt : original.estimateDate.toISOString());
+      assert.equal(estimateRenders.at(-1)?.estimate.estimateDate.toISOString(), saved.estimateDate.toISOString());
+      assert.equal(saved.approvalToken === original.approvalToken, !expired);
+      assert.match(estimateMessages.at(-1)!.html, new RegExp(`/estimate-approval/${saved.approvalToken}`));
+    }
+    assert.deepEqual(h.audit, ["estimate.email.sent", "estimate.resent", "estimate.email.sent", "estimate.resent"]);
+  });
+});
+
+it("keeps both estimate kinds tenant-scoped on preview and send, with super-admin access", async () => {
+  for (const opts of [{ companyId: 2, missingBranch: true }, { companyId: null, missingBranch: true }]) {
+    await withServer(estimateHarness(opts), async request => {
+      for (const path of ["/outgoing-email/estimate/50123", "/outgoing-email/estimate_resend/50124"]) {
+        assert.equal((await request(`${path}/preview`)).status, 404);
+        assert.equal((await request(`${path}/send`, "POST", { confirmationToken: "foreign-review" })).status, 404);
+        assert.equal((await request(`${path}/attachment`, "POST", { confirmationToken: "foreign-review" })).status, 404);
+      }
+    });
+  }
+  await withServer(estimateHarness({ companyId: null, role: "super_admin" }), async request => {
+    for (const path of ["/outgoing-email/estimate/50123", "/outgoing-email/estimate_resend/50124"]) {
+      const fields = { options: { attachPdf: false } };
+      const { status, body } = await request(`${path}/preview`, "POST", fields);
+      assert.equal(status, 200);
+      assert.equal((await request(`${path}/send`, "POST", { ...fields, confirmationToken: body.confirmationToken })).status, 200);
+    }
+  });
+});
 
 it("previews current email, company sender, period, amount, due date and filename without rendering the PDF", async () => {
   const h = harness();

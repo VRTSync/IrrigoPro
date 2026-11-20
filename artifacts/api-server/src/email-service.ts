@@ -3,6 +3,7 @@ import { storage } from './storage';
 import { formatEstimateNumber } from '@workspace/shared';
 import { resolveCompanyLogoUrl } from './logo-url';
 import { DEFAULT_FROM_EMAIL, SENDGRID_FROM_NAME, type CompanySender } from './lib/company-sender';
+import type { Company } from '@workspace/db';
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 
@@ -23,6 +24,7 @@ export interface EstimateEmailData {
   estimateId: number;
   estimateNumber: string;
   customerName: string;
+  customerLabel: string;
   customerEmail: string;
   projectName: string;
   projectAddress?: string;
@@ -46,6 +48,8 @@ export interface EstimateEmailData {
   estimateDate: string;
   createdBy: string;
   companyId: number;
+  companyProfile?: Company | null;
+  subject?: string;
   workDescription?: string | null;
   items?: Array<{
     description: string;
@@ -78,6 +82,20 @@ export interface EstimateEmailData {
     type: string;
     disposition: 'attachment';
   }>;
+}
+
+type EstimateApprovalLinks = { approveUrl: string; rejectUrl: string; viewUrl: string };
+export const ESTIMATE_PREVIEW_LINK = 'about:blank#link-created-when-sent';
+
+export function buildEstimateApprovalSubject(data: Pick<EstimateEmailData, 'estimateNumber' | 'customerLabel'>): string {
+  return `Irrigation Estimate #${String(data.estimateNumber).replace(/^EST-?/i, '')} – ${data.customerLabel}`;
+}
+
+export function buildEstimateApprovalEmail(
+  data: EstimateEmailData,
+  links: EstimateApprovalLinks,
+): Promise<{ subject: string; html: string; text: string }> {
+  return EmailService.buildEstimateApprovalEmail(data, links);
 }
 
 export function escapeHtml(value: string): string {
@@ -159,8 +177,8 @@ export class EmailService {
 
   static async sendEstimateApprovalEmail(data: EstimateEmailData): Promise<void> {
     // Task #703 — make a missing API key a hard failure on the
-    // estimate path so the route helper's try/catch rolls back the
-    // DB write and the frontend surfaces a real error instead of a
+    // estimate path so it never records a successful delivery
+    // and the frontend surfaces a real error instead of a
     // misleading "Sent." toast.
     if (!isEmailConfigured()) {
       throw new Error(
@@ -175,20 +193,7 @@ export class EmailService {
     const rejectUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}?intent=reject`;
     const viewUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
 
-    // Get company information including logo
-    const company = await storage.getCompanyProfile(data.companyId);
-    const resolvedLogoUrl = company?.logo ? this.getCompanyLogoUrl(company.logo) : null;
-    console.log(`[estimate-email] send est=${data.estimateNumber} logo=${resolvedLogoUrl ?? '(none)'} baseUrl=${this.baseUrl}`);
-    const companyInfo = {
-      name: company?.name || 'IrrigoPro',
-      logo: resolvedLogoUrl,
-      email: company?.email || DEFAULT_FROM_EMAIL,
-      phone: company?.phone || '',
-      website: company?.website || ''
-    };
-
-    const htmlContent = this.generateEstimateEmailHTML(data, approveUrl, rejectUrl, viewUrl, companyInfo);
-    const textContent = this.generateEstimateEmailText(data, approveUrl, rejectUrl, companyInfo);
+    const { subject, html, text } = await buildEstimateApprovalEmail(data, { approveUrl, rejectUrl, viewUrl });
 
     const toAddr = (data.to && data.to.trim()) || data.customerEmail;
     const ccList = (data.cc ?? []).filter((s) => s && s.trim().length > 0);
@@ -201,9 +206,9 @@ export class EmailService {
         to: toAddr,
         ...(ccList.length ? { cc: ccList } : {}),
         ...(bccList.length ? { bcc: bccList } : {}),
-        subject: `Irrigation Estimate #${String(data.estimateNumber).replace(/^EST-?/i, '')}`,
-        html: htmlContent,
-        text: textContent,
+        subject: data.subject ?? subject,
+        html,
+        text,
         categories: ['estimate-approval'],
         customArgs: {
           estimateId: data.estimateId.toString(),
@@ -244,6 +249,24 @@ export class EmailService {
           : `Failed to send estimate email: ${baseMsg}`,
       );
     }
+  }
+
+  static async buildEstimateApprovalEmail(data: EstimateEmailData, { approveUrl, rejectUrl, viewUrl }: EstimateApprovalLinks) {
+    // Get company information including logo. Reviewed mail reuses the
+    // company profile already loaded for the draft.
+    const company = data.companyProfile === undefined ? await storage.getCompanyProfile(data.companyId) : data.companyProfile;
+    const companyInfo = {
+      name: company?.name || 'IrrigoPro',
+      logo: company?.logo ? this.getCompanyLogoUrl(company.logo) : null,
+      email: company?.email || DEFAULT_FROM_EMAIL,
+      phone: company?.phone || '',
+      website: company?.website || '',
+    };
+    return {
+      subject: buildEstimateApprovalSubject(data),
+      html: this.generateEstimateEmailHTML(data, approveUrl, rejectUrl, viewUrl, companyInfo, approveUrl === ESTIMATE_PREVIEW_LINK),
+      text: this.generateEstimateEmailText(data, approveUrl, rejectUrl, companyInfo),
+    };
   }
 
   private static escapeHtml = escapeHtml;
@@ -471,7 +494,8 @@ export class EmailService {
       email: string;
       phone: string;
       website: string;
-    }
+    },
+    isPreview = false,
   ): string {
     const partsSubtotal = data.partsSubtotal ?? 0;
     const laborSubtotal = data.laborSubtotal ?? 0;
@@ -586,6 +610,7 @@ export class EmailService {
 
     <div style="text-align: center; margin: 30px 0;">
       <p style="font-size: 18px; color: #374151; margin-bottom: 20px;">Ready to proceed?</p>
+      ${isPreview ? '<p style="font-size: 14px; color: #6b7280;">(link created when sent)</p>' : ''}
       
       <a href="${approveUrl}" style="display: inline-block; background: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 10px;">
         ✓ Approve Estimate

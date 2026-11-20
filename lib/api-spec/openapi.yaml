@@ -13,7 +13,7 @@ tags:
 paths:
   /outgoing-email/{kind}/{id}/preview:
     parameters:
-      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice] } }
+      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice, estimate, estimate_resend] } }
       - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
     post:
       operationId: previewOutgoingEmail
@@ -30,9 +30,29 @@ paths:
               schema: { $ref: "#/components/schemas/OutgoingEmailPreview" }
         "400": { description: Invalid draft }
         "404": { description: Unknown email kind or document not available }
+  /outgoing-email/{kind}/{id}/attachment:
+    parameters:
+      - { name: kind, in: path, required: true, schema: { type: string, enum: [estimate, estimate_resend] } }
+      - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      operationId: viewOutgoingEmailAttachment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OutgoingEmailAttachmentInput" }
+      responses:
+        "200":
+          description: Estimate PDF for the reviewed source and printed dates, without consuming the review
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400": { description: Review required }
+        "404": { description: Unknown email kind or document not available }
+        "409": { description: "Review changed, expired, or was already used" }
   /outgoing-email/{kind}/{id}/send:
     parameters:
-      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice] } }
+      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice, estimate, estimate_resend] } }
       - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
     post:
       operationId: sendOutgoingEmail
@@ -476,6 +496,11 @@ components:
       description: Required explicit company context for an unscoped super administrator
       schema: { type: integer, minimum: 1 }
   schemas:
+    OutgoingEmailAttachmentInput:
+      type: object
+      required: [confirmationToken]
+      properties:
+        confirmationToken: { type: string }
     OutgoingEmailDraftInput:
       type: object
       properties:
@@ -496,7 +521,7 @@ components:
       type: object
       required: [kind, id, from, replyTo, usingCompanyAddress, to, cc, bcc, subject, note, options, optionDefs, html, text, attachments, warnings, confirmationToken, expiresAt]
       properties:
-        kind: { type: string, enum: [invoice] }
+        kind: { type: string, enum: [invoice, estimate, estimate_resend] }
         id: { type: integer }
         from:
           type: object

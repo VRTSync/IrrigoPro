@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useArrayQuery, apiRequest, parseApiError } from "@/lib/queryClient";
-import { sendEstimateEmail } from "@/lib/email";
+import { ReviewAndSendDialog } from "@/components/email/review-and-send-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   LayoutDashboard,
@@ -45,7 +45,7 @@ import {
 import { ConvertToWorkOrderModal } from "@/components/estimates/convert-to-work-order-modal";
 import {
   LIFECYCLE_STATUSES, canDeleteEstimateAs, formatEstimateNumber,
-  isPendingReview, type LifecycleStatus,
+  isPendingReview, isReadyToSend, type LifecycleStatus,
 } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 import type { EstimateSummary } from "@workspace/db";
@@ -222,23 +222,23 @@ export default function EstimateCommandCenter() {
     setWizardOpen(true);
   }, []);
 
-  // --- Approve & Send mutation — chains internal approve + email send
-  // so the row action matches the "Approve & Send" semantics from the
-  // existing estimate detail flow (estimate is marked ready to send,
-  // then the customer email is delivered).
+  const [reviewEstimate, setReviewEstimate] = useState<{ id: number; number: string } | null>(null);
+  const invalidateEstimateViews = () => {
+    qc.invalidateQueries({ queryKey: ["/api/estimates?limit=500"] });
+    qc.invalidateQueries({ queryKey: ["/api/estimates"] });
+    qc.invalidateQueries({ queryKey: ["/api/estimates/summary"] });
+  };
+
+  // Approve first; only the review dialog can send to the customer.
   const approveMutation = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest(`/api/estimates/${id}/internal-approve`, "PATCH", {});
-      await sendEstimateEmail(id);
+      const { estimate } = await apiRequest(`/api/estimates/${id}/internal-approve`, "PATCH", {}) as { estimate: Estimate };
+      return { id, number: formatEstimateNumber(estimate.estimateNumber) };
     },
-    onSuccess: () => {
-      toast({
-        title: "Approved & sent",
-        description: "Estimate approved and emailed to the customer.",
-      });
-      qc.invalidateQueries({ queryKey: ["/api/estimates?limit=500"] });
-      qc.invalidateQueries({ queryKey: ["/api/estimates"] });
-      qc.invalidateQueries({ queryKey: ["/api/estimates/summary"] });
+    onSuccess: (estimate) => {
+      toast({ title: "Approved", description: "Review the email before sending it to the customer." });
+      setReviewEstimate(estimate);
+      invalidateEstimateViews();
     },
     onError: (err) => {
       // Surface the server's own message when it has one. The branch gate
@@ -246,7 +246,7 @@ export default function EstimateCommandCenter() {
       // first" — advice the generic "please try again" copy would throw
       // away, leaving the manager retrying an action that can never pass.
       toast({
-        title: "Failed to approve & send",
+        title: "Failed to approve estimate",
         description: parseApiError(
           err,
           "Please try again, or use the detail view to send manually.",
@@ -256,8 +256,18 @@ export default function EstimateCommandCenter() {
     },
   });
   const onApproveAndSend = useCallback(
-    (id: number) => approveMutation.mutate(id),
-    [approveMutation],
+    (id: number) => {
+      if (approveMutation.isPending) return;
+      const estimate = estimates.find((e) => e.id === id);
+      // The same action is available after cancelling a review; the
+      // estimate is already approved and must not be approved again.
+      if (estimate && isReadyToSend(estimate)) {
+        setReviewEstimate({ id, number: formatEstimateNumber(estimate.estimateNumber) });
+      } else {
+        approveMutation.mutate(id);
+      }
+    },
+    [approveMutation, estimates],
   );
 
   // --- Convert to work order mutation ---
@@ -487,6 +497,17 @@ export default function EstimateCommandCenter() {
           onDeleteEstimate={setPendingDeleteId}
         />
       </section>
+
+      {reviewEstimate && (
+        <ReviewAndSendDialog
+          open
+          onOpenChange={(open) => { if (!open) setReviewEstimate(null); }}
+          kind="estimate"
+          entityId={reviewEstimate.id}
+          title={`Send estimate #${reviewEstimate.number.replace(/^EST-/, "")}`}
+          onSent={invalidateEstimateViews}
+        />
+      )}
 
       <EstimateDetailModal
         open={selectedEstimateId !== null}

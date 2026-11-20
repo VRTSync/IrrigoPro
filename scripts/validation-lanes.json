@@ -86,7 +86,7 @@
     },
     {
       "name": "seasonal-budget-api",
-      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/seasonal-budget.test.ts src/routes/budget-routes.test.ts src/services/budget-alert-service.test.ts src/lib/migrations/registry.test.ts"
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/seasonal-budget.test.ts src/routes/budget-routes.test.ts src/services/budget-alert-service.test.ts"
     },
     {
       "name": "seasonal-budget-financial-pulse",
@@ -184,7 +184,7 @@
     },
     {
       "name": "estimate-branch-gate",
-      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/estimate-branch-gate.test.ts"
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/estimate-branch-gate.test.ts src/routes/estimate-role-matrix.test.ts src/routes/legacy-estimate-gone.test.ts src/estimate-email-polish.test.ts"
     },
     {
       "name": "retire-followup-migration",
@@ -218,7 +218,7 @@
   "web": [
     {
       "name": "review-and-send-dialog",
-      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/email/review-and-send-dialog.test.tsx"
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/email/review-and-send-dialog.test.tsx src/pages/manager-workspace.test.tsx src/pages/wet-checks/wc-lineage-slice3.test.tsx"
     },
     {
       "name": "outgoing-email-card",

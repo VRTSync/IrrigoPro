@@ -54,6 +54,7 @@ import type {
   OfflineBackflowInput,
   OfflineControllerInput,
   OfflineProgramInput,
+  OutgoingEmailAttachmentInput,
   OutgoingEmailDraftInput,
   OutgoingEmailPreview,
   OutgoingEmailSendInput,
@@ -74,12 +75,15 @@ type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
-export const getPreviewOutgoingEmailUrl = (kind: "invoice", id: number) => {
+export const getPreviewOutgoingEmailUrl = (
+  kind: "invoice" | "estimate" | "estimate_resend",
+  id: number,
+) => {
   return `/api/outgoing-email/${kind}/${id}/preview`;
 };
 
 export const previewOutgoingEmail = async (
-  kind: "invoice",
+  kind: "invoice" | "estimate" | "estimate_resend",
   id: number,
   outgoingEmailDraftInput: OutgoingEmailDraftInput,
   options?: RequestInit,
@@ -102,14 +106,22 @@ export const getPreviewOutgoingEmailMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewOutgoingEmail>>,
     TError,
-    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+    {
+      kind: "invoice" | "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailDraftInput>;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof previewOutgoingEmail>>,
   TError,
-  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+  {
+    kind: "invoice" | "estimate" | "estimate_resend";
+    id: number;
+    data: BodyType<OutgoingEmailDraftInput>;
+  },
   TContext
 > => {
   const mutationKey = ["previewOutgoingEmail"];
@@ -123,7 +135,11 @@ export const getPreviewOutgoingEmailMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof previewOutgoingEmail>>,
-    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> }
+    {
+      kind: "invoice" | "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailDraftInput>;
+    }
   > = (props) => {
     const { kind, id, data } = props ?? {};
 
@@ -147,25 +163,142 @@ export const usePreviewOutgoingEmail = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewOutgoingEmail>>,
     TError,
-    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+    {
+      kind: "invoice" | "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailDraftInput>;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof previewOutgoingEmail>>,
   TError,
-  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailDraftInput> },
+  {
+    kind: "invoice" | "estimate" | "estimate_resend";
+    id: number;
+    data: BodyType<OutgoingEmailDraftInput>;
+  },
   TContext
 > => {
   return useMutation(getPreviewOutgoingEmailMutationOptions(options));
 };
 
-export const getSendOutgoingEmailUrl = (kind: "invoice", id: number) => {
+export const getViewOutgoingEmailAttachmentUrl = (
+  kind: "estimate" | "estimate_resend",
+  id: number,
+) => {
+  return `/api/outgoing-email/${kind}/${id}/attachment`;
+};
+
+export const viewOutgoingEmailAttachment = async (
+  kind: "estimate" | "estimate_resend",
+  id: number,
+  outgoingEmailAttachmentInput: OutgoingEmailAttachmentInput,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getViewOutgoingEmailAttachmentUrl(kind, id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(outgoingEmailAttachmentInput),
+  });
+};
+
+export const getViewOutgoingEmailAttachmentMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof viewOutgoingEmailAttachment>>,
+    TError,
+    {
+      kind: "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailAttachmentInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof viewOutgoingEmailAttachment>>,
+  TError,
+  {
+    kind: "estimate" | "estimate_resend";
+    id: number;
+    data: BodyType<OutgoingEmailAttachmentInput>;
+  },
+  TContext
+> => {
+  const mutationKey = ["viewOutgoingEmailAttachment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof viewOutgoingEmailAttachment>>,
+    {
+      kind: "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailAttachmentInput>;
+    }
+  > = (props) => {
+    const { kind, id, data } = props ?? {};
+
+    return viewOutgoingEmailAttachment(kind, id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ViewOutgoingEmailAttachmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof viewOutgoingEmailAttachment>>
+>;
+export type ViewOutgoingEmailAttachmentMutationBody =
+  BodyType<OutgoingEmailAttachmentInput>;
+export type ViewOutgoingEmailAttachmentMutationError = ErrorType<void>;
+
+export const useViewOutgoingEmailAttachment = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof viewOutgoingEmailAttachment>>,
+    TError,
+    {
+      kind: "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailAttachmentInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof viewOutgoingEmailAttachment>>,
+  TError,
+  {
+    kind: "estimate" | "estimate_resend";
+    id: number;
+    data: BodyType<OutgoingEmailAttachmentInput>;
+  },
+  TContext
+> => {
+  return useMutation(getViewOutgoingEmailAttachmentMutationOptions(options));
+};
+
+export const getSendOutgoingEmailUrl = (
+  kind: "invoice" | "estimate" | "estimate_resend",
+  id: number,
+) => {
   return `/api/outgoing-email/${kind}/${id}/send`;
 };
 
 export const sendOutgoingEmail = async (
-  kind: "invoice",
+  kind: "invoice" | "estimate" | "estimate_resend",
   id: number,
   outgoingEmailSendInput: OutgoingEmailSendInput,
   options?: RequestInit,
@@ -185,14 +318,22 @@ export const getSendOutgoingEmailMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof sendOutgoingEmail>>,
     TError,
-    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+    {
+      kind: "invoice" | "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailSendInput>;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof sendOutgoingEmail>>,
   TError,
-  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+  {
+    kind: "invoice" | "estimate" | "estimate_resend";
+    id: number;
+    data: BodyType<OutgoingEmailSendInput>;
+  },
   TContext
 > => {
   const mutationKey = ["sendOutgoingEmail"];
@@ -206,7 +347,11 @@ export const getSendOutgoingEmailMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof sendOutgoingEmail>>,
-    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> }
+    {
+      kind: "invoice" | "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailSendInput>;
+    }
   > = (props) => {
     const { kind, id, data } = props ?? {};
 
@@ -229,14 +374,22 @@ export const useSendOutgoingEmail = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof sendOutgoingEmail>>,
     TError,
-    { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+    {
+      kind: "invoice" | "estimate" | "estimate_resend";
+      id: number;
+      data: BodyType<OutgoingEmailSendInput>;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof sendOutgoingEmail>>,
   TError,
-  { kind: "invoice"; id: number; data: BodyType<OutgoingEmailSendInput> },
+  {
+    kind: "invoice" | "estimate" | "estimate_resend";
+    id: number;
+    data: BodyType<OutgoingEmailSendInput>;
+  },
   TContext
 > => {
   return useMutation(getSendOutgoingEmailMutationOptions(options));

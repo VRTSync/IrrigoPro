@@ -2,7 +2,7 @@ import { getImpersonationToken } from "@/lib/impersonation";
 
 type PdfOpenResult = { ok: true } | { ok: false; message: string; validationFailure?: unknown };
 
-export async function openAuthedPdf(url: string): Promise<PdfOpenResult> {
+export async function openAuthedPdf(url: string, method: "GET" | "POST" = "GET", body?: object): Promise<PdfOpenResult> {
   // This must run inside the user gesture, before the first await.
   const tab = window.open("", "_blank");
   if (tab) tab.opener = null;
@@ -11,9 +11,11 @@ export async function openAuthedPdf(url: string): Promise<PdfOpenResult> {
     if (target.origin !== window.location.origin) throw new Error("PDF must use the app's origin");
     const token = getImpersonationToken();
     const response = await fetch(target.pathname + target.search, {
+      method,
+      body: body ? JSON.stringify(body) : undefined,
       credentials: "include",
       cache: "no-store",
-      headers: token ? { "x-impersonation-token": token } : undefined,
+      headers: { ...(token ? { "x-impersonation-token": token } : {}), ...(body ? { "Content-Type": "application/json" } : {}) },
     });
     if (!response.ok || !response.headers.get("content-type")?.includes("application/pdf")) {
       tab?.close();

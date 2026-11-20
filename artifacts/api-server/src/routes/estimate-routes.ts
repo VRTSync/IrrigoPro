@@ -4,7 +4,7 @@ import { resolveCompanySender } from "../lib/company-sender";
 // Previously most of these routes lived in the 16k-line `routes.ts`
 // monolith with a couple already extracted here for test-isolation
 // (Task #397/#606). Task #640 consolidates the rest: every estimate
-// CRUD, lifecycle transition, PDF, email, public-token, and
+// CRUD, lifecycle transition, PDF, public-token, and
 // convert-to-work-order endpoint is now defined in this one file.
 // `routes.ts` only invokes `registerEstimateRoutes(app, storage,
 // requireAuthentication)` once and contributes no estimate routes
@@ -14,7 +14,7 @@ import { resolveCompanySender } from "../lib/company-sender";
 // same paths, payloads, status codes, role guards, and audit-log
 // emissions. The helpers that used to be closures inside
 // `registerRoutes()` (estimate approval/PDF access middlewares,
-// the cross-company ownership guard, the send-approval-email flow,
+// the cross-company ownership guard,
 // and the PDF handler) now live next to the routes that use them.
 //
 // `storage` is typed as `EstimateRoutesStorage` so the test suite
@@ -95,7 +95,7 @@ export interface EstimateRoutesStorage {
   ): Promise<EstimateWithItems>;
 
   // Optional — required only by the production routes (list, delete,
-  // approve, reject, send-approval-email, transition, token approve/
+  // approve, reject, reviewed email delivery, token approve/
   // reject, convert-to-work-order, PDF). The existing test suite does
   // not exercise these routes and so does not stub them.
   getEstimates?(opts?: { includeDeleted?: boolean }): Promise<Estimate[]>;
@@ -286,19 +286,6 @@ export function estimateOwnershipMatches(
   return Number(userCompanyId) === Number(estimateCompanyId);
 }
 
-// Task #611 — typed error thrown by `_sendEstimateApprovalEmailFlow`
-// when the CAS-style "mark sent to customer" update matches zero
-// rows (i.e. someone else won a concurrent send-to-customer race
-// or the estimate moved out of a sendable state between the
-// route's precheck and the DB write). The route layer catches it
-// and returns 409 instead of the generic 500.
-export class EstimateSendConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "EstimateSendConflictError";
-  }
-}
-
 // ─── Route registration ──────────────────────────────────────────────────────
 
 export type EstimateRouteDeps = {
@@ -328,6 +315,8 @@ export type EstimateRouteDeps = {
 const newLinkRequestLog = new Map<string, number>();
 const NEW_LINK_DEBOUNCE_MS = 30 * 60 * 1000;
 
+export { requireResendRole, requireEstimateBranchForSend as requireBranchForSend } from "./estimate-role-guards";
+
 export function registerEstimateRoutes(
   app: Express,
   storage: EstimateRoutesStorage,
@@ -346,29 +335,8 @@ export function registerEstimateRoutes(
   // that duplication is a separate task). Always registered AFTER the
   // approval access guard so an unauthorised caller gets 403, not a 400
   // that would leak whether the estimate has a branch.
-  const requireBranchForSend = requireEstimateBranchForSend(storage);
+  const branchGate = requireEstimateBranchForSend(storage);
 
-  // Task #2010 — `resend` carries no approval-access guard (that question is
-  // deliberately left open; see the follow-up task). It does its own inline
-  // role check, but as a *handler* statement that check ran after the branch
-  // middleware, so an unauthorised same-company user got a branch-state
-  // dependent 400 instead of the 403 they used to get. Guard ordering is a
-  // security property: lift the identical role set into a middleware that
-  // runs before the branch gate. Deliberately NOT the shared approval guard
-  // and deliberately not widened — same three roles as the inline check it
-  // replaces. Params stay loose so this cannot re-type the route's own.
-  const requireResendRole = (req: any, res: any, next: any) => {
-    const role = req.authenticatedUserRole;
-    const canResend =
-      role === "irrigation_manager" || role === "company_admin" || role === "super_admin";
-    if (!canResend) {
-      res.status(403).json({
-        message: "Access denied. Resending requires irrigation manager or admin role.",
-      });
-      return;
-    }
-    next();
-  };
   // processEstimatePayload is shared with the Wet Check conversion engine
   // (server/storage.ts → convertWetCheck) so both code paths compute prices
   // and totals identically. See server/estimate-payload.ts for details.
@@ -1037,116 +1005,12 @@ export function registerEstimateRoutes(
     }
   });
 
-  // ── POST /api/estimates/:id/email ─────────────────────────────────────
-  // Task #616 — Email estimate (with optional recipient overrides + note).
-  // Previously a stub that returned success without sending. Now funnels
-  // through the same `_sendEstimateApprovalEmailFlow` helper as
-  // `/send-approval-email` and `/transition` so token generation,
-  // status transitions, and SendGrid delivery all live in one place.
-  app.post(
-    "/api/estimates/:id/email",
-    requireAuthentication,
-    requireEstimateApprovalAccess,
-    requireBranchForSend,
-    async (req: any, res) => {
-      try {
-        const id = parseInt(String(req.params.id));
-        if (!Number.isFinite(id) || id <= 0) {
-          res.status(400).json({ message: "Invalid estimate ID" });
-          return;
-        }
-        const estimate = await storage.getEstimate(id);
-        if (!estimate) {
-          res.status(404).json({ message: "Estimate not found" });
-          return;
-        }
-        if (!estimateOwnershipMatches(req, estimate.companyId)) {
-          res.status(404).json({ message: "Estimate not found" });
-          return;
-        }
-
-        // Lifecycle guardrails — mirror /send-approval-email so this
-        // endpoint can't be used to bypass send-state rules just
-        // because it accepts custom recipients.
-        if (estimate.status !== "pending") {
-          res
-            .status(400)
-            .json({ message: "Only pending estimates can have approval emails sent" });
-          return;
-        }
-        if (estimate.internalStatus === "sent_to_customer") {
-          res
-            .status(400)
-            .json({ message: "Estimate has already been sent to the customer" });
-          return;
-        }
-        if (
-          estimate.internalStatus !== "pending_approval" &&
-          estimate.internalStatus !== "approved_internal"
-        ) {
-          res
-            .status(400)
-            .json({ message: "Estimate is not in a sendable internal state" });
-          return;
-        }
-
-        const emailStr = z.string().trim().email("Invalid email address");
-        const sendSchema = z
-          .object({
-            to: emailStr.optional(),
-            cc: z.array(emailStr).max(5, "At most 5 Cc addresses").optional(),
-            bcc: z.array(emailStr).max(5, "At most 5 Bcc addresses").optional(),
-            note: z
-              .string()
-              .trim()
-              .max(2000, "Note is too long (max 2000 chars)")
-              .optional(),
-            // Task #1791 — opt-in PDF attachment.
-            attachPdf: z.boolean().optional(),
-          })
-          .strict();
-        const parsed = sendSchema.safeParse(req.body ?? {});
-        if (!parsed.success) {
-          const first = parsed.error.issues[0];
-          res.status(400).json({
-            message: first?.message || "Invalid email payload",
-            errors: parsed.error.issues,
-          });
-          return;
-        }
-
-        await _sendEstimateApprovalEmailFlow(id, {
-          to: parsed.data.to,
-          cc: parsed.data.cc,
-          bcc: parsed.data.bcc,
-          note: parsed.data.note,
-          attachPdf: parsed.data.attachPdf,
-          req,
-        });
-
-        res.json({ message: "Estimate email sent successfully", sentAt: new Date() });
-      } catch (error) {
-        req.log?.error?.({ err: error }, "Failed to send estimate email");
-        console.error("Error sending estimate email:", error);
-        // Task #703 — surface the underlying SendGrid / config
-        // reason (e.g. "SendGrid rejected the estimate email: The
-        // from address does not match a verified Sender Identity")
-        // so the frontend toast is actionable.
-        const msg =
-          error instanceof Error && error.message
-            ? error.message
-            : "Failed to send estimate email";
-        res.status(500).json({ message: msg });
-      }
-    },
-  );
-
   // ── Estimate approval workflow (legacy POST) ──────────────────────────
   app.post(
     "/api/estimates/:id/approve",
     requireAuthentication,
     requireEstimateApprovalAccess,
-    requireBranchForSend,
+    branchGate,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1445,7 +1309,7 @@ export function registerEstimateRoutes(
     "/api/estimates/:id/internal-approve",
     requireAuthentication,
     requireEstimateApprovalAccess,
-    requireBranchForSend,
+    branchGate,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1501,7 +1365,7 @@ export function registerEstimateRoutes(
     "/api/estimates/:id/approve",
     requireAuthentication,
     requireEstimateApprovalAccess,
-    requireBranchForSend,
+    branchGate,
     async (req: any, res) => {
       try {
         const id = parseInt(String(req.params.id));
@@ -1644,382 +1508,10 @@ export function registerEstimateRoutes(
     },
   );
 
-  // Send approval email to customer
-  // Shared helper for sending an estimate's approval email. Used by both
-  // POST /api/estimates/:id/send-approval-email and the new transition
-  // endpoint (`send_to_customer` and `resend`) so token generation, the
-  // `approvalSentAt` / `internalStatus = sent_to_customer` write, and the
-  // SendGrid send all live in one place. Optionally also resets
-  // `estimateDate` (used by `resend` to clear the expired bucket).
-  //
-  // Task #611 — the flow is now email-first: the token is generated in
-  // memory, the customer email is sent, and only then is the DB row
-  // marked `sent_to_customer` / stamped with the token. Previously the
-  // DB write committed first, so a SendGrid failure left the estimate
-  // marked sent with a token the customer never saw. With the order
-  // reversed, a transient send failure leaves the estimate in its
-  // pre-send internal status and the user can retry the single
-  // "Send to customer" action cleanly.
-  async function _sendEstimateApprovalEmailFlow(
-    estimateId: number,
-    opts: {
-      resetEstimateDate?: boolean;
-      // Task #365 — re-deliver a non-expired sent estimate without
-      // resetting estimateDate. Passed through to markEstimateSentToCustomer
-      // so the CAS WHERE clause allows internalStatus='sent_to_customer'.
-      isSentRedelivery?: boolean;
-      to?: string;
-      cc?: string[];
-      bcc?: string[];
-      note?: string;
-      // Task #1791 — when true, generate the estimate PDF and attach it to
-      // the outgoing SendGrid email as a base64-encoded PDF file.
-      attachPdf?: boolean;
-      req?: any;
-    } = {},
-  ) {
-    const estimateWithItems = await storage.getEstimate(estimateId);
-    if (!estimateWithItems) throw new Error(`Estimate ${estimateId} not found`);
-
-    const crypto = await import("crypto");
-    // Task #365 — for sent re-delivery, reuse the existing approval token so
-    // the customer's previously shared link remains valid. Only refresh expiry.
-    // For expired resend and first send, always mint a new token.
-    const approvalToken = opts.isSentRedelivery && estimateWithItems.approvalToken
-      ? (estimateWithItems.approvalToken as string)
-      : crypto.randomBytes(32).toString("hex");
-    // Task #1955 — one send timestamp for the whole flow. It is the
-    // expiry clock, so the PDF we attach below and the row we persist
-    // after a successful send must agree on it exactly.
-    const sentAt = new Date();
-    const tokenExpiresAt = new Date(sentAt);
-    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30);
-
-    // If we're going to reset `estimateDate` (the `resend` flow), use the
-    // new value in the email body so the customer sees today's date
-    // matching what we're about to persist.
-    const effectiveEstimateDate = opts.resetEstimateDate
-      ? new Date(sentAt)
-      : new Date(estimateWithItems.estimateDate);
-
-    const items = estimateWithItems.items ?? [];
-    const laborRate = parseFloat(estimateWithItems.laborRate);
-
-    const resolvedTo = (opts.to && opts.to.trim()) || estimateWithItems.customerEmail;
-    const resolvedCc = (opts.cc ?? []).filter((s) => s && s.trim().length > 0);
-    const resolvedBcc = (opts.bcc ?? []).filter((s) => s && s.trim().length > 0);
-
-    const { EmailService, } = await import("../email-service");
-    const { isInspectionOriginEstimate } = await import("../estimate-pdf-html");
-    const isInspectionOrigin = isInspectionOriginEstimate(items);
-
-    // Task #1791 — generate PDF buffer for attachment when opted in.
-    let pdfAttachments: Array<{
-      content: string;
-      filename: string;
-      type: string;
-      disposition: 'attachment';
-    }> | undefined;
-    if (opts.attachPdf) {
-      try {
-        const { generateEstimatePdfForEmail } = await import("../estimate-pdf-service");
-        const pdfResult = await generateEstimatePdfForEmail(
-          storage as import("../storage").IStorage,
-          estimateId,
-          // Task #1955 — the attached PDF must state the window the
-          // customer is being given by *this* send, not the one from the
-          // previous send still stored on the row. The same `sentAt` is
-          // persisted below once the email succeeds.
-          { sentAt },
-        );
-        if (pdfResult) {
-          pdfAttachments = [{
-            content: pdfResult.buffer.toString('base64'),
-            filename: pdfResult.filename,
-            type: 'application/pdf',
-            disposition: 'attachment',
-          }];
-          console.log(`[estimate-email] PDF attached: ${pdfResult.filename} (${pdfResult.buffer.length} bytes)`);
-        }
-      } catch (pdfErr) {
-        // Non-fatal — log and proceed without attachment rather than
-        // blocking the email send.
-        console.error('[estimate-email] PDF generation failed, sending without attachment:', pdfErr instanceof Error ? pdfErr.message : pdfErr);
-      }
-    }
-
-    await EmailService.sendEstimateApprovalEmail({
-      sender: await resolveCompanySender(estimateWithItems.companyId),
-      estimateId: estimateWithItems.id,
-      estimateNumber: estimateWithItems.estimateNumber,
-      customerName: estimateWithItems.customerName,
-      customerEmail: estimateWithItems.customerEmail,
-      projectName: estimateWithItems.projectName,
-      projectAddress: estimateWithItems.projectAddress || undefined,
-      // Task #2010 — branch location on the approval email.
-      branchName: (estimateWithItems as unknown as { branchName?: string | null }).branchName ?? null,
-      workLocationLat: estimateWithItems.workLocationLat ?? null,
-      workLocationLng: estimateWithItems.workLocationLng ?? null,
-      workLocationAddress: estimateWithItems.workLocationAddress ?? null,
-      controllerLetter: estimateWithItems.controllerLetter ?? null,
-      zoneNumber: estimateWithItems.zoneNumber ?? null,
-      totalAmount: `$${parseFloat(estimateWithItems.totalAmount).toFixed(2)}`,
-      partsSubtotal: parseFloat(estimateWithItems.partsSubtotal) || 0,
-      laborSubtotal: parseFloat(estimateWithItems.laborSubtotal) || 0,
-      totalLaborHours: parseFloat(estimateWithItems.totalLaborHours) || 0,
-      laborRate,
-      isInspectionOrigin,
-      approvalToken,
-      estimateDate: effectiveEstimateDate.toLocaleDateString(),
-      createdBy: estimateWithItems.createdBy,
-      companyId: estimateWithItems.companyId!,
-      workDescription: estimateWithItems.workDescription ?? null,
-      to: resolvedTo,
-      cc: resolvedCc,
-      bcc: resolvedBcc,
-      note: opts.note,
-      attachments: pdfAttachments,
-      items: items.map((item) => ({
-        description: item.description || item.partName,
-        partName: item.partName,
-        quantity: item.quantity,
-        partPrice: parseFloat(item.partPrice),
-        laborHours: parseFloat(item.laborHours),
-        partsCost: parseFloat(item.totalPrice),
-        laborCost: parseFloat(item.laborHours) * laborRate,
-        lineTotal: parseFloat(item.totalPrice) + parseFloat(item.laborHours) * laborRate,
-        controllerLetter: item.controllerLetter ?? null,
-        zoneNumber: item.zoneNumber ?? null,
-        issueType: item.issueType ?? null,
-      })),
-    });
-
-    // Email send succeeded — persist the transition via a single
-    // conditional UPDATE (Task #611). The WHERE clause pins
-    // internalStatus to a pre-send value (or `status='expired'` for
-    // resend), so two concurrent send-to-customer requests can't
-    // both stamp tokens: the second writer matches zero rows and we
-    // throw EstimateSendConflictError, which the route layer maps
-    // to 409. The cost is a redundant email going out for the loser
-    // of the race — preferable to burying a stale token in the DB.
-    const persisted = await storage.markEstimateSentToCustomer!(estimateId, {
-      approvalToken,
-      tokenExpiresAt,
-      approvalSentAt: sentAt,
-      // Task #1955 — compare-and-swap value for the resend path (the row
-      // that was read at the top of this flow must still be the one on
-      // disk, or a concurrent send already won).
-      previousApprovalToken: (estimateWithItems.approvalToken as string | null) ?? null,
-      newEstimateDate: opts.resetEstimateDate ? effectiveEstimateDate : null,
-      isResend: !!opts.resetEstimateDate,
-      isSentRedelivery: !!opts.isSentRedelivery,
-      // Task #1574 — persist actual delivery address so the rejection
-      // audit log records the right recipient even when the send modal's
-      // "To" field was overridden.
-      sentToEmail: resolvedTo,
-    });
-    if (!persisted) {
-      throw new EstimateSendConflictError(
-        opts.resetEstimateDate
-          ? "Estimate is no longer in an expired state and cannot be resent"
-          : opts.isSentRedelivery
-            ? "Estimate is no longer in a sent state and cannot be re-delivered"
-            : "Estimate has already been sent to the customer",
-      );
-    }
-
-    // Task #616 — record a single audit row per send so managers can
-    // see in the estimate's history exactly who sent it, to which
-    // addresses, and when.
-    if (opts.req) {
-      const req = opts.req;
-      await recordAuditEvent(req, {
-        actorUserId: req.authenticatedUserId ?? null,
-        actorLabel: req.authenticatedUserName ?? null,
-        actorRole: req.authenticatedUserRole ?? null,
-        actorCompanyId: req.authenticatedUserCompanyId ?? null,
-        actionType: "data",
-        action: "estimate.email.sent",
-        severity: "info",
-        targetType: "estimate",
-        targetId: String(estimateId),
-        summary: `Estimate ${formatEstimateNumber(estimateWithItems.estimateNumber)} sent to ${resolvedTo}`,
-        details: {
-          estimateId,
-          estimateNumber: estimateWithItems.estimateNumber,
-          to: resolvedTo,
-          cc: resolvedCc,
-          bcc: resolvedBcc,
-          hasNote: !!(opts.note && opts.note.trim()),
-        },
-      });
-    }
-
-    return persisted;
-  }
-
-  app.post(
-    "/api/estimates/:id/send-approval-email",
-    requireAuthentication,
-    requireEstimateApprovalAccess,
-    requireBranchForSend,
-    async (req: any, res) => {
-      try {
-        const id = parseInt(String(req.params.id));
-        const estimate = await storage.getEstimate(id);
-        if (!estimate) {
-          res.status(404).json({ message: "Estimate not found" });
-          return;
-        }
-        if (!estimateOwnershipMatches(req, estimate.companyId)) {
-          res.status(404).json({ message: "Estimate not found" });
-          return;
-        }
-        if (estimate.status !== "pending") {
-          res
-            .status(400)
-            .json({ message: "Only pending estimates can have approval emails sent" });
-          return;
-        }
-        // Allow sending from either the queue's pre-approval state
-        // (one-click "Approve & Send") or after internal approval
-        // (two-step). Reject if it has already been sent.
-        if (estimate.internalStatus === "sent_to_customer") {
-          res
-            .status(400)
-            .json({ message: "Estimate has already been sent to the customer" });
-          return;
-        }
-        if (
-          estimate.internalStatus !== "pending_approval" &&
-          estimate.internalStatus !== "approved_internal"
-        ) {
-          res
-            .status(400)
-            .json({ message: "Estimate is not in a sendable internal state" });
-          return;
-        }
-
-        await _sendEstimateApprovalEmailFlow(id, { req });
-
-        res.json({
-          message: "Approval email sent successfully",
-          sentAt: new Date(),
-        });
-      } catch (error) {
-        if (error instanceof EstimateSendConflictError) {
-          res.status(409).json({ message: error.message });
-          return;
-        }
-        console.error("Error sending approval email:", error);
-        // Task #703 — surface the underlying SendGrid / config
-        // reason so the frontend toast is actionable instead of a
-        // generic "Failed to send approval email".
-        const msg =
-          error instanceof Error && error.message
-            ? error.message
-            : "Failed to send approval email";
-        res.status(500).json({ message: msg });
-      }
-    },
-  );
-
-  // ── POST /api/estimates/:id/resend ────────────────────────────────────
-  // Task #639 — canonical resend endpoint. Replaces the legacy
-  // `POST /api/estimates/:id/transition` with `action=resend` (which
-  // now returns 410 Gone via `registerLegacyEstimateGoneRoutes`).
-  // Only estimates in the computed `expired` lifecycle bucket may be
-  // resent; the underlying flow resets `estimateDate`, mints a new
-  // approval token, and sends the customer email through the shared
-  // `_sendEstimateApprovalEmailFlow` helper.
-  app.post(
-    "/api/estimates/:id/resend",
-    requireAuthentication,
-    requireResendRole,
-    requireBranchForSend,
-    async (req: any, res) => {
-      try {
-        const id = parseInt(String(req.params.id));
-        if (isNaN(id) || id <= 0) {
-          res.status(400).json({ message: "Invalid estimate ID" });
-          return;
-        }
-        const estimate = await storage.getEstimate(id);
-        if (!estimate) {
-          res.status(404).json({ message: "Estimate not found" });
-          return;
-        }
-        if (!estimateOwnershipMatches(req, estimate.companyId)) {
-          res.status(404).json({ message: "Estimate not found" });
-          return;
-        }
-        // Role is enforced by `requireResendRole` ahead of the branch guard
-        // (Task #2010) — same three roles, just hoisted so an unauthorised
-        // caller gets 403 before any branch state is evaluated.
-        // Task #365 — widen to also allow `sent` (awaiting customer reply)
-        // so managers can re-deliver the approval email without needing
-        // to wait for the estimate to expire first. Draft / approved /
-        // rejected / converted estimates are still rejected.
-        const lc = estimate.lifecycleStatus;
-        const isExpiredResend = lc === "expired";
-        const isSentRedelivery = lc === "sent";
-        if (!isExpiredResend && !isSentRedelivery) {
-          const stateLabel = lc ?? estimate.internalStatus ?? "unknown";
-          res.status(400).json({
-            message: `Cannot resend a ${stateLabel} estimate. Only sent or expired estimates may be resent.`,
-          });
-          return;
-        }
-        const body = (req.body ?? {}) as Record<string, unknown>;
-        const overrideTo =
-          typeof body.to === "string" ? body.to.trim() || undefined : undefined;
-        const overrideCc = Array.isArray(body.cc)
-          ? (body.cc as unknown[]).filter((s): s is string => typeof s === "string")
-          : [];
-        const overrideBcc = Array.isArray(body.bcc)
-          ? (body.bcc as unknown[]).filter((s): s is string => typeof s === "string")
-          : [];
-        const overrideNote =
-          typeof body.note === "string" ? body.note.trim() || undefined : undefined;
-
-        await _sendEstimateApprovalEmailFlow(id, {
-          resetEstimateDate: isExpiredResend,
-          isSentRedelivery,
-          to: overrideTo,
-          cc: overrideCc,
-          bcc: overrideBcc,
-          note: overrideNote,
-          req,
-        });
-        const fresh = await storage.getEstimate(id);
-        // Task #641 — audit the resend so the Activity tab shows it.
-        await recordLifecycleAudit(req, {
-          resource: "estimate",
-          action: "estimate.resent",
-          targetId: id,
-          companyId: estimate.companyId ?? null,
-          before: { status: estimate.status, internalStatus: estimate.internalStatus },
-          after: { status: fresh?.status, internalStatus: fresh?.internalStatus },
-          summary: isExpiredResend
-            ? `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} resent after expiration`
-            : `Estimate ${estimate.estimateNumber ? formatEstimateNumber(estimate.estimateNumber) : id} re-delivered to customer`,
-        });
-        res.json({ message: "Estimate resent to customer", estimate: fresh });
-      } catch (error) {
-        if (error instanceof EstimateSendConflictError) {
-          res.status(409).json({ message: error.message });
-          return;
-        }
-        console.error("Estimate resend error:", error);
-        res.status(500).json({ message: "Failed to resend estimate" });
-      }
-    },
-  );
-
   // ── POST /api/estimates/:id/mark-sent ─────────────────────────────────
   // Task #680 — Mark an estimate as sent **without** sending an email.
   // Mirrors the preconditions and side effects of
-  // `_sendEstimateApprovalEmailFlow` (mints a 32-byte approval token
+  // `sendEstimateApprovalEmailFlow` (mints a 32-byte approval token
   // with a 30-day expiry, flips internalStatus → sent_to_customer,
   // dual-stamps the lifecycle column via `markEstimateSentToCustomer`),
   // but intentionally skips the SendGrid send. Used when the estimate
@@ -3012,7 +2504,7 @@ export function registerEstimateRoutes(
     // Seam 3 — role guard: only billing-tier and manager roles may convert.
     // Mirrors the guard on the approve/send routes (requireEstimateApprovalAccess).
     requireEstimateApprovalAccess,
-    requireBranchForSend,
+    branchGate,
     async (req, res) => {
       try {
         const id = parseInt(String(req.params.id));

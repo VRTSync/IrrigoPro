@@ -66,6 +66,34 @@ const sendButton = () => screen.getByTestId("button-send-reviewed-email");
 const postBody = (call: number) => JSON.parse(String(api.mock.calls[call][1]?.body));
 
 describe("Review and Send", () => {
+  it("opens estimate PDFs with POST and refreshes the review when the attachment is removed", async () => {
+    const estimateBase = "/api/outgoing-email/estimate_resend/50123";
+    const viewUrl = `${estimateBase}/attachment`;
+    const warning = "The estimate date and approval link remain unchanged, and the 30-day window restarts from today's send.";
+    api.mockImplementation(async (url, init) => {
+      if (String(url) !== `${estimateBase}/preview` || init?.method !== "POST") throw new Error("Unexpected request");
+      const attachPdf = JSON.parse(String(init.body)).options?.attachPdf ?? true;
+      return json(makePreview({
+        kind: "estimate_resend", id: 50123, subject: "Irrigation Estimate #50123 – The Ranch",
+        options: { attachPdf }, optionDefs: [{ key: "attachPdf", label: "Attach the estimate as a PDF", default: true }],
+        attachments: attachPdf ? [{ filename: "Estimate-50123.pdf", viewUrl }] : [],
+        warnings: [warning], html: '<a href="about:blank#link-created-when-sent">Approve Estimate</a>',
+      }));
+    });
+    render(<ReviewAndSendDialog open onOpenChange={() => {}} kind="estimate_resend" entityId={50123} title="Resend estimate #50123" />);
+    expect(await screen.findByText(warning)).toBeVisible();
+    expect(screen.getByTitle("Email preview")).toHaveAttribute("srcdoc", expect.stringContaining("link-created-when-sent"));
+    const checkbox = screen.getByRole("checkbox", { name: "Attach the estimate as a PDF" });
+    expect(checkbox).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(spies.openAuthedPdf).toHaveBeenCalledWith(viewUrl, "POST", { confirmationToken: makePreview().confirmationToken });
+    fireEvent.click(checkbox);
+    expect(sendButton()).toBeDisabled();
+    await waitFor(() => expect(screen.queryByText("Estimate-50123.pdf")).not.toBeInTheDocument(), { timeout: 1500 });
+    expect(postBody(1).options).toEqual({ attachPdf: false });
+    expect(sendButton()).toBeEnabled();
+  });
+
   it("prefills from the server and shows its sender, sandboxed HTML and PDF attachment", async () => {
     openReview();
     expect(sendButton()).toBeDisabled();

@@ -18,7 +18,7 @@ import { ChipList } from "./chip-list";
 interface ReviewAndSendDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  kind: "invoice";
+  kind: OutgoingEmailPreview["kind"];
   entityId: number;
   title: string;
   onSent?: (r: OutgoingEmailSent) => void;
@@ -127,10 +127,13 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<Rev
   }
 
   async function viewAttachment(url: string) {
+    if (!draft || !upToDate) return;
     setViewError(undefined);
     setViewing(true);
     try {
-      const result = await openAuthedPdf(url);
+      const result = kind === "invoice"
+        ? await openAuthedPdf(url)
+        : await openAuthedPdf(url, "POST", { confirmationToken: draft.confirmationToken });
       if (!result.ok) setViewError(result);
     } finally {
       setViewing(false);

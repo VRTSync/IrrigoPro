@@ -29,6 +29,9 @@ import { eq } from "drizzle-orm";
 import { computeLifecycleStatus, ESTIMATE_EXPIRATION_DAYS } from "@workspace/shared";
 
 import { storage } from "./storage";
+import { EmailService, type EstimateEmailData } from "./email-service";
+import { createEstimateEmailHandler } from "./outgoing-email/estimate-handlers";
+import { registerOutgoingEmailRoutes } from "./routes/outgoing-email-routes";
 import {
   registerEstimateRoutes,
   type EstimateRoutesStorage,
@@ -93,10 +96,11 @@ async function seedLapsedSentEstimate(overrides: {
 }
 
 // A minimal mount of the real estimate routes so the customer-facing
-// token endpoint can be exercised over HTTP. Only the read paths are
-// used here; the send flow is driven through storage directly.
+// token endpoint and reviewed resend can be exercised over HTTP.
 const noAuth: RequestHandler = (req: any, _res, next) => {
   req.authenticatedUserRole = "super_admin";
+  req.authenticatedUserId = 1;
+  req.authenticatedUserCompanyId = null;
   next();
 };
 
@@ -111,7 +115,7 @@ function makeReadOnlyStorage(): EstimateRoutesStorage {
         .from(estimates)
         .where(eq(estimates.id, id))
         .limit(1);
-      return row as unknown as EstimateWithItems | undefined;
+      return row && { ...row, items: [], lifecycleStatus: computeLifecycleStatus(row) };
     },
     async getEstimates() {
       return (await db.select().from(estimates)) as unknown as EstimateWithItems[];
@@ -128,12 +132,38 @@ function makeReadOnlyStorage(): EstimateRoutesStorage {
 let publicServer: Server;
 let publicBaseUrl: string;
 
+const resendFields = { to: "override@example.invalid", options: { attachPdf: false } };
+const post = (id: number, action: "preview" | "send", confirmationToken?: string) =>
+  fetch(`${publicBaseUrl}/api/outgoing-email/estimate_resend/${id}/${action}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...resendFields, confirmationToken }),
+  });
+
+async function previewResend(id: number): Promise<string> {
+  const res = await post(id, "preview");
+  assert.equal(res.status, 200);
+  return (await res.json() as { confirmationToken: string }).confirmationToken;
+}
+
 describe("resend of a derived-expired estimate (Task #1955)", () => {
   before(async () => {
     await cleanupSeed();
     const app = express();
     app.use(express.json());
-    registerEstimateRoutes(app, makeReadOnlyStorage(), noAuth);
+    const reads = makeReadOnlyStorage();
+    registerEstimateRoutes(app, reads, noAuth);
+    const storageForTest = {
+      getEstimate: reads.getEstimate,
+      getCustomer: reads.getCustomer,
+      getCompany: async () => undefined,
+      getCompanyProfile: async () => undefined,
+      markEstimateSentToCustomer: storage.markEstimateSentToCustomer.bind(storage),
+    };
+    registerOutgoingEmailRoutes(app, {
+      requireAuthentication: noAuth,
+      handlers: [createEstimateEmailHandler("estimate_resend", { storage: storageForTest, recordAuditEvent: async () => {} })],
+    });
     publicServer = createServer(app);
     await new Promise<void>((resolve) => publicServer.listen(0, resolve));
     publicBaseUrl = `http://127.0.0.1:${(publicServer.address() as AddressInfo).port}`;
@@ -152,31 +182,23 @@ describe("resend of a derived-expired estimate (Task #1955)", () => {
     assert.equal(computeLifecycleStatus(seeded), "expired");
   });
 
-  it("persists the new token and send time, restarting the window", async () => {
+  it("persists the new token and send time, restarting the window", async (t) => {
     const seeded = await seedLapsedSentEstimate();
+    const mail = t.mock.method(EmailService, "sendEstimateApprovalEmail", async (_data: EstimateEmailData) => {});
     const sentAt = new Date();
-    const tokenExpiresAt = new Date(sentAt);
-    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + ESTIMATE_EXPIRATION_DAYS);
-
-    const persisted = await storage.markEstimateSentToCustomer(seeded.id, {
-      approvalToken: "fresh-token-1955",
-      tokenExpiresAt,
-      approvalSentAt: sentAt,
-      newEstimateDate: sentAt,
-      isResend: true,
-      previousApprovalToken: seeded.approvalToken,
-    });
-
-    assert.ok(
-      persisted,
-      "resend must persist — gating on status='expired' would have matched zero rows here",
-    );
+    const sent = await post(seeded.id, "send", await previewResend(seeded.id));
+    assert.equal(sent.status, 200, "resend must persist even though status is still pending");
+    assert.equal(mail.mock.callCount(), 1);
+    const outgoing = mail.mock.calls[0].arguments[0];
 
     const [row] = await db
       .select()
       .from(estimates)
       .where(eq(estimates.id, seeded.id));
-    assert.equal(row.approvalToken, "fresh-token-1955");
+    assert.equal(row.approvalToken, outgoing.approvalToken);
+    assert.notEqual(row.approvalToken, seeded.approvalToken);
+    assert.equal(row.sentToEmail, resendFields.to);
+    assert.equal(row.approvalSentAt?.toISOString(), (await sent.json() as { sentAt: string }).sentAt);
     assert.ok(
       row.approvalSentAt && row.approvalSentAt.getTime() >= sentAt.getTime() - 1000,
       "send time must be re-stamped",
@@ -191,27 +213,19 @@ describe("resend of a derived-expired estimate (Task #1955)", () => {
     );
   });
 
-  it("gives the customer a usable link again after they hit the dead one", async () => {
-    // A customer who clicked the expired link persists status='expired',
-    // and every public token endpoint reads a non-pending status as
-    // "already responded" — so a resend must hand the window back.
+  it("gives the customer a usable link again after they hit the dead one", async (t) => {
+    // Customer clicked the expired link, persisting legacy status='expired'.
     const seeded = await seedLapsedSentEstimate({ status: "expired" });
-    const sentAt = new Date();
-    const persisted = await storage.markEstimateSentToCustomer(seeded.id, {
-      approvalToken: "fresh-token-1955-b",
-      tokenExpiresAt: new Date(sentAt.getTime() + 30 * 24 * 60 * 60 * 1000),
-      approvalSentAt: sentAt,
-      newEstimateDate: sentAt,
-      isResend: true,
-      previousApprovalToken: seeded.approvalToken,
-    });
-    assert.ok(persisted, "the legacy status='expired' shape must keep working");
+    const mail = t.mock.method(EmailService, "sendEstimateApprovalEmail", async (_data: EstimateEmailData) => {});
+    const sent = await post(seeded.id, "send", await previewResend(seeded.id));
+    assert.equal(sent.status, 200, "the legacy status='expired' shape must keep working");
+    const newToken = mail.mock.calls[0].arguments[0].approvalToken;
 
     const [row] = await db
       .select()
       .from(estimates)
       .where(eq(estimates.id, seeded.id));
-    assert.equal(row.approvalToken, "fresh-token-1955-b");
+    assert.equal(row.approvalToken, newToken);
     assert.equal(computeLifecycleStatus(row), "sent");
     assert.equal(
       row.status,
@@ -222,7 +236,7 @@ describe("resend of a derived-expired estimate (Task #1955)", () => {
     // Prove it end-to-end through the public token endpoint the emailed
     // link lands on.
     const res = await fetch(
-      `${publicBaseUrl}/api/estimates/view-by-token/fresh-token-1955-b`,
+      `${publicBaseUrl}/api/estimates/view-by-token/${newToken}`,
     );
     assert.equal(res.status, 200, `view-by-token returned ${res.status}`);
     const body = (await res.json()) as { alreadyResponded: boolean; status: string };
@@ -234,34 +248,27 @@ describe("resend of a derived-expired estimate (Task #1955)", () => {
     assert.equal(body.status, "pending");
   });
 
-  it("rejects a second concurrent resend instead of stamping twice", async () => {
+  it("rejects a second concurrent resend instead of stamping twice", { timeout: 15_000 }, async (t) => {
     const seeded = await seedLapsedSentEstimate();
-    const sentAt = new Date();
-    const args = {
-      tokenExpiresAt: new Date(sentAt.getTime() + 30 * 24 * 60 * 60 * 1000),
-      approvalSentAt: sentAt,
-      newEstimateDate: sentAt,
-      isResend: true as const,
-      // Both writers read the same row, so both carry the same CAS value.
-      previousApprovalToken: seeded.approvalToken,
-    };
-
-    const winner = await storage.markEstimateSentToCustomer(seeded.id, {
-      ...args,
-      approvalToken: "winner-token-1955",
+    let release!: () => void;
+    const ready = new Promise<void>(resolve => { release = resolve; });
+    const tokens: string[] = [];
+    t.mock.method(EmailService, "sendEstimateApprovalEmail", async (data: EstimateEmailData) => {
+      tokens.push(data.approvalToken);
+      if (tokens.length === 2) release();
+      // Both deliveries must reach the mailer before either can attempt
+      // the real DB CAS, or the second request just sees the new lifecycle.
+      await ready;
     });
-    const loser = await storage.markEstimateSentToCustomer(seeded.id, {
-      ...args,
-      approvalToken: "loser-token-1955",
-    });
+    const reviews = await Promise.all([previewResend(seeded.id), previewResend(seeded.id)]);
+    const safety = setTimeout(release, 6000);
+    const results = await Promise.all(reviews.map(token => post(seeded.id, "send", token))).finally(() => clearTimeout(safety));
+    assert.deepEqual(results.map(res => res.status).sort(), [200, 409]);
+    const conflict = await results.find(res => res.status === 409)!.json() as { message: string };
+    assert.equal(conflict.message, "Estimate is no longer in an expired state and cannot be resent");
 
-    assert.ok(winner, "the first writer should win");
-    assert.equal(loser, undefined, "the second writer must see a conflict");
-
-    const [row] = await db
-      .select()
-      .from(estimates)
-      .where(eq(estimates.id, seeded.id));
-    assert.equal(row.approvalToken, "winner-token-1955");
+    const [row] = await db.select().from(estimates).where(eq(estimates.id, seeded.id));
+    assert.ok(tokens.includes(row.approvalToken!));
+    assert.notEqual(tokens[0], tokens[1]);
   });
 });

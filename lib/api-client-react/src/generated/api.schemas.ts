@@ -5,6 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface OutgoingEmailAttachmentInput {
+  confirmationToken: string;
+}
+
 export type OutgoingEmailDraftInputOptions = { [key: string]: boolean };
 
 export interface OutgoingEmailDraftInput {
@@ -33,6 +37,8 @@ export type OutgoingEmailPreviewKind =
 
 export const OutgoingEmailPreviewKind = {
   invoice: "invoice",
+  estimate: "estimate",
+  estimate_resend: "estimate_resend",
 } as const;
 
 export type OutgoingEmailPreviewFrom = {

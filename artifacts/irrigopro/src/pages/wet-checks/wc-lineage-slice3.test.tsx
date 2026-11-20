@@ -11,13 +11,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import React from "react";
+import { resolve } from "node:path";
 
 // ─── (a) Estimate-detail "From Wet Check #X" banner ──────────────────────────
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ queryKey }: any) => {
+  useQuery: ({ queryKey, enabled }: any) => {
     // Return a mock estimate with originWetCheckId = 42 when queried.
-    if (String(queryKey?.[0]).includes("/api/estimates")) {
+    if (enabled !== false && String(queryKey?.[0]).includes("/api/estimates")) {
       return {
         data: {
           id: 101,
@@ -32,13 +33,15 @@ vi.mock("@tanstack/react-query", () => ({
           customerPhone: "555-0100",
           customerAddress: "123 Main St",
           createdAt: new Date().toISOString(),
+          estimateDate: new Date().toISOString(),
           items: [],
         },
         isLoading: false,
       };
     }
-    return { data: undefined, isLoading: false };
+    return { data: [], isLoading: false };
   },
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   useMutation: () => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),
@@ -58,24 +61,12 @@ vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 
-vi.mock("@/lib/email", () => ({
-  sendEstimateEmail: vi.fn(),
-}));
-
-vi.mock("@/hooks/use-estimate-resend", () => ({
-  useEstimateResend: () => ({ resendEstimate: vi.fn(), isResending: false }),
-}));
-
 vi.mock("@/components/estimates/estimate-media-block", () => ({
   EstimateMediaBlock: () => null,
 }));
 
-vi.mock("@/components/estimates/resend-confirm-dialog", () => ({
-  ResendConfirmDialog: () => null,
-}));
-
-vi.mock("@/components/estimates/send-estimate-dialog", () => ({
-  SendEstimateDialog: () => null,
+vi.mock("@/components/email/review-and-send-dialog", () => ({
+  ReviewAndSendDialog: () => null,
 }));
 
 vi.mock("@/components/activity/ActivityTab", () => ({
@@ -86,7 +77,8 @@ vi.mock("@/components/estimates/list/estimate-list-status-badge", () => ({
   EstimateListStatusBadge: () => null,
 }));
 
-vi.mock("@workspace/shared", () => ({
+vi.mock("@workspace/shared", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@workspace/shared")>(),
   formatEstimateNumber: (n: any) => String(n ?? ""),
   buildEstimatePdfFilename: (n: any) => `estimate-${n}.pdf`,
   isApproved: () => false,
@@ -174,10 +166,7 @@ describe("(b) createWorkOrderFromEstimate copies originWetCheckId", () => {
   it("storage.ts createWorkOrderFromEstimate passes originWetCheckId to the WO insert", async () => {
     const { readFileSync } = await import("fs");
     const source = readFileSync(
-      new URL(
-        "../../../../artifacts/api-server/src/storage.ts",
-        import.meta.url,
-      ).pathname,
+      resolve(import.meta.dirname, "../../../../api-server/src/storage.ts"),
       "utf-8",
     );
     // Both conversion paths must forward originWetCheckId.
@@ -200,16 +189,6 @@ describe("(b) createWorkOrderFromEstimate copies originWetCheckId", () => {
 });
 
 // ─── (c) WO detail — From Wet Check banner ───────────────────────────────────
-
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [], isLoading: false }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-  useMutation: () => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-  }),
-}));
 
 vi.mock("@/utils/safeStorage", () => ({
   safeGet: () =>
@@ -345,10 +324,7 @@ describe("(d) ManagerWetCheckDetailPage lineage source-guard", () => {
   it("ManagerWetCheckDetailPage renders the lineage panel data-testid", async () => {
     const { readFileSync } = await import("fs");
     const source = readFileSync(
-      new URL(
-        "./ManagerWetCheckDetailPage.tsx",
-        import.meta.url,
-      ).pathname,
+      resolve(import.meta.dirname, "./ManagerWetCheckDetailPage.tsx"),
       "utf-8",
     );
     // The panel must have the data-testid anchor.

@@ -70,6 +70,7 @@ export * from "./offlineBackflowInputLastTestResult";
 export * from "./offlineBackflowInputTestUnknownReason";
 export * from "./offlineControllerInput";
 export * from "./offlineProgramInput";
+export * from "./outgoingEmailAttachmentInput";
 export * from "./outgoingEmailDraftInput";
 export * from "./outgoingEmailDraftInputOptions";
 export * from "./outgoingEmailPreview";

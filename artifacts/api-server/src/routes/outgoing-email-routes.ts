@@ -3,7 +3,7 @@ import { Router, type Express, type Request, type RequestHandler } from "express
 import { PreviewOutgoingEmailResponse, SendOutgoingEmailResponse } from "@workspace/api-zod";
 import { createSingleUseConfirmation } from "../lib/single-use-confirmation";
 import { logger } from "../lib/logger";
-import { outgoingEmailHandlers } from "../outgoing-email/registry";
+import { createOutgoingEmailHandlers } from "../outgoing-email/registry";
 import { draftInputSchema, INVOICE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "../outgoing-email/types";
 
 const messages = {
@@ -27,14 +27,16 @@ function fingerprint(draft: BuiltDraft) {
 
 export function registerOutgoingEmailRoutes(app: Express, {
   requireAuthentication,
-  handlers = outgoingEmailHandlers.values(),
+  handlers,
+  recordLifecycleAudit,
 }: {
   requireAuthentication: RequestHandler;
   handlers?: Iterable<OutgoingEmailHandler<any>>;
+  recordLifecycleAudit?: Parameters<typeof createOutgoingEmailHandlers>[0];
 }) {
   const router = Router();
-  for (const handler of handlers) {
-    const action = (sending: boolean): RequestHandler<{ id: string }> => async (req, res) => {
+  for (const handler of handlers ?? createOutgoingEmailHandlers(recordLifecycleAudit)) {
+    const action = (operation: "preview" | "send" | "attachment"): RequestHandler<{ id: string }> => async (req, res) => {
       res.set("Cache-Control", "no-store");
       const id = Number(req.params.id);
       if (!/^[1-9]\d*$/.test(req.params.id) || !Number.isSafeInteger(id)) {
@@ -62,7 +64,7 @@ export function registerOutgoingEmailRoutes(app: Express, {
         const content = fingerprint(draft);
         const bound = (v: string, c: string) => JSON.stringify([...claims, v, c]);
         const now = new Date();
-        if (!sending) {
+        if (operation === "preview") {
           const { token, expiresAt } = confirmation.issue(bound(version, content), now);
           const { sender, versionStamp: _, ...visibleDraft } = draft;
           res.json(PreviewOutgoingEmailResponse.parse({
@@ -73,8 +75,8 @@ export function registerOutgoingEmailRoutes(app: Express, {
           return;
         }
 
-        if (!draft.to) {
-          res.status(422).json({ message: "This customer has no billing email. Enter one, or add it in QuickBooks and resync." });
+        if (operation === "send" && !draft.to) {
+          res.status(422).json({ message: handler.noRecipientMessage ?? "This customer has no billing email. Enter one, or add it in QuickBooks and resync." });
           return;
         }
         const supplied: unknown = req.body?.confirmationToken;
@@ -86,11 +88,18 @@ export function registerOutgoingEmailRoutes(app: Express, {
           res.status(check.status).json({ reason: check.reason, message: check.message });
           return;
         }
-        if (!review || review[1] !== version || review[2] !== content) {
+        if (!review || review[1] !== version || (operation === "send" && review[2] !== content)) {
           res.status(409).json({
             reason: "confirmation_mismatch",
             message: review && review[1] !== version && handler.kind === "invoice" ? INVOICE_CHANGED : messages.mismatch,
           });
+          return;
+        }
+        if (operation === "attachment" && handler.renderAttachment) {
+          // View only needs the signed attachment version, not the editable
+          // message fields. A review with no attachment has a different version.
+          const file = await handler.renderAttachment(entity);
+          res.attachment(file.filename).type("application/pdf").send(file.buffer);
           return;
         }
         // No await between the check and consumption: concurrent requests in
@@ -103,11 +112,18 @@ export function registerOutgoingEmailRoutes(app: Express, {
           return;
         }
         (req.log ?? logger).error({ err, kind: handler.kind, id }, "Outgoing email request failed");
-        res.status(500).json({ message: sending ? "Could not finish sending the email. Check delivery history before trying again." : "Could not preview the email." });
+        res.status(500).json({
+          message: operation === "send"
+            ? "Could not finish sending the email. Check delivery history before trying again."
+            : operation === "attachment" ? "Could not preview the attachment." : "Could not preview the email.",
+        });
       }
     };
-    router.post(`/${handler.kind}/:id/preview`, ...handler.capabilities, action(false));
-    router.post(`/${handler.kind}/:id/send`, ...handler.capabilities, action(true));
+    router.post(`/${handler.kind}/:id/preview`, ...handler.capabilities, action("preview"));
+    router.post(`/${handler.kind}/:id/send`, ...handler.capabilities, action("send"));
+    if (handler.renderAttachment) {
+      router.post(`/${handler.kind}/:id/attachment`, ...handler.capabilities, action("attachment"));
+    }
   }
   router.use((_req, res) => { res.status(404).json({ message: "Email kind not found." }); });
   app.use("/api/outgoing-email", requireAuthentication, router);

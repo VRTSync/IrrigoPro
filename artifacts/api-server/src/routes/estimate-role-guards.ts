@@ -14,8 +14,8 @@ import { checkEstimateBranchGate } from "../estimate-payload";
 // ─── Role constants ───────────────────────────────────────────────────────────
 
 // Roles that may perform internal approval / customer delivery on an
-// estimate (approve, reject, internal-approve, send-approval-email,
-// email, pending-approval list).
+// estimate (approve, reject, internal-approve, email review and send,
+// pending-approval list).
 // TODO(roles): migrate to a capability from lib/shared/src/roles.ts (hasCapability). Inventory: docs/roles-migration-inventory.md
 export const ESTIMATE_APPROVAL_ROLES = new Set<string>([
   "super_admin",
@@ -113,6 +113,20 @@ export const requireEstimateApprovalAccess: RequestHandler = (req, res, next) =>
   next();
 };
 
+// Task #2010 — resend uses its original three roles, not the wider
+// approval-access guard. Run it before the branch gate so an unauthorized
+// caller gets 403 without learning whether the estimate needs a branch.
+export const requireResendRole: RequestHandler = (req, res, next) => {
+  const role = req.authenticatedUserRole;
+  if (role !== "irrigation_manager" && role !== "company_admin" && role !== "super_admin") {
+    res.status(403).json({
+      message: "Access denied. Resending requires irrigation manager or admin role.",
+    });
+    return;
+  }
+  next();
+};
+
 // Read-only access guard for the estimate PDF endpoint. Rendering or
 // downloading is not a mutation, so the role list is wider than
 // requireEstimateApprovalAccess.
@@ -163,7 +177,7 @@ export interface EstimateBranchGateStorage {
       }
     | undefined
   >;
-  getCustomer(id: number): Promise<{ branches?: unknown } | undefined>;
+  getCustomer(id: number): Promise<{ companyId?: number | null; branches?: unknown } | undefined>;
 }
 
 export function requireEstimateBranchForSend(
@@ -190,14 +204,7 @@ export function requireEstimateBranchForSend(
       // Answering 400 here would confirm the row exists and leak its
       // branch state across the tenant boundary. super_admin has a null
       // company scope and legitimately sees every row.
-      const callerCompanyId = (
-        req as unknown as { authenticatedUserCompanyId?: number | null }
-      ).authenticatedUserCompanyId;
-      if (
-        callerCompanyId != null &&
-        estimate.companyId != null &&
-        estimate.companyId !== callerCompanyId
-      ) {
+      if (!estimateOwnershipMatches(req, estimate.companyId)) {
         next();
         return;
       }
@@ -206,7 +213,7 @@ export function requireEstimateBranchForSend(
         return;
       }
       const customer = await storage.getCustomer(Number(estimate.customerId));
-      if (!customer) {
+      if (!customer || (customer.companyId !== undefined && customer.companyId !== estimate.companyId)) {
         next();
         return;
       }

@@ -7445,7 +7445,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireInvoiceSend,
     _core: reminderCore,
   });
-  registerOutgoingEmailRoutes(app, { requireAuthentication });
+  registerOutgoingEmailRoutes(app, { requireAuthentication, recordLifecycleAudit });
   // Task #1889 — internal A/R notes. GET + POST only; there is deliberately no
   // update or delete route in that module and there must never be one.
   // Gated on requireArNotesAccess (CAN_READ_AR_NOTES), which is NARROWER than
@@ -9305,7 +9305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // multi-purpose POST /transition all return 410 with a redirect
   // message. See the helper module for the contract and tests.
   // The canonical replacements (PATCH approve/reject,
-  // /submit-for-review, /send-approval-email, /resend) all live in
+  // /submit-for-review) all live in
   // ./estimate-routes.ts as of Task #640.
   registerLegacyEstimateGoneRoutes(app);
 

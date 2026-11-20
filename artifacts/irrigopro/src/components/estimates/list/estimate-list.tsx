@@ -9,12 +9,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { type LifecycleStatus } from "@workspace/shared";
+import { formatEstimateNumber, type LifecycleStatus } from "@workspace/shared";
 import type { Estimate } from "@workspace/db/schema";
 import { EstimateListRow } from "./estimate-list-row";
 import { EstimateListStatusBadge } from "./estimate-list-status-badge";
-import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
-import { useEstimateResend } from "@/hooks/use-estimate-resend";
+import { ReviewAndSendDialog } from "@/components/email/review-and-send-dialog";
+import { queryClient } from "@/lib/queryClient";
 import {
   lifecycleOf,
   nextSort,
@@ -61,17 +61,6 @@ export function EstimateList({ estimates, filters, onOpen, onEdit, isError, onRe
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [resendDialogEstimate, setResendDialogEstimate] = useState<Estimate | null>(null);
-  const { resendEstimate, isResending } = useEstimateResend();
-
-  const handleConfirmResend = async (payload: Parameters<typeof resendEstimate>[1]) => {
-    if (!resendDialogEstimate) return;
-    try {
-      await resendEstimate(resendDialogEstimate.id, payload);
-      setResendDialogEstimate(null);
-    } catch {
-      // Error toast surfaced by hook; keep dialog open for retry.
-    }
-  };
 
   const filtered = useMemo(() => {
     return estimates.filter((e) => {
@@ -241,15 +230,16 @@ export function EstimateList({ estimates, filters, onOpen, onEdit, isError, onRe
         )}
       </div>
 
-      <ResendConfirmDialog
-        estimate={resendDialogEstimate}
-        open={resendDialogEstimate !== null}
-        onOpenChange={(open) => {
-          if (!open) setResendDialogEstimate(null);
-        }}
-        onConfirm={handleConfirmResend}
-        isResending={isResending}
-      />
+      {resendDialogEstimate && (
+        <ReviewAndSendDialog
+          open
+          onOpenChange={(open) => { if (!open) setResendDialogEstimate(null); }}
+          kind="estimate_resend"
+          entityId={resendDialogEstimate.id}
+          title={`Resend estimate #${formatEstimateNumber(resendDialogEstimate.estimateNumber).replace(/^EST-/, "")}`}
+          onSent={() => queryClient.invalidateQueries({ queryKey: ["/api/estimates"] })}
+        />
+      )}
     </>
   );
 }

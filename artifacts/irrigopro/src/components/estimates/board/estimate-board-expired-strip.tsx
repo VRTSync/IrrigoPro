@@ -2,9 +2,9 @@ import { useState } from "react";
 import type { Estimate } from "@workspace/db/schema";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, ChevronDown, Send } from "lucide-react";
-import { useEstimateResend } from "@/hooks/use-estimate-resend";
-import { ResendConfirmDialog } from "@/components/estimates/resend-confirm-dialog";
-import { ESTIMATE_EXPIRATION_DAYS, estimateExpiryAnchor } from "@workspace/shared";
+import { ReviewAndSendDialog } from "@/components/email/review-and-send-dialog";
+import { queryClient } from "@/lib/queryClient";
+import { ESTIMATE_EXPIRATION_DAYS, estimateExpiryAnchor, formatEstimateNumber } from "@workspace/shared";
 
 interface EstimateBoardExpiredStripProps {
   estimates: Estimate[];
@@ -32,19 +32,8 @@ export function EstimateBoardExpiredStrip({
 }: EstimateBoardExpiredStripProps) {
   const [expanded, setExpanded] = useState(false);
   const [resendDialogEstimate, setResendDialogEstimate] = useState<Estimate | null>(null);
-  const { resendEstimate, isResending } = useEstimateResend();
 
   if (estimates.length === 0) return null;
-
-  const handleConfirmResend = async (payload: Parameters<typeof resendEstimate>[1]) => {
-    if (!resendDialogEstimate) return;
-    try {
-      await resendEstimate(resendDialogEstimate.id, payload);
-      setResendDialogEstimate(null);
-    } catch {
-      // Error toast surfaced by hook; keep dialog open for retry.
-    }
-  };
 
   return (
     <div className="border border-orange-200 bg-orange-50 rounded-md overflow-hidden">
@@ -120,15 +109,16 @@ export function EstimateBoardExpiredStrip({
           </div>
         </div>
       )}
-      <ResendConfirmDialog
-        estimate={resendDialogEstimate}
-        open={resendDialogEstimate !== null}
-        onOpenChange={(open) => {
-          if (!open) setResendDialogEstimate(null);
-        }}
-        onConfirm={handleConfirmResend}
-        isResending={isResending}
-      />
+      {resendDialogEstimate && (
+        <ReviewAndSendDialog
+          open
+          onOpenChange={(open) => { if (!open) setResendDialogEstimate(null); }}
+          kind="estimate_resend"
+          entityId={resendDialogEstimate.id}
+          title={`Resend estimate #${formatEstimateNumber(resendDialogEstimate.estimateNumber).replace(/^EST-/, "")}`}
+          onSent={() => queryClient.invalidateQueries({ queryKey: ["/api/estimates"] })}
+        />
+      )}
     </div>
   );
 }

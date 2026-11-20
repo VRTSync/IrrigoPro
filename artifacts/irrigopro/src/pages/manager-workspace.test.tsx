@@ -85,8 +85,8 @@ describe("manager-workspace.tsx — source-level assertions", () => {
     expect(MW_SRC.includes("EstimateDetailModal")).toBe(false);
   });
 
-  it("sendEstimateEmail is not imported", () => {
-    expect(MW_SRC.includes("sendEstimateEmail")).toBe(false);
+  it("does not import estimate email controls", () => {
+    expect(MW_SRC.includes("ReviewAndSendDialog")).toBe(false);
   });
 
   it("totalCount does not include an estimates addend", () => {

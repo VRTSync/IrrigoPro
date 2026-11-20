@@ -1061,3 +1061,45 @@ mtime_ms = 1795129777751
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b5a2b88e-e64d-47b3-bdb4-cf45479578a2/fe3283d5-e8d9-4fbc-a590-ffb710b15d9e"
 storage_version_token = "1795129793412147"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "6WiT1ycbZ4Ix3bRButFuH"
+uri = "file://generated-artifacts/estimate-review/first-send-approval-buttons.png"
+type = "image"
+title = "First estimate send — board review"
+description = "Signed-in development screenshot. The board first approved the disposable estimate, then opened the review with placeholder approval links."
+logical_id = "987dc368-1040-4a62-a705-1541c1bdb141"
+content_hash = "sha256:c5ed78899a51bf3a8c0d6c50f066863fd40585fe200f8abc651dc2636f7025cf"
+size = 249120
+mtime_ms = 1795134499759
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/987dc368-1040-4a62-a705-1541c1bdb141/1600bacd-43c6-4d36-a9bb-786d3caf56b6"
+storage_version_token = "1795134523910422"
+content_type = "image/png"
+
+[[outputs]]
+id = "4wofseEG7WKUW340AkZri"
+uri = "file://generated-artifacts/estimate-review/sent-redelivery-approval-buttons.png"
+type = "image"
+title = "Sent estimate — re-delivery review"
+description = "Signed-in development screenshot showing the warning that the estimate date and approval link remain unchanged."
+logical_id = "c491cff4-371b-4c98-aaad-cdc38363c236"
+content_hash = "sha256:0fb1dde0ca321c62e444eaa90585135b624f26b4c13d898e0e1e07d57d4d05da"
+size = 214970
+mtime_ms = 1795134502283
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c491cff4-371b-4c98-aaad-cdc38363c236/5a95a31e-65ec-4a45-a1da-6ff683deb158"
+storage_version_token = "1795134524351105"
+content_type = "image/png"
+
+[[outputs]]
+id = "wfRtNyO5b16KqlE-OK-Jk"
+uri = "file://generated-artifacts/estimate-review/expired-resend-approval-buttons.png"
+type = "image"
+title = "Expired estimate — resend review"
+description = "Signed-in development screenshot showing the warning that the estimate date and 30-day window reset. No email was sent during these browser checks."
+logical_id = "af132089-5546-48e6-9f19-80194dc027de"
+content_hash = "sha256:d70f735570c56a943fe768973a3394e63fb6f3faa910f20aba90c43a38e65a08"
+size = 212971
+mtime_ms = 1795134503803
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/af132089-5546-48e6-9f19-80194dc027de/f6ed1f64-61f9-4363-a385-27c6768c94ec"
+storage_version_token = "1795134524831914"
+content_type = "image/png"

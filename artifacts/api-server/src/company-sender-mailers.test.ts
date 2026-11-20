@@ -26,6 +26,7 @@ const companySender: CompanySender = {
 };
 const estimate: EstimateEmailData = {
   sender: companySender, estimateId: 1, estimateNumber: "50000", customerName: "Customer",
+  customerLabel: "Customer",
   customerEmail: "customer@example.com", projectName: "Test project", totalAmount: "$10.00",
   approvalToken: "test-token", estimateDate: "2026-11-18", createdBy: "Office", companyId: 1,
 };

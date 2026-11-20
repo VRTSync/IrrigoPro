@@ -8,7 +8,7 @@
 import * as zod from "zod";
 
 export const PreviewOutgoingEmailParams = zod.object({
-  kind: zod.enum(["invoice"]),
+  kind: zod.enum(["invoice", "estimate", "estimate_resend"]),
   id: zod.coerce.number().min(1),
 });
 
@@ -40,7 +40,7 @@ export const PreviewOutgoingEmailBody = zod.object({
 });
 
 export const PreviewOutgoingEmailResponse = zod.object({
-  kind: zod.enum(["invoice"]),
+  kind: zod.enum(["invoice", "estimate", "estimate_resend"]),
   id: zod.number(),
   from: zod.object({
     email: zod.string(),
@@ -74,8 +74,17 @@ export const PreviewOutgoingEmailResponse = zod.object({
   expiresAt: zod.coerce.date(),
 });
 
+export const ViewOutgoingEmailAttachmentParams = zod.object({
+  kind: zod.enum(["estimate", "estimate_resend"]),
+  id: zod.coerce.number().min(1),
+});
+
+export const ViewOutgoingEmailAttachmentBody = zod.object({
+  confirmationToken: zod.string(),
+});
+
 export const SendOutgoingEmailParams = zod.object({
-  kind: zod.enum(["invoice"]),
+  kind: zod.enum(["invoice", "estimate", "estimate_resend"]),
   id: zod.coerce.number().min(1),
 });
 

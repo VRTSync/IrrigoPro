@@ -18,3 +18,11 @@ web lane, and typecheck/mobile suites to the types lane. Run the manifest guard
 to detect missing named paths and inspect uncovered-test warnings. Reserve
 service workflows for long-running processes; do not remove someone else's
 checks to create space.
+
+Keep suites that write a shared database-wide marker in a single lane.
+
+**Why:** Validation lanes run in parallel; one copy of a migration suite can
+restore the marker while another is still asserting it.
+
+**How to apply:** Leave the suite covered within its owning lane instead of
+listing it in another lane. Repeated runs within one lane are serial.
