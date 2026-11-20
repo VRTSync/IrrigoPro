@@ -358,6 +358,8 @@ async function startServer(
     },
     getCompany: async () => undefined,
     getCompanyProfile: async () => undefined,
+    claimEstimateEmailSend: async () => { throw new Error("Unexpected send in branch guard tests"); },
+    releaseEstimateEmailSend: async () => { throw new Error("Unexpected send in branch guard tests"); },
     markEstimateSentToCustomer: async () => { throw new Error("Unexpected send in branch guard tests"); },
   };
   registerOutgoingEmailRoutes(app, {

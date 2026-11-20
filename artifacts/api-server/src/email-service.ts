@@ -5,6 +5,7 @@ import { resolveCompanyLogoUrl } from './logo-url';
 import { DEFAULT_FROM_EMAIL, SENDGRID_FROM_NAME, type CompanySender } from './lib/company-sender';
 import { emailBaseUrl } from './lib/email-base-url';
 import { escapeHtml } from './outgoing-email/layout';
+import { logger } from './lib/logger';
 import type { Company } from '@workspace/db';
 
 export { escapeHtml };
@@ -49,6 +50,7 @@ export interface EstimateEmailData {
   // When true the email renders zone-grouped (inspection-origin estimate).
   isInspectionOrigin?: boolean;
   approvalToken: string;
+  deliveryAttemptId?: string;
   estimateDate: string;
   createdBy: string;
   companyId: number;
@@ -90,6 +92,9 @@ export interface EstimateEmailData {
 
 type EstimateApprovalLinks = { approveUrl: string; rejectUrl: string; viewUrl: string };
 export const ESTIMATE_PREVIEW_LINK = 'about:blank#link-created-when-sent';
+
+// Only this error permits releasing a delivery claim and trying again.
+export class EstimateEmailNotSubmittedError extends Error {}
 
 export function buildEstimateApprovalSubject(data: Pick<EstimateEmailData, 'estimateNumber' | 'customerLabel'>): string {
   return `Irrigation Estimate #${String(data.estimateNumber).replace(/^EST-?/i, '')} – ${data.customerLabel}`;
@@ -259,7 +264,7 @@ export class EmailService {
     // and the frontend surfaces a real error instead of a
     // misleading "Sent." toast.
     if (!isEmailConfigured()) {
-      throw new Error(
+      throw new EstimateEmailNotSubmittedError(
         'Email is not configured: SENDGRID_API_KEY is missing. Estimate was not sent.',
       );
     }
@@ -271,14 +276,17 @@ export class EmailService {
     const rejectUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}?intent=reject`;
     const viewUrl = `${this.baseUrl}/estimate-approval/${data.approvalToken}`;
 
-    const { subject, html, text } = await buildEstimateApprovalEmail(data, { approveUrl, rejectUrl, viewUrl });
+    const { subject, html, text } = await buildEstimateApprovalEmail(data, { approveUrl, rejectUrl, viewUrl })
+      .catch((error: unknown) => {
+        throw new EstimateEmailNotSubmittedError("Could not prepare the estimate email. Nothing was sent.", { cause: error });
+      });
 
     const toAddr = (data.to && data.to.trim()) || data.customerEmail;
     const ccList = (data.cc ?? []).filter((s) => s && s.trim().length > 0);
     const bccList = (data.bcc ?? []).filter((s) => s && s.trim().length > 0);
 
     try {
-      await sgMail.send({
+      const [response] = await sgMail.send({
         from: data.sender.from,
         ...(data.sender.replyTo ? { replyTo: data.sender.replyTo } : {}),
         to: toAddr,
@@ -291,7 +299,8 @@ export class EmailService {
         customArgs: {
           estimateId: data.estimateId.toString(),
           estimateNumber: data.estimateNumber,
-          companyId: data.companyId.toString()
+          companyId: data.companyId.toString(),
+          ...(data.deliveryAttemptId ? { deliveryAttemptId: data.deliveryAttemptId } : {}),
         },
         // Task #1791 — forward PDF attachment when the caller provides one.
         ...(data.attachments && data.attachments.length > 0
@@ -299,34 +308,29 @@ export class EmailService {
           : {}),
       });
 
-      console.log(`Estimate approval email sent to ${toAddr}${ccList.length ? ` (cc ${ccList.join(', ')})` : ''}${bccList.length ? ` (bcc ${bccList.join(', ')})` : ''}`);
-    } catch (error: any) {
-      // Task #703 — SendGrid puts the actionable reason on
-      // error.response.body.errors[*].message (e.g. "The from
-      // address does not match a verified Sender Identity"). Log
-      // the structured payload and re-throw an Error whose message
-      // includes that reason so the route handler returns it in
-      // the JSON response and the frontend toast is actionable.
-      const sgErrors = error?.response?.body?.errors;
-      const sgReason = Array.isArray(sgErrors)
-        ? sgErrors
-            .map((e: any) => e?.message)
-            .filter((m: unknown): m is string => typeof m === 'string' && m.length > 0)
-            .join('; ')
-        : '';
-      console.error('Failed to send estimate approval email:', {
-        statusCode: error?.code ?? error?.response?.statusCode,
-        body: error?.response?.body,
-        message: error?.message,
-      });
-      const baseMsg =
-        (error instanceof Error && error.message) || 'Unknown SendGrid error';
-      throw new Error(
-        sgReason
-          ? `SendGrid rejected the estimate email: ${sgReason}`
-          : `Failed to send estimate email: ${baseMsg}`,
-      );
+      if (response.statusCode !== 202) {
+        throw new Error(`Unexpected SendGrid acceptance response: ${response.statusCode}`);
+      }
+    } catch (error) {
+      // The SendGrid SDK puts the HTTP status in `code` on ResponseError.
+      // Only explicit rejection responses are retryable; a timeout, dropped
+      // connection, or 5xx can happen after the provider accepted the mail.
+      const responseError = error as { code?: unknown; response?: { body?: { errors?: unknown } } } | null;
+      const status = responseError?.code;
+      if (responseError?.response && typeof status === 'number' &&
+          [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(status)) {
+        const errors = responseError.response.body?.errors;
+        const reason = Array.isArray(errors)
+          ? errors.map(e => e?.message).filter((m: unknown) => typeof m === 'string' && m.length > 0).join('; ')
+          : '';
+        throw new EstimateEmailNotSubmittedError(
+          reason ? `SendGrid rejected the estimate email: ${reason}` : `SendGrid rejected the estimate email (HTTP ${status}).`,
+          { cause: error },
+        );
+      }
+      throw error;
     }
+    logger.info({ estimateId: data.estimateId, companyId: data.companyId, attemptId: data.deliveryAttemptId }, 'SendGrid accepted estimate email');
   }
 
   static async buildEstimateApprovalEmail(data: EstimateEmailData, { approveUrl, rejectUrl, viewUrl }: EstimateApprovalLinks) {

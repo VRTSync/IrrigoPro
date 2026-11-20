@@ -223,6 +223,8 @@ async function startMatrixServer(): Promise<Harness> {
     },
     getCompany: async () => undefined,
     getCompanyProfile: async () => undefined,
+    claimEstimateEmailSend: async () => "claimed" as const,
+    releaseEstimateEmailSend: async () => { throw new Error("Unexpected delivery in role matrix tests"); },
     markEstimateSentToCustomer: async (id: number) => emailStorage.getEstimate(id),
   };
   registerOutgoingEmailRoutes(app, {

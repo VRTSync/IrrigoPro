@@ -39,6 +39,12 @@ Background delivery must carry the approved draft across the durable queue, not 
 
 **How to apply:** Store a review fingerprint and a durable confirmation digest, recheck the draft before each send, and let recovery mark only running work that no worker still owns.
 
+For direct estimate delivery, an unconfirmed claim is not a timed lock. Keep it until non-delivery is verified; lost provider responses and failed post-acceptance database writes are not safe retry signals.
+
+**Why:** A timeout or process restart says nothing about whether SendGrid accepted the email. Letting the claim expire can silently send a second approval link.
+
+**How to apply:** Require a new review once a delivery has been recorded, even when a re-delivery kept the approval token and estimate date. Use provider delivery evidence, not elapsed time, when designing recovery.
+
 A refused preview and a stale confirmed send are different outcomes. A fresh reminder preview must explain its refusal and offer the invoice action when available. A valid, unused review whose invoice has since become ineligible needs a conflict; a spent review stays spent even when its own send caused the change.
 
 **Why:** A successful reminder starts the throttle. Rechecking eligibility before authenticating the review can disguise a replay as a fresh refusal and obscure what happened.

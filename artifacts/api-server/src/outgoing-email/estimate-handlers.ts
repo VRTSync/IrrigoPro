@@ -9,7 +9,7 @@ import {
 } from "../routes/estimate-role-guards";
 import type { EstimateRouteDeps } from "../routes/estimate-routes";
 import { storage } from "../storage";
-import { estimateEmailData, sendEstimateApprovalEmailFlow, type EstimateSendStorage } from "./estimate-send-flow";
+import { estimateEmailData, nextEstimateSendTime, sendEstimateApprovalEmailFlow, type EstimateSendStorage } from "./estimate-send-flow";
 import { OutgoingEmailError, type OutgoingEmailHandler } from "./types";
 
 const PLACEHOLDER_LINKS = {
@@ -85,7 +85,7 @@ export function createEstimateEmailHandler(
       const customer = estimate.customerId == null ? undefined : await deps.storage.getCustomer(estimate.customerId);
       if (customer && customer.companyId !== estimate.companyId) return null;
       const company = estimate.companyId == null ? null : await deps.storage.getCompanyProfile(estimate.companyId);
-      return { estimate, customer, company: company ?? null, now: deps.now?.() ?? new Date() };
+      return { estimate, customer, company: company ?? null, now: nextEstimateSendTime(estimate, deps.now?.() ?? new Date()) };
     },
     async draft(entity, input) {
       const { estimate, customer, company } = entity;
@@ -112,7 +112,7 @@ export function createEstimateEmailHandler(
           : [],
         warnings, options: { attachPdf }, variant: null,
         versionStamp: [
-          estimate.updatedAt.toISOString(), estimate.lifecycleStatus, estimate.totalAmount,
+          estimate.updatedAt.toISOString(), estimate.approvalSentAt?.toISOString(), estimate.lifecycleStatus, estimate.totalAmount,
           attachPdf ? attachmentVersion(entity) : "no-pdf",
         ].join("|"),
       };

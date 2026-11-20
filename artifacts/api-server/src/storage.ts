@@ -188,6 +188,9 @@ import {
   sumCompletionLaborHours,
 } from "@workspace/shared";
 import { computeEstimateSummary } from "./estimate-summary";
+import {
+  claimEstimateEmailSend, releaseEstimateEmailSend, markEstimateSentToCustomer,
+} from "./storage/estimate-email-sends";
 import type { EstimateSummary, WetCheckBillingListItem } from "@workspace/db";
 import { ObjectStorageService } from "./objectStorage";
 import { money } from "./lib/money";
@@ -647,23 +650,9 @@ export interface IStorage {
   // precondition is not met (or the row is missing).
   rejectEstimateIfPending(id: number): Promise<Estimate | undefined>;
   internallyApproveEstimateIfPending(id: number): Promise<Estimate | undefined>;
-  markEstimateSentToCustomer(
-    id: number,
-    args: {
-      approvalToken: string;
-      tokenExpiresAt: Date;
-      approvalSentAt: Date;
-      newEstimateDate: Date | null;
-      isResend: boolean;
-      isSentRedelivery?: boolean;
-      // Task #1955 — the approval token read at the start of the send
-      // flow. Used as the compare-and-swap value on the resend path.
-      previousApprovalToken?: string | null;
-      // Task #1574 — actual delivery address; persisted so the
-      // reject-via-token audit log records the right recipient.
-      sentToEmail?: string;
-    },
-  ): Promise<Estimate | undefined>;
+  claimEstimateEmailSend: typeof claimEstimateEmailSend;
+  releaseEstimateEmailSend: typeof releaseEstimateEmailSend;
+  markEstimateSentToCustomer: typeof markEstimateSentToCustomer;
   updateEstimateWithItems(id: number, estimate: InsertEstimate, items: ReplacementItem<InsertEstimateItem>[]): Promise<EstimateWithItems>;
   deleteEstimate(id: number): Promise<boolean>;
   // Task #634 — manager-facing soft delete for draft estimates.
@@ -3436,105 +3425,9 @@ export class DatabaseStorage implements IStorage {
     return { ...updated, lifecycleStatus: computeLifecycleStatus(updated) } as Estimate;
   }
 
-  // Task #611 — CAS-style "mark estimate sent to customer". A single
-  // conditional UPDATE: only flips the row if it's still in one of
-  // the two valid pre-send states (or, for the `resend` flow, if the
-  // estimate's `status='expired'`). Two concurrent send requests
-  // therefore can't both stamp tokens — the loser sees zero rows
-  // updated and the caller surfaces a 409. Returns undefined on
-  // conflict.
-  async markEstimateSentToCustomer(
-    id: number,
-    args: {
-      approvalToken: string;
-      tokenExpiresAt: Date;
-      approvalSentAt: Date;
-      newEstimateDate: Date | null;
-      isResend: boolean;
-      // Task #365 — re-delivery of a non-expired sent estimate. The
-      // estimate is already `sent_to_customer` / lifecycle=`sent` and
-      // the customer hasn't responded yet. We re-stamp the token and
-      // re-send the email without resetting estimateDate.
-      isSentRedelivery?: boolean;
-      // Task #1955 — the approval token read at the start of the send
-      // flow, used as the compare-and-swap value on the resend path
-      // (see the CAS branches below).
-      previousApprovalToken?: string | null;
-      // Task #1574 — actual delivery address; persisted so the
-      // reject-via-token POST handler records truthful audit attribution.
-      sentToEmail?: string;
-    },
-  ): Promise<Estimate | undefined> {
-    const setClause: Partial<InsertEstimate> = {
-      approvalToken: args.approvalToken,
-      tokenExpiresAt: args.tokenExpiresAt,
-      approvalSentAt: args.approvalSentAt,
-      internalStatus: "sent_to_customer",
-      ...(args.sentToEmail ? { sentToEmail: args.sentToEmail } : {}),
-      // Task #1955 — a resend renews the customer's approval window, so
-      // the customer-facing status must go back to `pending`. Rows where
-      // a customer clicked the dead link carry `status='expired'`, and
-      // every public token endpoint treats a non-pending status as
-      // "already responded" — leaving it would deliver an email whose
-      // brand-new token is refused. Only the expired-resend branch does
-      // this; a re-delivery of a live estimate is already `pending`.
-      ...(args.isResend ? { status: "pending" } : {}),
-      // Task #642 — dual-write the lifecycle column. The resend flow
-      // also flips lifecycle back from `expired` (read-time view of
-      // `sent` + stale estimateDate) to `sent` since the new
-      // estimateDate clears the expiry condition.
-      lifecycle: "sent",
-    };
-    if (args.newEstimateDate) {
-      (setClause as { estimateDate?: Date }).estimateDate = args.newEstimateDate;
-    }
-    // Three CAS branches:
-    //   isResend         — expired estimate. Task #1955: expiry is a
-    //                      read-time view, so an expired estimate is
-    //                      *persisted* as a sent row (internalStatus=
-    //                      'sent_to_customer', lifecycle='sent') whose
-    //                      window has lapsed; `status` only becomes
-    //                      'expired' if a customer happened to click the
-    //                      dead approval link first. Gating on
-    //                      status='expired' therefore rejected the normal
-    //                      case after the email had already gone out.
-    //                      Concurrency is instead protected by swapping on
-    //                      the approval token read at the start of the
-    //                      flow: the loser of a race no longer matches.
-    //   isSentRedelivery — already sent but not expired; gate on
-    //                      internalStatus='sent_to_customer' AND lifecycle='sent'
-    //   normal first send — gate on pre-send internalStatus values
-    const previousTokenMatches =
-      args.previousApprovalToken
-        ? eq(estimates.approvalToken, args.previousApprovalToken)
-        : isNull(estimates.approvalToken);
-    const whereClause = args.isResend
-      ? and(
-          eq(estimates.id, id),
-          eq(estimates.internalStatus, "sent_to_customer"),
-          eq(estimates.lifecycle as any, "sent"),
-          previousTokenMatches,
-        )
-      : args.isSentRedelivery
-        ? and(
-            eq(estimates.id, id),
-            eq(estimates.internalStatus, "sent_to_customer"),
-            eq(estimates.lifecycle as any, "sent"),
-          )
-        : and(
-          eq(estimates.id, id),
-          or(
-            eq(estimates.internalStatus, "pending_approval"),
-            eq(estimates.internalStatus, "approved_internal"),
-          ),
-        );
-    const [updated] = await db.update(estimates)
-      .set(setClause)
-      .where(whereClause)
-      .returning();
-    if (!updated) return undefined;
-    return { ...updated, lifecycleStatus: computeLifecycleStatus(updated) } as Estimate;
-  }
+  claimEstimateEmailSend = claimEstimateEmailSend;
+  releaseEstimateEmailSend = releaseEstimateEmailSend;
+  markEstimateSentToCustomer = markEstimateSentToCustomer;
 
   async updateEstimateWithItems(id: number, estimate: InsertEstimate, items: ReplacementItem<InsertEstimateItem>[]): Promise<EstimateWithItems> {
     return await db.transaction(async (tx) => {

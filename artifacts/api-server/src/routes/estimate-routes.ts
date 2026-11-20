@@ -127,18 +127,7 @@ export interface EstimateRoutesStorage {
   ): Promise<Estimate | EstimateWithItems | undefined | null>;
   markEstimateSentToCustomer?(
     id: number,
-    opts: {
-      approvalToken: string;
-      tokenExpiresAt: Date;
-      approvalSentAt: Date;
-      newEstimateDate: Date | null;
-      isResend: boolean;
-      isSentRedelivery?: boolean;
-      // Task #1955 — CAS value for the resend path.
-      previousApprovalToken?: string | null;
-      // Task #1574 — actual delivery address for truthful audit attribution.
-      sentToEmail?: string;
-    },
+    opts: Parameters<typeof import("../storage/estimate-email-sends").markEstimateSentToCustomer>[1],
   ): Promise<Estimate | EstimateWithItems | undefined | null>;
   createWorkOrderFromEstimate?(id: number, companyId?: number | null): Promise<WorkOrder>;
   getIrrigationManagerForCompany?(
@@ -1567,6 +1556,7 @@ export function registerEstimateRoutes(
         tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30);
 
         const persisted = await storage.markEstimateSentToCustomer!(id, {
+          companyId: estimate.companyId,
           approvalToken,
           tokenExpiresAt,
           approvalSentAt: new Date(),
@@ -1575,7 +1565,7 @@ export function registerEstimateRoutes(
         });
         if (!persisted) {
           res.status(409).json({
-            message: "Estimate has already been sent to the customer",
+            message: "The estimate changed or an email is already being sent or awaiting delivery confirmation.",
           });
           return;
         }

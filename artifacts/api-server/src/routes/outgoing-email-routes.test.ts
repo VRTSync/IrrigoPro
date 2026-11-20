@@ -12,9 +12,14 @@ mock.module("../storage", { namedExports: { storage: {} } });
 const estimateMessages: Array<{ html: string; text: string; to: string; subject: string; attachments?: Array<{ filename: string; content: string }> }> = [];
 const estimateRenders: Array<{ estimate: EstimateWithItems; sentAt: Date; html: string }> = [];
 let failEstimatePdf = false;
+let estimateProviderError: unknown;
 mock.module("@sendgrid/mail", { defaultExport: {
   setApiKey() {},
-  async send(message: (typeof estimateMessages)[number]) { estimateMessages.push(message); return [{ statusCode: 202 }]; },
+  async send(message: (typeof estimateMessages)[number]) {
+    estimateMessages.push(message);
+    if (estimateProviderError) throw estimateProviderError;
+    return [{ statusCode: 202 }];
+  },
 } });
 mock.module("../estimate-pdf", { namedExports: {
   async renderEstimatePdf(estimate: EstimateWithItems, opts: { sentAt: Date; company?: Company }) {
@@ -69,13 +74,24 @@ function estimateHarness(opts: { companyId?: number | null; role?: string; missi
     [50125, { ...baseEstimate, id: 50125, lifecycleStatus: "draft", internalStatus: "draft" }],
     [50126, { ...baseEstimate, id: 50126, lifecycleStatus: "expired", internalStatus: "sent_to_customer", approvalToken: "expired-secret-token" }],
   ]);
+  const claims = new Map<number, string>();
   const audit: string[] = [];
   const store: NonNullable<Parameters<typeof createEstimateEmailHandler>[1]>["storage"] = {
     async getEstimate(id) { return rows.get(id); },
     async getCustomer() { return customer; },
     async getCompany() { return company; },
     async getCompanyProfile() { return company; },
+    async claimEstimateEmailSend(row, attemptId) {
+      if (claims.has(row.id)) return "blocked";
+      claims.set(row.id, attemptId);
+      return "claimed";
+    },
+    async releaseEstimateEmailSend(id, _companyId, attemptId) {
+      if (claims.get(id) === attemptId) claims.delete(id);
+    },
     async markEstimateSentToCustomer(id, stamps) {
+      assert.equal(claims.get(id), stamps.deliveryAttemptId);
+      claims.delete(id);
       const row = rows.get(id)!;
       const saved = {
         ...row, internalStatus: "sent_to_customer", status: "pending", lifecycle: "sent", lifecycleStatus: "sent" as const,
@@ -414,6 +430,31 @@ it("does not deliver an estimate email if its reviewed attachment cannot be rend
       failEstimatePdf = false;
     }
   });
+});
+
+it("only clears the estimate send claim for a definite SendGrid rejection", async () => {
+  const fields = { options: { attachPdf: false } };
+  for (const [code, expectedStatus, retryStatus] of [[403, 500, 200], [408, 502, 409], [503, 502, 409]]) {
+    await withServer(estimateHarness(), async request => {
+      const path = "/outgoing-email/estimate/50123";
+      const before = estimateMessages.length;
+      const { body: review } = await request(`${path}/preview`, "POST", fields);
+      estimateProviderError = Object.assign(new Error("SendGrid error"), {
+        code, response: { body: { errors: [{ message: "Sender is not verified" }] } },
+      });
+      try {
+        const failed = await request(`${path}/send`, "POST", { ...fields, confirmationToken: review.confirmationToken });
+        assert.equal(failed.status, expectedStatus);
+        assert.match(failed.body.message, code === 403 ? /Sender is not verified/ : /may have accepted/);
+      } finally {
+        estimateProviderError = undefined;
+      }
+      const { body: fresh } = await request(`${path}/preview`, "POST", fields);
+      const retry = await request(`${path}/send`, "POST", { ...fields, confirmationToken: fresh.confirmationToken });
+      assert.equal(retry.status, retryStatus);
+      assert.equal(estimateMessages.length - before, retryStatus === 200 ? 2 : 1);
+    });
+  }
 });
 
 it("allows only the correct estimate lifecycle per kind and keeps the sent link and date on re-delivery", async () => {

@@ -1,26 +1,26 @@
 import type { Request } from "express";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { EstimateWithItems } from "@workspace/db";
 import { formatEstimateNumber } from "@workspace/shared";
 import type { EstimateEmailData } from "../email-service";
 import { isInspectionOriginEstimate } from "../estimate-pdf-html";
 import { resolveCompanySender } from "../lib/company-sender";
+import { logger } from "../lib/logger";
 import { recordAuditEvent as defaultRecordAuditEvent } from "../routes/audit-log";
 import type { IStorage } from "../storage";
 import { OutgoingEmailError } from "./types";
 
-export type EstimateSendStorage = Pick<IStorage, "getEstimate" | "getCompany" | "markEstimateSentToCustomer">;
+export type EstimateSendStorage = Pick<IStorage,
+  "getEstimate" | "getCompany" | "claimEstimateEmailSend" | "releaseEstimateEmailSend" | "markEstimateSentToCustomer"
+>;
 
-// Task #611 — typed error thrown by `sendEstimateApprovalEmailFlow`
-// when the CAS-style "mark sent to customer" update matches zero
-// rows (i.e. someone else won a concurrent send-to-customer race
-// or the estimate moved out of a sendable state between the
-// route's precheck and the DB write). The route layer catches it
-// and returns 409 instead of the generic 500.
-export class EstimateSendConflictError extends OutgoingEmailError {
-  constructor(message: string) {
-    super(409, message);
-    this.name = "EstimateSendConflictError";
-  }
+export const ESTIMATE_SEND_BLOCKED =
+  "An estimate email is already being sent or its delivery could not be confirmed. Verify delivery before trying again.";
+
+export function nextEstimateSendTime(estimate: EstimateWithItems, now: Date): Date {
+  // Re-delivery keeps the same token. Its new send timestamp must still
+  // invalidate all outstanding reviews of the previous delivery.
+  return new Date(Math.max(now.getTime(), (estimate.approvalSentAt?.getTime() ?? -Infinity) + 1));
 }
 
 // Share the estimate snapshot and template inputs between preview and delivery.
@@ -75,20 +75,8 @@ export function estimateEmailData(
   };
 }
 
-// Send approval email to customer
-// Shared helper for first delivery and resend after review. Token generation, the
-// `approvalSentAt` / `internalStatus = sent_to_customer` write, and the
-// SendGrid send all live in one place. Optionally also resets
-// `estimateDate` (used by `resend` to clear the expired bucket).
-//
-// Task #611 — the flow is now email-first: the token is generated in
-// memory, the customer email is sent, and only then is the DB row
-// marked `sent_to_customer` / stamped with the token. Previously the
-// DB write committed first, so a SendGrid failure left the estimate
-// marked sent with a token the customer never saw. With the order
-// reversed, a transient send failure leaves the estimate in its
-// pre-send internal status and the user can retry the single
-// "Send to customer" action cleanly.
+// Claim before contacting SendGrid, then stamp the customer-facing state only
+// after acceptance. An ambiguous outcome leaves the claim in place indefinitely.
 export async function sendEstimateApprovalEmailFlow(
   storage: EstimateSendStorage,
   estimateId: number,
@@ -112,19 +100,18 @@ export async function sendEstimateApprovalEmailFlow(
   } = {},
 ) {
   const estimateWithItems = opts.reviewed?.estimate ?? await storage.getEstimate(estimateId);
-  if (!estimateWithItems) throw new Error(`Estimate ${estimateId} not found`);
+  if (!estimateWithItems || estimateWithItems.id !== estimateId) throw new Error(`Estimate ${estimateId} not found`);
 
-  const crypto = await import("crypto");
   // Task #365 — for sent re-delivery, reuse the existing approval token so
   // the customer's previously shared link remains valid. Only refresh expiry.
   // For expired resend and first send, always mint a new token.
   const approvalToken = opts.isSentRedelivery && estimateWithItems.approvalToken
     ? (estimateWithItems.approvalToken as string)
-    : crypto.randomBytes(32).toString("hex");
+    : randomBytes(32).toString("hex");
   // Task #1955 — one send timestamp for the whole flow. It is the
   // expiry clock, so the PDF we attach below and the row we persist
   // after a successful send must agree on it exactly.
-  const sentAt = opts.reviewed?.sentAt ?? new Date();
+  const sentAt = opts.reviewed?.sentAt ?? nextEstimateSendTime(estimateWithItems, new Date());
   const tokenExpiresAt = new Date(sentAt);
   tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 30);
 
@@ -139,7 +126,7 @@ export async function sendEstimateApprovalEmailFlow(
   const resolvedCc = (opts.cc ?? []).filter((s) => s && s.trim().length > 0);
   const resolvedBcc = (opts.bcc ?? []).filter((s) => s && s.trim().length > 0);
 
-  const { EmailService } = await import("../email-service");
+  const { EmailService, EstimateEmailNotSubmittedError } = await import("../email-service");
 
   // Task #1791 — generate PDF buffer for attachment when opted in.
   let pdfAttachments: Array<{
@@ -174,47 +161,50 @@ export async function sendEstimateApprovalEmailFlow(
     sender: await resolveCompanySender(estimateWithItems.companyId),
     note: opts.note,
   });
+  const companyId = estimateWithItems.companyId;
+  const attemptId = randomUUID();
+  const mode = opts.resetEstimateDate ? "resend" : opts.isSentRedelivery ? "redelivery" : "first";
+  const claim = await storage.claimEstimateEmailSend(estimateWithItems, attemptId, mode);
+  if (claim === "blocked") throw new OutgoingEmailError(409, ESTIMATE_SEND_BLOCKED);
+  if (claim === "changed") {
+    throw new OutgoingEmailError(409, "The estimate changed after you reviewed it. Review it again before sending. Nothing was sent by this request.");
+  }
+
+  const log = opts.req?.log ?? logger;
   try {
     await EmailService.sendEstimateApprovalEmail({
       ...data, approvalToken, subject: opts.subject, to: resolvedTo, cc: resolvedCc,
-      bcc: resolvedBcc, attachments: pdfAttachments,
+      bcc: resolvedBcc, attachments: pdfAttachments, deliveryAttemptId: attemptId,
     });
   } catch (error) {
-    throw new OutgoingEmailError(500, error instanceof Error ? error.message : "Failed to send estimate email");
+    if (error instanceof EstimateEmailNotSubmittedError) {
+      await storage.releaseEstimateEmailSend(estimateId, companyId, attemptId);
+      throw new OutgoingEmailError(500, error.message);
+    }
+    log.warn({ estimateId, companyId, attemptId }, "Could not confirm estimate email delivery; claim retained");
+    throw new OutgoingEmailError(502, "The email provider may have accepted this estimate email. Verify delivery before trying again.");
   }
 
-  // Email send succeeded — persist the transition via a single
-  // conditional UPDATE (Task #611). The WHERE clause pins
-  // internalStatus to a pre-send value (or `status='expired'` for
-  // resend), so two concurrent send-to-customer requests can't
-  // both stamp tokens: the second writer matches zero rows and we
-  // throw EstimateSendConflictError, which the route layer maps
-  // to 409. The cost is a redundant email going out for the loser
-  // of the race — preferable to burying a stale token in the DB.
-  const persisted = await storage.markEstimateSentToCustomer(estimateId, {
-    approvalToken,
-    tokenExpiresAt,
-    approvalSentAt: sentAt,
-    // Task #1955 — compare-and-swap value for the resend path (the row
-    // that was read at the top of this flow must still be the one on
-    // disk, or a concurrent send already won).
-    previousApprovalToken: (estimateWithItems.approvalToken as string | null) ?? null,
-    newEstimateDate: opts.resetEstimateDate ? effectiveEstimateDate : null,
-    isResend: !!opts.resetEstimateDate,
-    isSentRedelivery: !!opts.isSentRedelivery,
-    // Task #1574 — persist actual delivery address so the rejection
-    // audit log records the right recipient even when the send modal's
-    // "To" field was overridden.
-    sentToEmail: resolvedTo,
-  });
-  if (!persisted) {
-    throw new EstimateSendConflictError(
-      opts.resetEstimateDate
-        ? "Estimate is no longer in an expired state and cannot be resent"
-        : opts.isSentRedelivery
-          ? "Estimate is no longer in a sent state and cannot be re-delivered"
-          : "Estimate has already been sent to the customer",
-    );
+  let persisted;
+  try {
+    persisted = await storage.markEstimateSentToCustomer(estimateId, {
+      companyId,
+      deliveryAttemptId: attemptId,
+      approvalToken,
+      tokenExpiresAt,
+      approvalSentAt: sentAt,
+      previousApprovalToken: estimateWithItems.approvalToken ?? null,
+      newEstimateDate: opts.resetEstimateDate ? effectiveEstimateDate : null,
+      isResend: !!opts.resetEstimateDate,
+      isSentRedelivery: !!opts.isSentRedelivery,
+      sentToEmail: resolvedTo,
+    });
+    if (!persisted) throw new Error("Estimate no longer matches the send transition");
+  } catch (err) {
+    // A query error can include parameters such as the new approval token.
+    log.error({ errorType: err instanceof Error ? err.name : "unknown", estimateId, companyId, attemptId },
+      "SendGrid accepted estimate email but its state update could not be confirmed");
+    throw new OutgoingEmailError(500, "The email provider accepted this estimate email, but the estimate update could not be confirmed. Verify delivery before trying again.");
   }
 
   // Task #616 — record a single audit row per send so managers can

@@ -15,21 +15,22 @@
  * These tests hit the real database (like the other estimate storage
  * integration tests) and assert that a resend of a derived-expired row
  * persists the new token and send time — restarting the window — while
- * still rejecting a concurrent second writer.
+ * rejecting competing sends before they can reach the mail provider.
  */
 
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import express, { type RequestHandler } from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { companies, db, estimates } from "@workspace/db";
+import { companies, db, estimateEmailSendClaims, estimates } from "@workspace/db";
 import type { EstimateWithItems } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { computeLifecycleStatus, ESTIMATE_EXPIRATION_DAYS } from "@workspace/shared";
 
 import { storage } from "./storage";
-import { EmailService, type EstimateEmailData } from "./email-service";
+import { EmailService, EstimateEmailNotSubmittedError, type EstimateEmailData } from "./email-service";
 import { createEstimateEmailHandler } from "./outgoing-email/estimate-handlers";
 import { registerOutgoingEmailRoutes } from "./routes/outgoing-email-routes";
 import {
@@ -40,6 +41,12 @@ import {
 const SEED_PROJECT_NAME = "TASK-1955-RESEND-CAS-TEST";
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 async function cleanupSeed(): Promise<void> {
   await db.delete(estimates).where(eq(estimates.projectName, SEED_PROJECT_NAME));
@@ -64,7 +71,10 @@ async function resolveCompanyId(): Promise<number> {
 async function seedLapsedSentEstimate(overrides: {
   status?: string;
   approvalToken?: string | null;
+  mode?: "first" | "redelivery" | "resend";
 } = {}) {
+  const first = overrides.mode === "first";
+  const live = overrides.mode === "redelivery";
   const stamp = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   const [row] = await db
     .insert(estimates)
@@ -81,15 +91,15 @@ async function seedLapsedSentEstimate(overrides: {
       laborSubtotal: "0.00",
       totalAmount: "0.00",
       status: overrides.status ?? "pending",
-      internalStatus: "sent_to_customer",
-      lifecycle: "sent",
+      internalStatus: first ? "approved_internal" : "sent_to_customer",
+      lifecycle: first ? "pending_review" : "sent",
       estimateDate: daysAgo(60),
-      approvalSentAt: daysAgo(ESTIMATE_EXPIRATION_DAYS + 10),
+      approvalSentAt: first ? null : daysAgo(live ? 10 : ESTIMATE_EXPIRATION_DAYS + 10),
       approvalToken:
-        overrides.approvalToken === undefined
+        first ? null : overrides.approvalToken === undefined
           ? `old-token-${stamp}`
           : overrides.approvalToken,
-      tokenExpiresAt: daysAgo(10),
+      tokenExpiresAt: first ? null : daysAgo(live ? -20 : 10),
     })
     .returning();
   return row;
@@ -99,7 +109,7 @@ async function seedLapsedSentEstimate(overrides: {
 // token endpoint and reviewed resend can be exercised over HTTP.
 const noAuth: RequestHandler = (req: any, _res, next) => {
   req.authenticatedUserRole = "super_admin";
-  req.authenticatedUserId = 1;
+  req.authenticatedUserId = Number(req.get("x-test-user-id") ?? 1);
   req.authenticatedUserCompanyId = null;
   next();
 };
@@ -133,20 +143,23 @@ let publicServer: Server;
 let publicBaseUrl: string;
 
 const resendFields = { to: "override@example.invalid", options: { attachPdf: false } };
-const post = (id: number, action: "preview" | "send", confirmationToken?: string) =>
-  fetch(`${publicBaseUrl}/api/outgoing-email/estimate_resend/${id}/${action}`, {
+const post = (
+  id: number, action: "preview" | "send", confirmationToken?: string,
+  kind: "estimate" | "estimate_resend" = "estimate_resend", userId = 1,
+) =>
+  fetch(`${publicBaseUrl}/api/outgoing-email/${kind}/${id}/${action}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-test-user-id": String(userId) },
     body: JSON.stringify({ ...resendFields, confirmationToken }),
   });
 
-async function previewResend(id: number): Promise<string> {
-  const res = await post(id, "preview");
+async function previewResend(id: number, kind: "estimate" | "estimate_resend" = "estimate_resend", userId = 1): Promise<string> {
+  const res = await post(id, "preview", undefined, kind, userId);
   assert.equal(res.status, 200);
   return (await res.json() as { confirmationToken: string }).confirmationToken;
 }
 
-describe("resend of a derived-expired estimate (Task #1955)", () => {
+describe("estimate email delivery claims and resend state", () => {
   before(async () => {
     await cleanupSeed();
     const app = express();
@@ -158,11 +171,15 @@ describe("resend of a derived-expired estimate (Task #1955)", () => {
       getCustomer: reads.getCustomer,
       getCompany: async () => undefined,
       getCompanyProfile: async () => undefined,
-      markEstimateSentToCustomer: storage.markEstimateSentToCustomer.bind(storage),
+      claimEstimateEmailSend: storage.claimEstimateEmailSend,
+      releaseEstimateEmailSend: storage.releaseEstimateEmailSend,
+      markEstimateSentToCustomer: (...args: Parameters<typeof storage.markEstimateSentToCustomer>) =>
+        storage.markEstimateSentToCustomer(...args),
     };
     registerOutgoingEmailRoutes(app, {
       requireAuthentication: noAuth,
-      handlers: [createEstimateEmailHandler("estimate_resend", { storage: storageForTest, recordAuditEvent: async () => {} })],
+      handlers: (["estimate", "estimate_resend"] as const).map(kind =>
+        createEstimateEmailHandler(kind, { storage: storageForTest, recordAuditEvent: async () => {} })),
     });
     publicServer = createServer(app);
     await new Promise<void>((resolve) => publicServer.listen(0, resolve));
@@ -248,27 +265,110 @@ describe("resend of a derived-expired estimate (Task #1955)", () => {
     assert.equal(body.status, "pending");
   });
 
-  it("rejects a second concurrent resend instead of stamping twice", { timeout: 15_000 }, async (t) => {
-    const seeded = await seedLapsedSentEstimate();
-    let release!: () => void;
-    const ready = new Promise<void>(resolve => { release = resolve; });
-    const tokens: string[] = [];
-    t.mock.method(EmailService, "sendEstimateApprovalEmail", async (data: EstimateEmailData) => {
-      tokens.push(data.approvalToken);
-      if (tokens.length === 2) release();
-      // Both deliveries must reach the mailer before either can attempt
-      // the real DB CAS, or the second request just sees the new lifecycle.
-      await ready;
-    });
-    const reviews = await Promise.all([previewResend(seeded.id), previewResend(seeded.id)]);
-    const safety = setTimeout(release, 6000);
-    const results = await Promise.all(reviews.map(token => post(seeded.id, "send", token))).finally(() => clearTimeout(safety));
-    assert.deepEqual(results.map(res => res.status).sort(), [200, 409]);
-    const conflict = await results.find(res => res.status === 409)!.json() as { message: string };
-    assert.equal(conflict.message, "Estimate is no longer in an expired state and cannot be resent");
+  for (const mode of ["first", "redelivery", "resend"] as const) {
+    it(`allows only one provider delivery for concurrent ${mode} requests`, { timeout: 15_000 }, async (t) => {
+      const seeded = await seedLapsedSentEstimate({ mode });
+      const kind = mode === "first" ? "estimate" : "estimate_resend";
+      const entered = deferred();
+      const release = deferred();
+      let mailCalls = 0;
+      const mail = t.mock.method(EmailService, "sendEstimateApprovalEmail", async (_data: EstimateEmailData) => {
+        if (++mailCalls === 1) {
+          entered.resolve();
+          await release.promise;
+        }
+      });
+      const reviews = await Promise.all([1, 2, 3].map(user => previewResend(seeded.id, kind, user)));
+      const firstSend = post(seeded.id, "send", reviews[0], kind, 1);
+      try {
+        // Keep the first request inside the mailer so the competing
+        // reviewer necessarily sees the same pre-send database state.
+        await Promise.race([entered.promise, firstSend.then(res => assert.fail(`First send stopped at ${res.status}`))]);
+        const competing = await post(seeded.id, "send", reviews[1], kind, 2);
+        assert.equal(competing.status, 409);
+        assert.match((await competing.json() as { message: string }).message, /already being sent/);
+        assert.equal(mail.mock.callCount(), 1);
+      } finally {
+        release.resolve();
+        assert.equal((await firstSend).status, 200);
+      }
 
+      // A slow request with the old review must not deliver after release.
+      const stale = await post(seeded.id, "send", reviews[2], kind, 3);
+      assert.equal(stale.status, mode === "first" ? 404 : 409);
+      assert.equal(mail.mock.callCount(), 1);
+      assert.equal(await storage.claimEstimateEmailSend(seeded, randomUUID(), mode), "changed",
+        "a request that already loaded the old row must not claim after the winner releases");
+      const [row] = await db.select().from(estimates).where(eq(estimates.id, seeded.id));
+      assert.equal(row.approvalToken, mail.mock.calls[0].arguments[0].approvalToken);
+      assert.equal(row.approvalToken === seeded.approvalToken, mode === "redelivery");
+      assert.equal(row.estimateDate.getTime() === seeded.estimateDate.getTime(), mode !== "resend");
+      assert.ok(row.approvalSentAt && row.tokenExpiresAt);
+      const expectedExpiry = new Date(row.approvalSentAt);
+      expectedExpiry.setDate(expectedExpiry.getDate() + ESTIMATE_EXPIRATION_DAYS);
+      assert.deepEqual(row.tokenExpiresAt, expectedExpiry);
+      assert.equal((await db.select().from(estimateEmailSendClaims).where(eq(estimateEmailSendClaims.estimateId, seeded.id))).length, 0);
+      if (mode === "redelivery") {
+        const fresh = await post(seeded.id, "send", await previewResend(seeded.id, kind, 2), kind, 2);
+        assert.equal(fresh.status, 200, "a deliberate new review can re-deliver");
+        assert.equal(mail.mock.callCount(), 2);
+      }
+    });
+  }
+
+  it("retains the tenant claim and blocks a fresh review after a provider timeout", async (t) => {
+    const seeded = await seedLapsedSentEstimate({ mode: "first" });
+    assert.equal(await storage.claimEstimateEmailSend({ ...seeded, companyId: 0 }, randomUUID(), "first"), "changed");
+    const mail = t.mock.method(EmailService, "sendEstimateApprovalEmail", async (_data: EstimateEmailData) => {
+      throw new Error("connection closed before receiving a response");
+    });
+    const kind = "estimate";
+    const sent = await post(seeded.id, "send", await previewResend(seeded.id, kind), kind);
+    assert.equal(sent.status, 502);
+    assert.match((await sent.json() as { message: string }).message, /may have accepted/);
+    const [claim] = await db.select().from(estimateEmailSendClaims).where(eq(estimateEmailSendClaims.estimateId, seeded.id));
+    assert.equal(claim.companyId, seeded.companyId);
+    assert.equal(claim.attemptId, mail.mock.calls[0].arguments[0].deliveryAttemptId);
+    await storage.releaseEstimateEmailSend(seeded.id, 0, claim.attemptId);
+    const retried = await post(seeded.id, "send", await previewResend(seeded.id, kind, 2), kind, 2);
+    assert.equal(retried.status, 409);
+    assert.match((await retried.json() as { message: string }).message, /Verify delivery/);
+    assert.equal(mail.mock.callCount(), 1);
     const [row] = await db.select().from(estimates).where(eq(estimates.id, seeded.id));
-    assert.ok(tokens.includes(row.approvalToken!));
-    assert.notEqual(tokens[0], tokens[1]);
+    assert.equal(row.approvalSentAt, null);
+    assert.equal(row.approvalToken, null);
+    assert.equal(await storage.markEstimateSentToCustomer(seeded.id, {
+      companyId: seeded.companyId, approvalToken: "manual-token", tokenExpiresAt: daysAgo(-30),
+      approvalSentAt: new Date(), newEstimateDate: null, isResend: false,
+    }), undefined, "manual mark-sent must not invalidate an unconfirmed email link");
+  });
+
+  it("releases the claim after a definite rejection so a fresh review can retry", async (t) => {
+    const seeded = await seedLapsedSentEstimate();
+    let attempts = 0;
+    const mail = t.mock.method(EmailService, "sendEstimateApprovalEmail", async (_data: EstimateEmailData) => {
+      if (++attempts === 1) throw new EstimateEmailNotSubmittedError("SendGrid rejected the estimate email");
+    });
+    const failed = await post(seeded.id, "send", await previewResend(seeded.id));
+    assert.equal(failed.status, 500);
+    assert.equal(mail.mock.callCount(), 1);
+    const retried = await post(seeded.id, "send", await previewResend(seeded.id));
+    assert.equal(retried.status, 200);
+    assert.equal(mail.mock.callCount(), 2);
+  });
+
+  it("does not send again when acceptance succeeds but stamping the estimate fails", async (t) => {
+    const seeded = await seedLapsedSentEstimate();
+    const mail = t.mock.method(EmailService, "sendEstimateApprovalEmail", async (_data: EstimateEmailData) => {});
+    const stamp = t.mock.method(storage, "markEstimateSentToCustomer", async () => {
+      throw new Error("database write failed");
+    });
+    const sent = await post(seeded.id, "send", await previewResend(seeded.id));
+    assert.equal(sent.status, 500);
+    assert.match((await sent.json() as { message: string }).message, /provider accepted/);
+    stamp.mock.restore();
+    const retried = await post(seeded.id, "send", await previewResend(seeded.id, "estimate_resend", 2), "estimate_resend", 2);
+    assert.equal(retried.status, 409);
+    assert.equal(mail.mock.callCount(), 1);
   });
 });
