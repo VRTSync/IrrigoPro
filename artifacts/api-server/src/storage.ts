@@ -827,7 +827,7 @@ export interface IStorage {
   /** Full history for one invoice, newest first. Company-scoped. */
   getInvoiceReminders(invoiceId: number, companyId: number | null): Promise<InvoiceReminder[]>;
   /** The most recent *delivered* reminder, which is what the throttle reads. */
-  getLastDeliveredInvoiceReminder(invoiceId: number): Promise<InvoiceReminder | undefined>;
+  getLastDeliveredInvoiceReminder(invoiceId: number, companyId?: number | null): Promise<InvoiceReminder | undefined>;
   /** Delivered-reminder count + last sent-at, per invoice, for the A/R list. */
   getInvoiceReminderSummaries(
     companyId: number | null,
@@ -1118,7 +1118,7 @@ export interface IStorage {
     executor?: DbExecutor,
     explicitEstimateNumber?: string,
   ): Promise<EstimateWithItems>;
-  getWetCheck(id: number, companyId: number): Promise<WetCheckWithDetails | undefined>;
+  getWetCheck(id: number, companyId: number | null): Promise<WetCheckWithDetails | undefined>;
   findActiveWetCheck(companyId: number, customerId: number, technicianId: number, branchName?: string | null): Promise<WetCheck | undefined>;
   createWetCheck(insert: InsertWetCheck): Promise<WetCheck>;
   updateWetCheck(id: number, companyId: number, patch: Partial<InsertWetCheck>): Promise<WetCheck | undefined>;
@@ -7684,13 +7684,14 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(invoiceReminders.sentAt), desc(invoiceReminders.id));
   }
 
-  async getLastDeliveredInvoiceReminder(invoiceId: number): Promise<InvoiceReminder | undefined> {
+  async getLastDeliveredInvoiceReminder(invoiceId: number, companyId?: number | null): Promise<InvoiceReminder | undefined> {
     const [row] = await db
       .select()
       .from(invoiceReminders)
       .where(
         and(
           eq(invoiceReminders.invoiceId, invoiceId),
+          companyId == null ? undefined : eq(invoiceReminders.companyId, companyId),
           eq(invoiceReminders.deliveryStatus, 'sent'),
         ),
       )
@@ -9236,10 +9237,11 @@ export class DatabaseStorage implements IStorage {
     return catalogLaborHoursForFinding({ issueType, quantity }, catalog).toFixed(2);
   }
 
-  async getWetCheck(id: number, companyId: number): Promise<WetCheckWithDetails | undefined> {
+  async getWetCheck(id: number, companyId: number | null): Promise<WetCheckWithDetails | undefined> {
     const [wc] = await db.select().from(wetChecks)
-      .where(and(eq(wetChecks.id, id), eq(wetChecks.companyId, companyId)));
+      .where(and(eq(wetChecks.id, id), companyId === null ? undefined : eq(wetChecks.companyId, companyId)));
     if (!wc) return undefined;
+    companyId = wc.companyId;
     // Task #1857: order by the controller's stored letter via a join so that
     // if a controller is re-lettered the ordering reflects the new letter.
     // Falls back to controllerLetter (denormalized copy) for historical records

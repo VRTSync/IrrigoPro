@@ -13,4 +13,7 @@ export const OutgoingEmailPreviewKind = {
   invoice: "invoice",
   estimate: "estimate",
   estimate_resend: "estimate_resend",
+  invoice_reminder: "invoice_reminder",
+  wet_check_report: "wet_check_report",
+  irrigation_profile_report: "irrigation_profile_report",
 } as const;

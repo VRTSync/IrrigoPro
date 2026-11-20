@@ -177,7 +177,14 @@ export const ResumeInvoiceBatchBody = zod.object({
 });
 
 export const PreviewOutgoingEmailParams = zod.object({
-  kind: zod.enum(["invoice", "estimate", "estimate_resend"]),
+  kind: zod.enum([
+    "invoice",
+    "estimate",
+    "estimate_resend",
+    "invoice_reminder",
+    "wet_check_report",
+    "irrigation_profile_report",
+  ]),
   id: zod.coerce.number().min(1),
 });
 
@@ -206,10 +213,21 @@ export const PreviewOutgoingEmailBody = zod.object({
     .describe("Blank uses the default"),
   note: zod.string().max(previewOutgoingEmailBodyNoteMax).optional(),
   options: zod.record(zod.string(), zod.boolean()).optional(),
+  variant: zod
+    .string()
+    .optional()
+    .describe("Template key; omission uses the default"),
 });
 
 export const PreviewOutgoingEmailResponse = zod.object({
-  kind: zod.enum(["invoice", "estimate", "estimate_resend"]),
+  kind: zod.enum([
+    "invoice",
+    "estimate",
+    "estimate_resend",
+    "invoice_reminder",
+    "wet_check_report",
+    "irrigation_profile_report",
+  ]),
   id: zod.number(),
   from: zod.object({
     email: zod.string(),
@@ -223,6 +241,13 @@ export const PreviewOutgoingEmailResponse = zod.object({
   subject: zod.string(),
   note: zod.string(),
   options: zod.record(zod.string(), zod.boolean()),
+  variant: zod.string().nullable(),
+  variantDefs: zod.array(
+    zod.object({
+      key: zod.string(),
+      label: zod.string(),
+    }),
+  ),
   optionDefs: zod.array(
     zod.object({
       key: zod.string(),
@@ -253,7 +278,14 @@ export const ViewOutgoingEmailAttachmentBody = zod.object({
 });
 
 export const SendOutgoingEmailParams = zod.object({
-  kind: zod.enum(["invoice", "estimate", "estimate_resend"]),
+  kind: zod.enum([
+    "invoice",
+    "estimate",
+    "estimate_resend",
+    "invoice_reminder",
+    "wet_check_report",
+    "irrigation_profile_report",
+  ]),
   id: zod.coerce.number().min(1),
 });
 
@@ -286,6 +318,10 @@ export const SendOutgoingEmailBody = zod
       .describe("Blank uses the default"),
     note: zod.string().max(sendOutgoingEmailBodyOneNoteMax).optional(),
     options: zod.record(zod.string(), zod.boolean()).optional(),
+    variant: zod
+      .string()
+      .optional()
+      .describe("Template key; omission uses the default"),
   })
   .and(
     zod.object({
@@ -296,6 +332,10 @@ export const SendOutgoingEmailBody = zod
 export const SendOutgoingEmailResponse = zod.object({
   sentTo: zod.string(),
   sentAt: zod.coerce.date(),
+});
+
+export const GetInvoiceSentCopyParams = zod.object({
+  id: zod.coerce.number().min(1),
 });
 
 export const PreviewMarkupRecalculationQueryParams = zod.object({

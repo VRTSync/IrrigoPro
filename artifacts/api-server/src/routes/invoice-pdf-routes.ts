@@ -1,6 +1,6 @@
 import type { Express, RequestHandler, Response } from "express";
 import { storage as defaultStorage } from "../storage";
-import { InvoicePdfService, buildInvoicePdfFilename } from "../invoice-pdf-service";
+import { InvoicePdfService, buildInvoicePdfFilename, readInvoiceSentCopy } from "../invoice-pdf-service";
 import { logger } from "../lib/logger";
 import type { InvoicePdfGenerationResult } from "../invoice-pdf-service";
 
@@ -9,6 +9,7 @@ interface Deps {
   requireInvoiceRead: RequestHandler;
   _storageApi?: typeof defaultStorage;
   _generatePdf?: (invoiceId: number) => Promise<InvoicePdfGenerationResult>;
+  _readSentCopy?: typeof readInvoiceSentCopy;
 }
 
 export function registerInvoicePdfRoutes(app: Express, deps: Deps): void {
@@ -26,16 +27,21 @@ export function registerInvoicePdfRoutes(app: Express, deps: Deps): void {
     return false;
   };
   // Check ownership before generating a PDF or resolving customer details.
-  async function load(req: any, res: Response) {
-    const invoiceId = Number(req.params.invoiceId);
+  async function loadInvoice(req: any, res: Response) {
+    const invoiceId = Number(req.params.invoiceId ?? req.params.id);
     const companyId = scope(req);
     const invoice = (companyId == null && req.authenticatedUserRole !== "super_admin")
       || !Number.isSafeInteger(invoiceId) || invoiceId <= 0
       ? undefined : await storage.getInvoiceById(invoiceId, companyId);
     if (!invoice) {
       res.status(404).json({ message: "Invoice not found" });
-      return null;
+      return undefined;
     }
+    return invoice;
+  }
+  async function load(req: any, res: Response) {
+    const invoice = await loadInvoice(req, res);
+    if (!invoice) return null;
     const customer = await storage.getCustomerById(invoice.customerId);
     if (!customer || customer.companyId !== invoice.companyId) {
       res.status(404).json({ message: "Invoice not found" });
@@ -81,4 +87,27 @@ export function registerInvoicePdfRoutes(app: Express, deps: Deps): void {
     }
   });
 
+  app.get("/api/invoices/:id/sent-copy", deps.requireAuthentication, deps.requireInvoiceRead, async (req, res) => {
+    try {
+      const invoice = await loadInvoice(req, res);
+      if (!invoice) return;
+      const copy = await storage.getLatestInvoiceSentCopy(invoice.id, invoice.companyId);
+      const bytes = copy && await (deps._readSentCopy ?? readInvoiceSentCopy)(copy.pdfUrl);
+      if (!copy || !bytes) {
+        res.status(404).json({ message: "No saved invoice PDF found." });
+        return;
+      }
+      const ascii = copy.filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "");
+      res.set({
+        "Cache-Control": "private, no-store",
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(copy.filename)}`,
+        "Content-Length": String(bytes.length),
+      });
+      res.end(bytes);
+    } catch (err) {
+      logger.error({ err }, "Error downloading saved invoice PDF");
+      res.status(500).json({ message: "Failed to download saved invoice PDF." });
+    }
+  });
 }

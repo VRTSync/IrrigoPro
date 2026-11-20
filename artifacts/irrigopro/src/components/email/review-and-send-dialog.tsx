@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Form } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { PdfValidationErrorPanel, type PdfErrorDetail } from "@/components/billing/pdf-validation-error";
 import { getImpersonationToken } from "@/lib/impersonation";
@@ -22,23 +23,29 @@ interface ReviewAndSendDialogProps {
   entityId: number;
   title: string;
   onSent?: (r: OutgoingEmailSent) => void;
+  onSendError?: () => void;
+  onAction?: (action: RefusalAction) => void;
 }
 
-type Fields = Pick<OutgoingEmailPreview, "to" | "cc" | "bcc" | "subject" | "note" | "options">;
-const emptyFields: Fields = { to: "", cc: [], bcc: [], subject: "", note: "", options: {} };
-const fieldsOf = ({ to, cc, bcc, subject, note, options }: Fields): Fields => ({ to, cc, bcc, subject, note, options });
+type RefusalAction = { kind: "send_invoice" | "generate_pdf"; label: string };
+type Fields = Pick<OutgoingEmailPreview, "to" | "cc" | "bcc" | "subject" | "note" | "options" | "variant">;
+const emptyFields: Fields = { to: "", cc: [], bcc: [], subject: "", note: "", options: {}, variant: null };
+const fieldsOf = ({ to, cc, bcc, subject, note, options, variant }: Fields): Fields => ({ to, cc, bcc, subject, note, options, variant });
+const draftInput = ({ variant, ...fields }: Fields) => ({ ...fields, ...(variant != null && { variant }) });
 
 function requestOptions(signal?: AbortSignal): RequestInit {
   const token = getImpersonationToken();
   return { credentials: "include", cache: "no-store", signal, headers: token ? { "x-impersonation-token": token } : undefined };
 }
 
-function apiError(error: unknown, fallback: string): PdfErrorDetail & { status?: number } {
-  const response = error as { status?: number; data?: { message?: unknown; validationFailure?: unknown } } | null;
+function apiError(error: unknown, fallback: string): PdfErrorDetail & { status?: number; action?: RefusalAction } {
+  const response = error as { status?: number; data?: { message?: unknown; validationFailure?: unknown; action?: RefusalAction } } | null;
+  const action = response?.data?.action;
   return {
     status: response?.status,
     message: typeof response?.data?.message === "string" ? response.data.message : fallback,
     validationFailure: response?.data?.validationFailure,
+    action: typeof action?.label === "string" && (action.kind === "send_invoice" || action.kind === "generate_pdf") ? action : undefined,
   };
 }
 
@@ -47,7 +54,7 @@ export function ReviewAndSendDialog({ open, ...props }: ReviewAndSendDialogProps
   return open ? <ReviewSession key={`${props.kind}:${props.entityId}`} {...props} /> : null;
 }
 
-function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<ReviewAndSendDialogProps, "open">) {
+function ReviewSession({ onOpenChange, kind, entityId, title, onSent, onSendError, onAction }: Omit<ReviewAndSendDialogProps, "open">) {
   const { toast } = useToast();
   const form = useForm<Fields>({ defaultValues: emptyFields });
   const fields = form.watch();
@@ -55,13 +62,14 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<Rev
   const sequence = useRef(0);
   const [request, setRequest] = useState<{ sequence: number; fields?: Fields; delay: number }>({ sequence: 0, delay: 0 });
   const [review, setReview] = useState<{ sequence: number; draft: OutgoingEmailPreview }>();
-  const [previewError, setPreviewError] = useState<string>();
+  const [previewError, setPreviewError] = useState<ReturnType<typeof apiError>>();
   const [sendError, setSendError] = useState<PdfErrorDetail>();
   const [viewError, setViewError] = useState<PdfErrorDetail>();
   const [retryRequired, setRetryRequired] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [sending, setSending] = useState(false);
   const inFlightSend = useRef(false);
+  const customSubject = useRef(false);
   const [ccPending, setCcPending] = useState(false);
   const [bccPending, setBccPending] = useState(false);
 
@@ -69,13 +77,13 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<Rev
     const abort = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        const draft = await previewOutgoingEmail(kind, entityId, request.fields ?? {}, requestOptions(abort.signal));
+        const draft = await previewOutgoingEmail(kind, entityId, request.fields ? draftInput(request.fields) : {}, requestOptions(abort.signal));
         if (abort.signal.aborted || request.sequence !== sequence.current) return;
         reset(fieldsOf(draft));
         setReview({ sequence: request.sequence, draft });
       } catch (error) {
         if (abort.signal.aborted || request.sequence !== sequence.current) return;
-        setPreviewError(apiError(error, "Could not load the email preview.").message);
+        setPreviewError(apiError(error, "Could not load the email preview."));
       }
     }, request.delay);
     return () => {
@@ -92,6 +100,8 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<Rev
 
   const change = <K extends keyof Fields,>(key: K, value: Fields[K]) => {
     const next = fieldsOf({ ...form.getValues(), [key]: value });
+    if (key === "subject") customSubject.current = !!String(value).trim();
+    if (key === "variant" && !customSubject.current) next.subject = "";
     reset(next, { keepDefaultValues: true });
     setSendError(undefined);
     schedule(next, 600);
@@ -110,12 +120,13 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<Rev
     setSendError(undefined);
     let result: OutgoingEmailSent;
     try {
-      result = await sendOutgoingEmail(kind, entityId, { ...fieldsOf(form.getValues()), confirmationToken: draft.confirmationToken }, requestOptions());
+      result = await sendOutgoingEmail(kind, entityId, { ...draftInput(form.getValues()), confirmationToken: draft.confirmationToken }, requestOptions());
     } catch (error) {
       const detail = apiError(error, "Could not send the email. Check delivery history before trying again.");
       setSendError(detail);
       if (detail.status === 409 || detail.status === 410) schedule(fieldsOf(form.getValues()));
       else setRetryRequired(true);
+      onSendError?.();
       return;
     } finally {
       inFlightSend.current = false;
@@ -167,6 +178,17 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<Rev
               </div>
               <ChipList label="CC" values={fields.cc} onChange={value => change("cc", value)} onDraftChange={setCcPending} testIdPrefix="review-email-cc" />
               <ChipList label="BCC" values={fields.bcc} onChange={value => change("bcc", value)} onDraftChange={setBccPending} testIdPrefix="review-email-bcc" />
+              {!!draft?.variantDefs.length && (
+                <div className="space-y-1">
+                  <Label htmlFor="review-email-template">Template</Label>
+                  <Select value={fields.variant ?? undefined} disabled={sending} onValueChange={value => change("variant", value)}>
+                    <SelectTrigger id="review-email-template" data-testid="select-review-email-template"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {draft.variantDefs.map(({ key, label }) => <SelectItem key={key} value={key} data-testid={`option-review-email-template-${key}`}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-1">
                 <div className="flex items-baseline justify-between gap-2">
                   <Label htmlFor="review-email-subject">Subject</Label>
@@ -213,8 +235,17 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent }: Omit<Rev
                 <div role="status" className="flex h-[60vh] items-start gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> Updating preview…
                 </div>
+              ) : previewError?.status === 422 ? (
+                <div role="alert" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" data-testid="text-email-preview-refusal">
+                  <p>{previewError.message}</p>
+                  {previewError.action && onAction && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => onAction(previewError.action!)} data-testid="button-email-preview-action">
+                      {previewError.action.label}
+                    </Button>
+                  )}
+                </div>
               ) : previewError ? (
-                <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{previewError}</p>
+                <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{previewError.message}</p>
               ) : draft ? (
                 <iframe sandbox="" srcDoc={draft.html} title="Email preview" className="h-[60vh] w-full rounded-lg border bg-white" />
               ) : null}

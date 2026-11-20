@@ -38,3 +38,9 @@ Background delivery must carry the approved draft across the durable queue, not 
 **Why:** A recipient or sender can change while the batch is queued, and a rolling restart can overlap processes. Neither should cause new, unreviewed mail or retry an uncertain send. A process-local consumed-token map alone cannot protect a durable action across replicas.
 
 **How to apply:** Store a review fingerprint and a durable confirmation digest, recheck the draft before each send, and let recovery mark only running work that no worker still owns.
+
+A refused preview and a stale confirmed send are different outcomes. A fresh reminder preview must explain its refusal and offer the invoice action when available. A valid, unused review whose invoice has since become ineligible needs a conflict; a spent review stays spent even when its own send caused the change.
+
+**Why:** A successful reminder starts the throttle. Rechecking eligibility before authenticating the review can disguise a replay as a fresh refusal and obscure what happened.
+
+**How to apply:** Authenticate the submitted review before rebuilding the draft, then check and consume it again at the point of delivery because rebuilding it can await storage.

@@ -23,7 +23,7 @@ const download = "/api/invoices/1008/pdf/download";
 const changed = "This invoice changed after you reviewed it. Review it again before sending.";
 const sentAt = "2026-11-19T12:01:00.000Z";
 const makePreview = (fields = {}, token = "review-one") => ({
-  kind: "invoice", id: 1008, to, cc: [], bcc: [], subject, note: "", options: {}, optionDefs: [],
+  kind: "invoice", id: 1008, to, cc: [], bcc: [], subject, note: "", options: {}, optionDefs: [], variant: null, variantDefs: [],
   from: { name: "High Plains Property Maintenance", email: "billing@highplainsprop.com" },
   replyTo: "office@highplainsprop.com", usingCompanyAddress: true,
   attachments: [{ filename, viewUrl: download }], warnings: [],
@@ -94,6 +94,53 @@ describe("Review and Send", () => {
     expect(sendButton()).toBeEnabled();
   });
 
+  it("loads a new subject and preview when the reminder template changes", async () => {
+    const variantDefs = [{ key: "suggested", label: "Suggested for this invoice" }, { key: "firm", label: "Firm reminder" }];
+    api.mockResolvedValueOnce(json(makePreview({ kind: "invoice_reminder", variant: "suggested", variantDefs, subject: "Suggested subject" })));
+    const second = defer<Response>();
+    api.mockImplementationOnce(() => second.promise);
+    render(<ReviewAndSendDialog open onOpenChange={vi.fn()} kind="invoice_reminder" entityId={1008} title="Send payment reminder" />);
+    await screen.findByTitle("Email preview");
+    const trigger = screen.getByRole("combobox", { name: "Template" });
+    expect(trigger).toHaveTextContent("Suggested for this invoice");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Firm reminder" }));
+    expect(sendButton()).toBeDisabled();
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(2), { timeout: 1500 });
+    expect(postBody(1)).toMatchObject({ variant: "firm", subject: "" });
+    await act(async () => second.resolve(json(makePreview({ kind: "invoice_reminder", variant: "firm", variantDefs, subject: "Firm subject" }, "new-token"))));
+    expect(screen.getByLabelText("Subject")).toHaveValue("Firm subject");
+    expect(sendButton()).toBeEnabled();
+  });
+
+  it("shows a reminder refusal and its action instead of a sendable preview", async () => {
+    const action = { kind: "send_invoice", label: "Send the invoice" };
+    const onAction = vi.fn();
+    api.mockResolvedValueOnce(json({ message: "This invoice has never been sent.", action }, 422));
+    render(<ReviewAndSendDialog open onOpenChange={vi.fn()} kind="invoice_reminder" entityId={1008} title="Send payment reminder" onAction={onAction} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("This invoice has never been sent.");
+    expect(screen.queryByTitle("Email preview")).toBeNull();
+    expect(sendButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: action.label }));
+    expect(onAction).toHaveBeenCalledWith(action);
+  });
+
+  it.each(["send_invoice", "generate_pdf"] as const)("opens the invoice review for the %s refusal", async kind => {
+    localStorage.setItem("user", JSON.stringify({ role: "billing_manager", id: 7, companyId: 1 }));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, queryFn: async ({ queryKey }) => {
+      if (queryKey[2] === "pdf") return { filename };
+      if (queryKey[2] === "ar-notes") return { notes: [] };
+      return { reminders: [], refusal: null, throttle: { throttled: false }, balanceDue: "10", daysOverdue: 8 };
+    } } } });
+    api.mockResolvedValueOnce(json({ message: "Send the invoice first.", action: { kind, label: "Open invoice review" } }, 422));
+    render(<QueryClientProvider client={queryClient}>
+      <InvoicePdfPreviewModal invoiceId={1008} invoiceNumber="IR-1008" customerEmail="" open onOpenChange={vi.fn()} />
+    </QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Send reminder" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open invoice review" }));
+    await screen.findByTitle("Email preview");
+    expect(api.mock.calls.map(([path]) => path)).toEqual(["/api/outgoing-email/invoice_reminder/1008/preview", `${base}/preview`]);
+  });
   it("prefills from the server and shows its sender, sandboxed HTML and PDF attachment", async () => {
     openReview();
     expect(sendButton()).toBeDisabled();

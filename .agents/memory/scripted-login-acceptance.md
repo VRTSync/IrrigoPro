@@ -34,3 +34,9 @@ rather than silently "fixed" into scope creep.
 **Why:** Smooth scrolling can leave a target under the sticky wizard footer after `scrollIntoView` returns. An immediate click may hit the footer instead, falsely suggesting a broken control.
 
 **How to apply:** Wait until the target contains `document.elementFromPoint` at its center, then click. Do not substitute a DOM-triggered click, which would conceal an actual obstruction.
+
+**Rule:** Verify authenticated PDF bytes with a browser-page fetch, not the PDF popup's captured response buffer.
+
+**Why:** Chromium's PDF viewer can leave Puppeteer's response buffer empty for a response that successfully delivers bytes. A popup can also steal focus and stall the next interaction on the source page.
+
+**How to apply:** Check status, MIME, and bytes with `fetch` and `arrayBuffer` inside the signed-in page. If testing the View click itself, capture its request separately and run later interactions in the foreground or in a fresh page.

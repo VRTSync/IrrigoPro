@@ -10,6 +10,7 @@ import type { OutgoingEmailPreviewFrom } from "./outgoingEmailPreviewFrom";
 import type { OutgoingEmailPreviewKind } from "./outgoingEmailPreviewKind";
 import type { OutgoingEmailPreviewOptionDefsItem } from "./outgoingEmailPreviewOptionDefsItem";
 import type { OutgoingEmailPreviewOptions } from "./outgoingEmailPreviewOptions";
+import type { OutgoingEmailPreviewVariantDefsItem } from "./outgoingEmailPreviewVariantDefsItem";
 
 export interface OutgoingEmailPreview {
   kind: OutgoingEmailPreviewKind;
@@ -24,6 +25,9 @@ export interface OutgoingEmailPreview {
   subject: string;
   note: string;
   options: OutgoingEmailPreviewOptions;
+  /** @nullable */
+  variant: string | null;
+  variantDefs: OutgoingEmailPreviewVariantDefsItem[];
   optionDefs: OutgoingEmailPreviewOptionDefsItem[];
   html: string;
   text: string;

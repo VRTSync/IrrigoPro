@@ -29,7 +29,9 @@ import { join } from "node:path";
 
 import { registerInvoiceEditabilityRoutes } from "./invoice-editability-routes";
 import { registerInvoiceArNoteRoutes } from "./invoice-ar-note-routes";
-import { registerInvoiceReminderRoutes } from "./invoice-reminder-routes";
+import { createReminderCore, registerInvoiceReminderRoutes } from "./invoice-reminder-routes";
+import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
+import { createReminderEmailHandler } from "../outgoing-email/reminder-handler";
 import {
   requireInvoiceRead,
   requireInvoiceSend,
@@ -218,6 +220,7 @@ function remindersHarness(opts: {
     async getLatestInvoiceSentCopy(id: number) {
       return { id: 9, pdfUrl: `/pdf/${id}.pdf` };
     },
+    async getCustomer() { return undefined; },
     async getUser(_id: number) {
       return { id: 7, name: "Dana Books" };
     },
@@ -240,10 +243,8 @@ function remindersHarness(opts: {
 
   const app = express();
   app.use(express.json());
-  registerInvoiceReminderRoutes(app, {
-    requireAuthentication: makeAuth(opts.role ?? "bookkeeper", opts.companyId ?? 1),
-    requireInvoiceSend,
-    requireReminderHistoryRead,
+  const requireAuthentication = makeAuth(opts.role ?? "bookkeeper", opts.companyId ?? 1);
+  const core = createReminderCore({
     _storageApi: storageApi,
     _mailer: async () => ({ success: true }),
     _loadPaymentTerms: async () => "net_30",
@@ -251,6 +252,8 @@ function remindersHarness(opts: {
     _baseUrl: () => "https://irrigopro.test",
   });
 
+  registerInvoiceReminderRoutes(app, { requireAuthentication, requireInvoiceSend, requireReminderHistoryRead, _core: core });
+  registerOutgoingEmailRoutes(app, { requireAuthentication, handlers: [createReminderEmailHandler(core)] });
   return { app, historyReads };
 }
 
@@ -560,8 +563,8 @@ describe("reminder history read vs reminder send", () => {
 
   it("still refuses irrigation_manager the send — the read grants no write", async () => {
     const h = remindersHarness({ role: "irrigation_manager" });
-    const { status } = await request(h.app, "POST", "/api/invoices/1/reminders", {
-      templateKey: "firm",
+    const { status } = await request(h.app, "POST", "/api/outgoing-email/invoice_reminder/1/preview", {
+      variant: "firm",
     });
 
     assert.equal(status, 403);

@@ -66,6 +66,7 @@ import type {
   OutgoingEmailAttachmentInput,
   OutgoingEmailDraftInput,
   OutgoingEmailPreview,
+  OutgoingEmailRefusal,
   OutgoingEmailSendInput,
   OutgoingEmailSent,
   PreviewMarkupRecalculationParams,
@@ -530,14 +531,26 @@ export const useResumeInvoiceBatch = <
 };
 
 export const getPreviewOutgoingEmailUrl = (
-  kind: "invoice" | "estimate" | "estimate_resend",
+  kind:
+    | "invoice"
+    | "estimate"
+    | "estimate_resend"
+    | "invoice_reminder"
+    | "wet_check_report"
+    | "irrigation_profile_report",
   id: number,
 ) => {
   return `/api/outgoing-email/${kind}/${id}/preview`;
 };
 
 export const previewOutgoingEmail = async (
-  kind: "invoice" | "estimate" | "estimate_resend",
+  kind:
+    | "invoice"
+    | "estimate"
+    | "estimate_resend"
+    | "invoice_reminder"
+    | "wet_check_report"
+    | "irrigation_profile_report",
   id: number,
   outgoingEmailDraftInput: OutgoingEmailDraftInput,
   options?: RequestInit,
@@ -554,14 +567,20 @@ export const previewOutgoingEmail = async (
 };
 
 export const getPreviewOutgoingEmailMutationOptions = <
-  TError = ErrorType<void>,
+  TError = ErrorType<void | OutgoingEmailRefusal>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewOutgoingEmail>>,
     TError,
     {
-      kind: "invoice" | "estimate" | "estimate_resend";
+      kind:
+        | "invoice"
+        | "estimate"
+        | "estimate_resend"
+        | "invoice_reminder"
+        | "wet_check_report"
+        | "irrigation_profile_report";
       id: number;
       data: BodyType<OutgoingEmailDraftInput>;
     },
@@ -572,7 +591,13 @@ export const getPreviewOutgoingEmailMutationOptions = <
   Awaited<ReturnType<typeof previewOutgoingEmail>>,
   TError,
   {
-    kind: "invoice" | "estimate" | "estimate_resend";
+    kind:
+      | "invoice"
+      | "estimate"
+      | "estimate_resend"
+      | "invoice_reminder"
+      | "wet_check_report"
+      | "irrigation_profile_report";
     id: number;
     data: BodyType<OutgoingEmailDraftInput>;
   },
@@ -590,7 +615,13 @@ export const getPreviewOutgoingEmailMutationOptions = <
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof previewOutgoingEmail>>,
     {
-      kind: "invoice" | "estimate" | "estimate_resend";
+      kind:
+        | "invoice"
+        | "estimate"
+        | "estimate_resend"
+        | "invoice_reminder"
+        | "wet_check_report"
+        | "irrigation_profile_report";
       id: number;
       data: BodyType<OutgoingEmailDraftInput>;
     }
@@ -608,17 +639,24 @@ export type PreviewOutgoingEmailMutationResult = NonNullable<
 >;
 export type PreviewOutgoingEmailMutationBody =
   BodyType<OutgoingEmailDraftInput>;
-export type PreviewOutgoingEmailMutationError = ErrorType<void>;
+export type PreviewOutgoingEmailMutationError =
+  ErrorType<void | OutgoingEmailRefusal>;
 
 export const usePreviewOutgoingEmail = <
-  TError = ErrorType<void>,
+  TError = ErrorType<void | OutgoingEmailRefusal>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewOutgoingEmail>>,
     TError,
     {
-      kind: "invoice" | "estimate" | "estimate_resend";
+      kind:
+        | "invoice"
+        | "estimate"
+        | "estimate_resend"
+        | "invoice_reminder"
+        | "wet_check_report"
+        | "irrigation_profile_report";
       id: number;
       data: BodyType<OutgoingEmailDraftInput>;
     },
@@ -629,7 +667,13 @@ export const usePreviewOutgoingEmail = <
   Awaited<ReturnType<typeof previewOutgoingEmail>>,
   TError,
   {
-    kind: "invoice" | "estimate" | "estimate_resend";
+    kind:
+      | "invoice"
+      | "estimate"
+      | "estimate_resend"
+      | "invoice_reminder"
+      | "wet_check_report"
+      | "irrigation_profile_report";
     id: number;
     data: BodyType<OutgoingEmailDraftInput>;
   },
@@ -745,14 +789,26 @@ export const useViewOutgoingEmailAttachment = <
 };
 
 export const getSendOutgoingEmailUrl = (
-  kind: "invoice" | "estimate" | "estimate_resend",
+  kind:
+    | "invoice"
+    | "estimate"
+    | "estimate_resend"
+    | "invoice_reminder"
+    | "wet_check_report"
+    | "irrigation_profile_report",
   id: number,
 ) => {
   return `/api/outgoing-email/${kind}/${id}/send`;
 };
 
 export const sendOutgoingEmail = async (
-  kind: "invoice" | "estimate" | "estimate_resend",
+  kind:
+    | "invoice"
+    | "estimate"
+    | "estimate_resend"
+    | "invoice_reminder"
+    | "wet_check_report"
+    | "irrigation_profile_report",
   id: number,
   outgoingEmailSendInput: OutgoingEmailSendInput,
   options?: RequestInit,
@@ -773,7 +829,13 @@ export const getSendOutgoingEmailMutationOptions = <
     Awaited<ReturnType<typeof sendOutgoingEmail>>,
     TError,
     {
-      kind: "invoice" | "estimate" | "estimate_resend";
+      kind:
+        | "invoice"
+        | "estimate"
+        | "estimate_resend"
+        | "invoice_reminder"
+        | "wet_check_report"
+        | "irrigation_profile_report";
       id: number;
       data: BodyType<OutgoingEmailSendInput>;
     },
@@ -784,7 +846,13 @@ export const getSendOutgoingEmailMutationOptions = <
   Awaited<ReturnType<typeof sendOutgoingEmail>>,
   TError,
   {
-    kind: "invoice" | "estimate" | "estimate_resend";
+    kind:
+      | "invoice"
+      | "estimate"
+      | "estimate_resend"
+      | "invoice_reminder"
+      | "wet_check_report"
+      | "irrigation_profile_report";
     id: number;
     data: BodyType<OutgoingEmailSendInput>;
   },
@@ -802,7 +870,13 @@ export const getSendOutgoingEmailMutationOptions = <
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof sendOutgoingEmail>>,
     {
-      kind: "invoice" | "estimate" | "estimate_resend";
+      kind:
+        | "invoice"
+        | "estimate"
+        | "estimate_resend"
+        | "invoice_reminder"
+        | "wet_check_report"
+        | "irrigation_profile_report";
       id: number;
       data: BodyType<OutgoingEmailSendInput>;
     }
@@ -829,7 +903,13 @@ export const useSendOutgoingEmail = <
     Awaited<ReturnType<typeof sendOutgoingEmail>>,
     TError,
     {
-      kind: "invoice" | "estimate" | "estimate_resend";
+      kind:
+        | "invoice"
+        | "estimate"
+        | "estimate_resend"
+        | "invoice_reminder"
+        | "wet_check_report"
+        | "irrigation_profile_report";
       id: number;
       data: BodyType<OutgoingEmailSendInput>;
     },
@@ -840,7 +920,13 @@ export const useSendOutgoingEmail = <
   Awaited<ReturnType<typeof sendOutgoingEmail>>,
   TError,
   {
-    kind: "invoice" | "estimate" | "estimate_resend";
+    kind:
+      | "invoice"
+      | "estimate"
+      | "estimate_resend"
+      | "invoice_reminder"
+      | "wet_check_report"
+      | "irrigation_profile_report";
     id: number;
     data: BodyType<OutgoingEmailSendInput>;
   },
@@ -848,6 +934,86 @@ export const useSendOutgoingEmail = <
 > => {
   return useMutation(getSendOutgoingEmailMutationOptions(options));
 };
+
+export const getGetInvoiceSentCopyUrl = (id: number) => {
+  return `/api/invoices/${id}/sent-copy`;
+};
+
+export const getInvoiceSentCopy = async (
+  id: number,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetInvoiceSentCopyUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetInvoiceSentCopyQueryKey = (id: number) => {
+  return [`/api/invoices/${id}/sent-copy`] as const;
+};
+
+export const getGetInvoiceSentCopyQueryOptions = <
+  TData = Awaited<ReturnType<typeof getInvoiceSentCopy>>,
+  TError = ErrorType<void>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInvoiceSentCopy>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetInvoiceSentCopyQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getInvoiceSentCopy>>
+  > = ({ signal }) => getInvoiceSentCopy(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getInvoiceSentCopy>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetInvoiceSentCopyQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getInvoiceSentCopy>>
+>;
+export type GetInvoiceSentCopyQueryError = ErrorType<void>;
+
+export function useGetInvoiceSentCopy<
+  TData = Awaited<ReturnType<typeof getInvoiceSentCopy>>,
+  TError = ErrorType<void>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInvoiceSentCopy>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetInvoiceSentCopyQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 export const getPreviewMarkupRecalculationUrl = (
   params?: PreviewMarkupRecalculationParams,

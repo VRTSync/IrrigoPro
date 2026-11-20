@@ -1,4 +1,3 @@
-import { resolveCompanySender } from "../lib/company-sender";
 // Irrigation System Profile — Build 1 + Build 3: Route module.
 //
 // All routes are company-scoped (companyId from req.authenticatedUserCompanyId).
@@ -22,7 +21,7 @@ import { resolveCompanySender } from "../lib/company-sender";
 //   GET    /api/irrigation-controllers/:id/history
 //   POST   /api/irrigation-controllers/:id/photo
 //   GET    /api/customers/:customerId/irrigation-profile/report-pdf  (Build 3)
-//   POST   /api/customers/:customerId/irrigation-profile/report/send (Build 3)
+//   Report email is reviewed and sent through the outgoing-email routes.
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
@@ -34,6 +33,7 @@ import { storage, ZoneCountClearError, LetterError } from "../storage";
 import type { IrrigationImportRow, IrrigationImportRowError, IrrigationZoneTypeEnum } from "../storage";
 import { ZoneProgramError, ProgramNameTakenError } from "../lib/controller-zone-records";
 import { DocClientIdConflict, idempotentDocCreate } from "../lib/doc-idempotency";
+import { isIrrigationProfileManagerRole as isManagerRole } from "./report-email-guards";
 import {
   hasCapability, CAN_READ_IRRIGATION_PROFILE, CAN_EDIT_IRRIGATION_ZONES,
   CAN_MANAGE_IRRIGATION_EQUIPMENT, CAN_DELETE_IRRIGATION_EQUIPMENT,
@@ -49,18 +49,6 @@ function isBackflowSerialConflict(error: unknown): boolean {
 }
 
 // ── Role helpers ──────────────────────────────────────────────────────────────
-
-// TODO(roles): migrate to a capability from lib/shared/src/roles.ts (hasCapability). Inventory: docs/roles-migration-inventory.md
-const MANAGER_ROLES = new Set([
-  "company_admin",
-  "super_admin",
-  "irrigation_manager",
-  "billing_manager",
-]);
-
-function isManagerRole(role: string | undefined): boolean {
-  return !!role && MANAGER_ROLES.has(role);
-}
 
 function isSuperAdmin(role: string | undefined): boolean {
   return role === "super_admin";
@@ -952,7 +940,7 @@ export function registerIrrigationProfileRoutes(
       if (!customerId) return badId(res, "customer");
 
       const role = req.authenticatedUserRole as string | undefined;
-      if (!role || !MANAGER_ROLES.has(role) || role === "billing_manager") {
+      if (!isManagerRole(role) || role === "billing_manager") {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1116,7 +1104,7 @@ export function registerIrrigationProfileRoutes(
 
       const role = req.authenticatedUserRole as string | undefined;
       // Only manager-tier roles (not field_tech) may import
-      if (!role || !MANAGER_ROLES.has(role) || role === "billing_manager") {
+      if (!isManagerRole(role) || role === "billing_manager") {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1326,88 +1314,6 @@ export function registerIrrigationProfileRoutes(
       } catch (e: any) {
         req.log?.error?.({ err: e, customerId }, "irrigationProfileReportPdf failed");
         res.status(500).json({ message: "Failed to generate irrigation profile PDF" });
-      }
-    },
-  );
-
-  // ── POST /api/customers/:customerId/irrigation-profile/report/send ──────────
-  // Generates the irrigation profile PDF and emails it to the customer.
-  // Company-scoped; returns 404 on company mismatch.
-  app.post(
-    "/api/customers/:customerId/irrigation-profile/report/send",
-    requireAuthentication,
-    async (req: any, res: any) => {
-      const customerId = parseId(req.params.customerId);
-      if (!customerId) return badId(res, "customer");
-
-      const role = req.authenticatedUserRole as string | undefined;
-      if (!isManagerRole(role)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      const callerCompanyId = getCallerCompanyId(req);
-      if (!isSuperAdmin(role) && !callerCompanyId) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
-      try {
-        const customer = await storage.getCustomer(customerId);
-        if (!customer) return notFound(res, "Customer");
-        if (!isSuperAdmin(role) && customer.companyId !== callerCompanyId) {
-          return notFound(res, "Customer");
-        }
-
-        const companyId = isSuperAdmin(role)
-          ? (customer.companyId ?? callerCompanyId!)
-          : callerCompanyId!;
-
-        // Determine recipient: explicit override or customer email on file.
-        const { to } = req.body ?? {};
-        let toEmail: string | null =
-          typeof to === "string" && to.trim() ? to.trim() : null;
-        if (!toEmail) toEmail = (customer as any).email ?? null;
-        if (!toEmail) {
-          return res.status(422).json({
-            message:
-              "No email address on file for this customer. Provide a 'to' email.",
-          });
-        }
-
-        const ctrlList = await storage.listIrrigationControllers(companyId, customerId);
-        const detailedControllers = await Promise.all(
-          ctrlList.map((c: any) => storage.getIrrigationController(companyId, c.id)),
-        );
-        const validControllers = detailedControllers.filter(
-          (c: any): c is NonNullable<typeof c> => c !== null,
-        );
-
-        const company = await storage.getCompanyProfile(companyId);
-
-        const { renderIrrigationProfilePdf } = await import("../irrigation-profile-pdf");
-        const pdf = await renderIrrigationProfilePdf(customer.name, validControllers, {
-          company: company ?? null,
-          propertyAddress: (customer as any).address ?? null,
-        });
-
-        const { EmailService } = await import("../email-service");
-        await EmailService.sendIrrigationProfileReport({
-          sender: await resolveCompanySender(companyId),
-          to: toEmail,
-          customerName: customer.name,
-          propertyAddress: (customer as any).address ?? null,
-          companyName: company?.name ?? "IrrigoPro",
-          companyEmail: company?.email ?? null,
-          companyPhone: company?.phone ?? null,
-          pdfBuffer: pdf,
-          customerId,
-        });
-
-        res.json({ sent: true, to: toEmail });
-      } catch (e: any) {
-        req.log?.error?.({ err: e, customerId }, "irrigationProfileReportSend failed");
-        res
-          .status(500)
-          .json({ message: e?.message ?? "Failed to send irrigation profile report" });
       }
     },
   );

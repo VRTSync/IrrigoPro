@@ -47,7 +47,9 @@ import {
 } from "./role-guards";
 import { registerInvoiceMarkSentRoutes } from "./invoice-mark-sent-routes";
 import { registerInvoiceMergeRoutes } from "./invoice-merge-routes";
-import { registerInvoiceReminderRoutes } from "./invoice-reminder-routes";
+import { createReminderCore, registerInvoiceReminderRoutes } from "./invoice-reminder-routes";
+import { createReminderEmailHandler } from "../outgoing-email/reminder-handler";
+import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
 import { registerBudgetRoutes } from "./budget-routes";
 import { registerFinancialPulseRoutes } from "./financial-pulse";
 import { requireEstimateApprovalAccess } from "./estimate-role-guards";
@@ -378,10 +380,8 @@ describe("invoice payment reminders — real routes, real guards", () => {
   function buildApp(role: TestRole, companyId: number | null = 1) {
     const app = express();
     app.use(express.json());
-    registerInvoiceReminderRoutes(app, {
-      requireAuthentication: makeAuth(role, companyId),
-      requireInvoiceSend,
-      requireReminderHistoryRead,
+    const requireAuthentication = makeAuth(role, companyId);
+    const core = createReminderCore({
       _storageApi: {
         async getInvoiceById(id: number, scoped: number | null) {
           // Invoice 1 belongs to company 1; invoice 2 belongs to company 2.
@@ -395,6 +395,7 @@ describe("invoice payment reminders — real routes, real guards", () => {
             customerName: "Acme",
             customerEmail: "ap@acme.test",
             status: "generated",
+            updatedAt: new Date("2026-08-01T00:00:00.000Z"),
             createdAt: new Date("2026-06-01T00:00:00.000Z"),
             dueDate: new Date("2026-06-01T00:00:00.000Z"),
             sentAt: new Date("2026-06-02T00:00:00.000Z"),
@@ -405,8 +406,9 @@ describe("invoice payment reminders — real routes, real guards", () => {
           };
         },
         async getLatestInvoiceSentCopy() {
-          return { id: 5, pdfUrl: "/pdf/x.pdf" };
+          return { id: 5, pdfUrl: "/pdf/x.pdf", filename: "invoice.pdf" };
         },
+        async getCustomer() { return undefined; },
         async getUser() {
           return { id: 7, name: "Tester" };
         },
@@ -427,46 +429,51 @@ describe("invoice payment reminders — real routes, real guards", () => {
         mailed.push(to);
         return { success: true };
       },
+      _resolveSender: async () => ({ from: { name: "Co", email: "billing@co.test" }, replyTo: "billing@co.test", usingCompanyAddress: false }),
       _readSentCopy: async () => Buffer.from("%PDF saved invoice"),
       _loadPaymentTerms: async () => "net_30",
       _now: () => new Date("2026-08-11T12:00:00.000Z"),
     });
+    registerInvoiceReminderRoutes(app, { requireAuthentication, requireInvoiceSend, requireReminderHistoryRead, _core: core });
+    registerOutgoingEmailRoutes(app, { requireAuthentication, handlers: [createReminderEmailHandler(core)] });
     return app;
   }
 
   async function call(app: Express, method: "GET" | "POST", path: string) {
     const { url, server } = await listen(app);
     try {
-      const res = await fetch(`${url}${path}`, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: method === "POST" ? JSON.stringify({ templateKey: "firm" }) : undefined,
+      const post = (target: string, fields: unknown) => fetch(`${url}${target}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields),
       });
-      return res.status;
+      if (method === "GET") return (await fetch(`${url}${path}`)).status;
+      const review = await post(`${path}/preview`, { variant: "firm" });
+      if (!review.ok) return review.status;
+      const { confirmationToken } = await review.json() as { confirmationToken: string };
+      return (await post(`${path}/send`, { variant: "firm", confirmationToken })).status;
     } finally {
       await close(server);
     }
   }
 
   it("bookkeeper CAN send a reminder and read its history", async () => {
-    assert.equal(await call(buildApp("bookkeeper"), "POST", "/api/invoices/1/reminders"), 201);
+    assert.equal(await call(buildApp("bookkeeper"), "POST", "/api/outgoing-email/invoice_reminder/1"), 200);
     assert.equal(await call(buildApp("bookkeeper"), "GET", "/api/invoices/1/reminders"), 200);
   });
 
   it("field_tech and irrigation_manager are refused, and no email is attempted", async () => {
     for (const role of ["field_tech", "irrigation_manager", NO_ROLE as TestRole]) {
       mailed.length = 0;
-      assert.equal(await call(buildApp(role), "POST", "/api/invoices/1/reminders"), 403);
+      assert.equal(await call(buildApp(role), "POST", "/api/outgoing-email/invoice_reminder/1"), 403);
       assert.equal(mailed.length, 0, `${String(role)} must never reach the mailer`);
     }
   });
 
   it("a bookkeeper in company A gets nothing for a company B invoice, and no email is attempted", async () => {
     mailed.length = 0;
-    assert.equal(await call(buildApp("bookkeeper", 1), "POST", "/api/invoices/2/reminders"), 404);
+    assert.equal(await call(buildApp("bookkeeper", 1), "POST", "/api/outgoing-email/invoice_reminder/2"), 404);
     assert.equal(mailed.length, 0);
     // Sanity: the same id resolves for the company that owns it.
-    assert.equal(await call(buildApp("bookkeeper", 2), "POST", "/api/invoices/2/reminders"), 201);
+    assert.equal(await call(buildApp("bookkeeper", 2), "POST", "/api/outgoing-email/invoice_reminder/2"), 200);
   });
 });
 
@@ -602,7 +609,7 @@ describe("routes.ts wiring", () => {
       assert.match(pdfSource.slice(start, pdfSource.indexOf("async", start)), /requireAuthentication.*requireInvoiceRead/, decl);
     }
     assert.match(ROUTES_SRC, /registerInvoicePdfRoutes\(app, \{ requireAuthentication, requireInvoiceRead \}\)/);
-    assert.match(ROUTES_SRC, /registerOutgoingEmailRoutes\(app, \{ requireAuthentication(?:, \w+)* \}\)/);
+    assert.match(ROUTES_SRC, /registerOutgoingEmailRoutes\(app, \{\s*requireAuthentication,\s*handlers: createOutgoingEmailHandlers\(reminderCore, recordLifecycleAudit\),\s*\}\)/);
   });
 
   it("both previously-ungated QuickBooks routes now carry the allowlist", () => {

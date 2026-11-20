@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Company, Customer, EstimateWithItems } from "@workspace/db";
 import { buildEstimateHtml, fmtDate } from "../estimate-pdf-html";
+import { requireInvoiceRead } from "./role-guards";
 
 // Storage initialization must not run in this in-memory HTTP suite.
 mock.module("../storage", { namedExports: { storage: {} } });
@@ -30,6 +31,7 @@ const { registerInvoicePdfRoutes } = await import("./invoice-pdf-routes");
 const { registerOutgoingEmailRoutes } = await import("./outgoing-email-routes");
 const { createInvoiceEmailHandler } = await import("../outgoing-email/invoice-handler");
 const { createEstimateEmailHandler } = await import("../outgoing-email/estimate-handlers");
+const { createReportEmailHandlers } = await import("../outgoing-email/report-handlers");
 const { buildInvoiceEmailSubject, buildInvoicePdfFilename, InvoicePdfService, readInvoiceSentCopy } = await import("../invoice-pdf-service");
 const { ObjectStorageService } = await import("../objectStorage");
 
@@ -113,6 +115,9 @@ function harness(opts: {
   const sent: any[][] = [];
   const copies: any[] = [];
   const stamps: any[] = [];
+  const reportSends: { kind: string; args: any }[] = [];
+  const reportRenders: string[] = [];
+  const savedReads: string[] = [];
   let generated = 0;
   const invoice = {
     id: 1008, customerId: 42, companyId: 1, invoiceNumber: "IR-1008",
@@ -127,6 +132,13 @@ function harness(opts: {
     emailFromName: sender.from.name, emailFromAddress: sender.from.email,
     emailReplyTo: sender.replyTo, emailSendingDomain: "example.invalid", emailDomainVerifiedAt: new Date(),
   };
+  const wc = {
+    id: 66, companyId: 1, customerId: 42, customerName: "The Ranch",
+    propertyAddress: "100 Main St", technicianName: "A Technician",
+    startedAt: new Date("2026-10-12T12:00:00Z"), updatedAt: new Date("2026-10-13T12:00:00Z"),
+    zoneRecords: [], photos: [],
+  };
+  const controller = { id: 8, updatedAt: new Date("2026-10-18T12:00:00Z") };
   const app = express();
   app.use(express.json());
   const requireAuthentication: express.RequestHandler = (req, res, next) => {
@@ -142,7 +154,21 @@ function harness(opts: {
     },
     async getCustomerById() {
       return { id: 42, companyId: opts.customerCompany ?? 1, name: "QB customer", irrigoName: "The Ranch",
-        email: opts.email === undefined ? " current@example.invalid " : opts.email };
+        address: "100 Main St", email: opts.email === undefined ? " current@example.invalid " : opts.email };
+    },
+    async getCustomer(id: number) { return id === 42 ? this.getCustomerById() : undefined; },
+    async getWetCheck(id: number, scope: number | null) {
+      return id === wc.id && (scope === null || scope === wc.companyId) ? wc : undefined;
+    },
+    async listIrrigationControllers(companyId: number, id: number) {
+      assert.equal(companyId, 1);
+      assert.equal(id, 42);
+      return [controller];
+    },
+    async getIrrigationController(companyId: number, id: number) {
+      assert.equal(companyId, 1);
+      assert.equal(id, controller.id);
+      return controller;
     },
     async getCompanyProfile(companyId: number) { assert.equal(companyId, invoice.companyId); return company; },
     async getCompany(companyId: number) { assert.equal(companyId, invoice.companyId); return company; },
@@ -168,9 +194,13 @@ function harness(opts: {
   };
   registerInvoicePdfRoutes(app, {
     requireAuthentication,
-    requireInvoiceRead: (_req, _res, next) => next(),
+    requireInvoiceRead,
     _storageApi: storage,
     _generatePdf: generate,
+    _readSentCopy: async key => {
+      savedReads.push(key);
+      return uploaded.find(file => file.key === key)?.buf ?? null;
+    },
   });
   const handler = createInvoiceEmailHandler({
     storage,
@@ -187,17 +217,33 @@ function harness(opts: {
       return opts.mailFailure ? { success: false, error: "mailer rejected" } : { success: true };
     },
   });
-  registerOutgoingEmailRoutes(app, { requireAuthentication, handlers: [handler] });
-  return { app, invoice, company, uploaded, deleted, sent, copies, stamps, events, generated: () => generated };
+  const reportHandlers = createReportEmailHandlers({
+    storage,
+    async renderWetCheck(source) {
+      assert.equal(source.id, wc.id);
+      reportRenders.push("wet_check_report");
+      return bytes;
+    },
+    async renderProfile(name, controllers) {
+      assert.equal(name, "QB customer");
+      assert.deepEqual(controllers.map(c => c.id), [controller.id]);
+      reportRenders.push("irrigation_profile_report");
+      return bytes;
+    },
+    async sendWetCheck(args) { reportSends.push({ kind: "wet_check_report", args }); },
+    async sendProfile(args) { reportSends.push({ kind: "irrigation_profile_report", args }); },
+  });
+  registerOutgoingEmailRoutes(app, { requireAuthentication, handlers: [handler, ...reportHandlers] });
+  return { app, invoice, company, wc, controller, reportRenders, reportSends, uploaded, deleted, sent, copies, stamps, events, savedReads, generated: () => generated };
 }
 
-async function withServer(h: Pick<ReturnType<typeof harness>, "app">, run: (request: (path?: string, method?: string, fields?: Record<string, unknown>) => Promise<{ status: number; body: any }>) => Promise<void>) {
+async function withServer(h: Pick<ReturnType<typeof harness>, "app">, run: (request: (path?: string, method?: string, fields?: Record<string, unknown>) => Promise<{ status: number; body: any; headers?: Headers }>) => Promise<void>) {
   const server = createServer(h.app);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
   try {
     await run(async (path = "/send", method = "POST", fields?: Record<string, unknown>) => {
-      const url = `${base}${path.startsWith("/outgoing-email/") ? path : method === "GET" ? `/invoices/1008/pdf${path}` : `/outgoing-email/invoice/1008${path}`}`;
+      const url = `${base}${path.startsWith("/outgoing-email/") || path.startsWith("/invoices/") ? path : method === "GET" ? `/invoices/1008/pdf${path}` : `/outgoing-email/invoice/1008${path}`}`;
       const post = (target: string, data: unknown) => fetch(target, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data),
       });
@@ -208,6 +254,8 @@ async function withServer(h: Pick<ReturnType<typeof harness>, "app">, run: (requ
         fields = { confirmationToken: draft.confirmationToken };
       }
       const res = method === "POST" ? await post(url, fields ?? {}) : await fetch(url, { method });
+      const isPdf = path.endsWith("/sent-copy") && res.headers.get("content-type") === "application/pdf";
+      if (isPdf) return { status: res.status, body: Buffer.from(await res.arrayBuffer()), headers: res.headers };
       return { status: res.status, body: res.headers.get("content-type")?.includes("application/pdf")
         ? await res.text()
         : await res.json().catch(() => null) };
@@ -418,6 +466,118 @@ it("keeps both estimate kinds tenant-scoped on preview and send, with super-admi
   });
 });
 
+const reportCases = [
+  { kind: "wet_check_report", id: 66, subject: "Your Irrigation Inspection Results — 100 Main St",
+    filename: "100 Main St - Inspection Report.pdf", viewUrl: "/api/wet-checks/66/report-pdf", denied: "Access restricted to manager/admin/billing roles" },
+  { kind: "irrigation_profile_report", id: 42, subject: "Your Irrigation System Profile — 100 Main St",
+    filename: "100 Main St - Irrigation Profile.pdf", viewUrl: "/api/customers/42/irrigation-profile/report-pdf", denied: "Forbidden" },
+];
+
+for (const report of reportCases) {
+  const route = `/outgoing-email/${report.kind}/${report.id}`;
+  it(`${report.kind} previews current recipient and sends the reviewed fields and report bytes`, async () => {
+    const h = harness();
+    await withServer(h, async request => {
+      const defaults = await request(`${route}/preview`);
+      assert.equal(defaults.status, 200);
+      assert.equal(defaults.body.to, "current@example.invalid");
+      assert.equal(defaults.body.subject, report.subject);
+      assert.deepEqual(defaults.body.from, sender.from);
+      assert.equal(defaults.body.replyTo, sender.replyTo);
+      assert.deepEqual(defaults.body.attachments, [{ filename: report.filename, viewUrl: report.viewUrl }]);
+      assert.deepEqual(defaults.body.variantDefs, []);
+      assert.equal((await request(`${route}/send`, "POST", {})).status, 400);
+      assert.equal(h.reportRenders.length, 0);
+      const fields = { to: "reviewed@example.invalid", cc: ["cc@example.invalid"], bcc: ["bcc@example.invalid"], subject: "Reviewed report", note: "Check <this>." };
+      const review = await request(`${route}/preview`, "POST", fields);
+      assert.equal(review.status, 200);
+      assert.match(review.body.html, /Check &lt;this&gt;\./);
+      assert.match(review.body.text, /Check <this>\./);
+      const confirmationToken = review.body.confirmationToken;
+      assert.equal((await request(`${route}/send`, "POST", { ...fields, cc: [], confirmationToken })).status, 409);
+      const result = await request(`${route}/send`, "POST", { ...fields, confirmationToken });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.sentTo, fields.to);
+      assert.deepEqual(h.reportRenders, [report.kind]);
+      const [{ args }] = h.reportSends;
+      assert.equal(args.to, fields.to);
+      assert.deepEqual(args.cc, fields.cc);
+      assert.deepEqual(args.bcc, fields.bcc);
+      assert.deepEqual(args.sender, sender);
+      assert.deepEqual(args.pdfBuffer, bytes);
+      assert.deepEqual(args.reviewed, { subject: fields.subject, html: review.body.html, text: review.body.text, filename: report.filename });
+    });
+  });
+
+  it(`${report.kind} lets the reviewer fill in a missing customer email`, async () => {
+    const h = harness({ email: null });
+    await withServer(h, async request => {
+      const initial = await request(`${route}/preview`);
+      assert.equal(initial.status, 200);
+      assert.equal(initial.body.to, "");
+      assert.match(initial.body.warnings.join(" "), /No email address/);
+      assert.equal((await request(`${route}/send`, "POST", { confirmationToken: initial.body.confirmationToken })).status, 422);
+      const fields = { to: "entered@example.invalid" };
+      const preview = await request(`${route}/preview`, "POST", fields);
+      assert.equal((await request(`${route}/send`, "POST", { ...fields, confirmationToken: preview.body.confirmationToken })).status, 200);
+    });
+  });
+
+  it(`${report.kind} enforces the same role and tenant gates for preview and send`, async () => {
+    for (const [opts, status, message] of [
+      [{ companyId: 2 }, 404, "Document not found."],
+      [{ role: "field_tech" }, 403, report.denied],
+      [{ role: "super_admin", companyId: null }, 200, undefined],
+    ] as const) {
+      const h = harness(opts);
+      await withServer(h, async request => {
+        const reviewed = await request(`${route}/preview`);
+        assert.equal(reviewed.status, status);
+        const sent = await request(`${route}/send`, "POST", { confirmationToken: reviewed.body.confirmationToken });
+        assert.equal(sent.status, status);
+        if (message) {
+          assert.equal(reviewed.body.message, message);
+          assert.equal(sent.body.message, message);
+        }
+        assert.equal(h.reportSends.length, status === 200 ? 1 : 0);
+      });
+    }
+  });
+
+  it(`${report.kind} refuses a stale report review`, async () => {
+    const h = harness();
+    await withServer(h, async request => {
+      const review = await request(`${route}/preview`);
+      if (report.kind === "wet_check_report") h.wc.updatedAt = new Date("2026-10-20");
+      else h.controller.updatedAt = new Date("2026-10-20");
+      assert.equal((await request(`${route}/send`, "POST", { confirmationToken: review.body.confirmationToken })).status, 409);
+      assert.equal(h.reportSends.length, 0);
+    });
+  });
+}
+
+it("serves the exact saved invoice bytes inline only to readers in scope, including super admin", async () => {
+  for (const [opts, status] of [
+    [{}, 200], [{ role: "super_admin", companyId: null }, 200], [{ companyId: 2 }, 404], [{ role: "field_tech" }, 403],
+  ] as const) {
+    const h = harness(opts);
+    h.copies.push({ filename, pdfUrl: "saved", companyId: 1 });
+    h.uploaded.push({ key: "saved", buf: bytes, contentType: "application/pdf" });
+    await withServer(h, async request => {
+      const result = await request("/invoices/1008/sent-copy", "GET");
+      assert.equal(result.status, status);
+      assert.equal(h.generated(), 0);
+      assert.deepEqual(h.savedReads, status === 200 ? ["saved"] : []);
+      if (status === 200) {
+        assert.deepEqual(result.body, bytes);
+        assert.equal(result.headers?.get("content-type"), "application/pdf");
+        assert.match(result.headers?.get("content-disposition") ?? "", /^inline; filename="The Ranch/);
+      }
+    });
+  }
+  await withServer(harness(), async request => assert.equal((await request("/invoices/1008/sent-copy", "GET")).status, 404));
+});
+
 it("previews current email, company sender, period, amount, due date and filename without rendering the PDF", async () => {
   const h = harness();
   await withServer(h, async request => {
@@ -613,7 +773,7 @@ it("rejects an edit both after preview and during PDF rendering with the invoice
   }
 });
 
-it("validates draft length and email fields, and only registers the invoice kind", async () => {
+it("validates draft length and email fields, and refuses unregistered kinds", async () => {
   const h = harness();
   await withServer(h, async request => {
     const cc = Array.from({ length: 6 }, (_, i) => `cc${i}@example.com`);

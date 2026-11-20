@@ -1201,3 +1201,73 @@ mtime_ms = 1795134584930
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/917f4a2f-eac6-4cf2-aaf3-75a607f53535/8768a4ba-553b-492a-b20b-e2720f89efd3"
 storage_version_token = "1795134600969205"
 content_type = "image/png"
+
+[[outputs]]
+id = "Bc2PbF3lVtv5Z74j18yfw"
+uri = "file://generated-artifacts/email-review-acceptance/reminder-review.png"
+type = "image"
+title = "Payment reminder review"
+description = "Signed-in preview with a test CC and the saved invoice PDF."
+logical_id = "83a614fe-cef2-4459-acda-f94178996339"
+content_hash = "sha256:345e12cbc5f90a88f1c58188c0e85cd1dc73194208a8b0d452bc1bcd3a898893"
+size = 204414
+mtime_ms = 1795134369629
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/83a614fe-cef2-4459-acda-f94178996339/b43e786e-09ef-4031-be54-40c1cb2a09fe"
+storage_version_token = "1795134520959590"
+content_type = "image/png"
+
+[[outputs]]
+id = "4iogbOvoZK4oEn4pUpXaT"
+uri = "file://generated-artifacts/email-review-acceptance/wet-check-report-review.png"
+type = "image"
+title = "Wet-check report review"
+description = "Signed-in preview with a test CC and the inspection PDF."
+logical_id = "8c19148d-37e4-48c1-9af5-6dc2687f2d8e"
+content_hash = "sha256:09a2c6dde05c3954a9c13338b6835b43cdcaae8568d245c4c73f7f4a32e5b276"
+size = 246044
+mtime_ms = 1795134483221
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/8c19148d-37e4-48c1-9af5-6dc2687f2d8e/75fa8451-2b6b-4b0a-90df-b1e09b475956"
+storage_version_token = "1795134521425923"
+content_type = "image/png"
+
+[[outputs]]
+id = "6gGBaCrgh_7e5x09tgJST"
+uri = "file://generated-artifacts/email-review-acceptance/irrigation-profile-report-review.png"
+type = "image"
+title = "Irrigation profile report review"
+description = "Signed-in preview with a test CC and the profile PDF."
+logical_id = "b3f49962-67fa-495f-ba34-f138b847bd9a"
+content_hash = "sha256:ffe758225a23f56c396eff9985bd9600d00f2cd1ecde4040020bc3e8d66839c3"
+size = 237899
+mtime_ms = 1795134487413
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b3f49962-67fa-495f-ba34-f138b847bd9a/fbfeb5db-ab28-4b8a-b723-82e59b5430da"
+storage_version_token = "1795134521995238"
+content_type = "image/png"
+
+[[outputs]]
+id = "4AjYnDxiju2LNYJHw4Xw2"
+uri = "file://generated-artifacts/email-review-acceptance/never-sent-refusal.png"
+type = "image"
+title = "Reminder blocked for an unsent invoice"
+description = "The refusal replaces the email preview and disables Send."
+logical_id = "c88c8073-a0a8-4be1-9393-49aa44a76369"
+content_hash = "sha256:d5aaa028101e865e5af98fd59450190942730cdff117c04fa3f6ec02fb6befa9"
+size = 185295
+mtime_ms = 1795134366257
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c88c8073-a0a8-4be1-9393-49aa44a76369/34090e33-ffcb-4be4-9b20-0a6cd3f11c11"
+storage_version_token = "1795134522450112"
+content_type = "image/png"
+
+[[outputs]]
+id = "3I3nAPnb3cSZ0itZ_yl_9"
+uri = "file://generated-artifacts/email-review-acceptance/refusal-opens-invoice-review.png"
+type = "image"
+title = "Invoice review opened from reminder refusal"
+description = "The Send the invoice action opened the invoice review without sending anything."
+logical_id = "45a62a41-6993-4525-97b5-f2afd2a07d66"
+content_hash = "sha256:c8f0477b56506d394132214f46cf78e39b41e1c191415be6fd2ba1fb083d3091"
+size = 210303
+mtime_ms = 1795134366669
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/45a62a41-6993-4525-97b5-f2afd2a07d66/2dbf2930-91e2-421b-b1dc-bce828d5e382"
+storage_version_token = "1795134522891574"
+content_type = "image/png"

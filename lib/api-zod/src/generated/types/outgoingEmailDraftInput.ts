@@ -22,4 +22,6 @@ export interface OutgoingEmailDraftInput {
   /** @maxLength 1000 */
   note?: string;
   options?: OutgoingEmailDraftInputOptions;
+  /** Template key; omission uses the default */
+  variant?: string;
 }

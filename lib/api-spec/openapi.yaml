@@ -88,7 +88,7 @@ paths:
         "409": { description: Batch is not interrupted or another batch is sending }
   /outgoing-email/{kind}/{id}/preview:
     parameters:
-      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice, estimate, estimate_resend] } }
+      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice, estimate, estimate_resend, invoice_reminder, wet_check_report, irrigation_profile_report] } }
       - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
     post:
       operationId: previewOutgoingEmail
@@ -105,6 +105,11 @@ paths:
               schema: { $ref: "#/components/schemas/OutgoingEmailPreview" }
         "400": { description: Invalid draft }
         "404": { description: Unknown email kind or document not available }
+        "422":
+          description: Email cannot be sent in the document's current state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OutgoingEmailRefusal" }
   /outgoing-email/{kind}/{id}/attachment:
     parameters:
       - { name: kind, in: path, required: true, schema: { type: string, enum: [estimate, estimate_resend] } }
@@ -127,7 +132,7 @@ paths:
         "409": { description: "Review changed, expired, or was already used" }
   /outgoing-email/{kind}/{id}/send:
     parameters:
-      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice, estimate, estimate_resend] } }
+      - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice, estimate, estimate_resend, invoice_reminder, wet_check_report, irrigation_profile_report] } }
       - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
     post:
       operationId: sendOutgoingEmail
@@ -146,6 +151,19 @@ paths:
         "404": { description: Unknown email kind or document not available }
         "409": { description: "Review changed, expired, or was already used" }
         "422": { description: Missing recipient or PDF totals do not reconcile }
+        "502": { description: Email provider did not accept delivery }
+  /invoices/{id}/sent-copy:
+    get:
+      operationId: getInvoiceSentCopy
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Exact PDF saved from the latest invoice email
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "404": { description: Invoice or saved copy not available }
   /markup-schedules/recalculate-prices/preview:
     post:
       operationId: previewMarkupRecalculation
@@ -698,6 +716,7 @@ components:
         subject: { type: string, maxLength: 200, description: Blank uses the default }
         note: { type: string, maxLength: 1000 }
         options: { type: object, additionalProperties: { type: boolean } }
+        variant: { type: string, description: Template key; omission uses the default }
     OutgoingEmailSendInput:
       allOf:
         - $ref: "#/components/schemas/OutgoingEmailDraftInput"
@@ -707,9 +726,9 @@ components:
             confirmationToken: { type: string }
     OutgoingEmailPreview:
       type: object
-      required: [kind, id, from, replyTo, usingCompanyAddress, to, cc, bcc, subject, note, options, optionDefs, html, text, attachments, warnings, confirmationToken, expiresAt]
+      required: [kind, id, from, replyTo, usingCompanyAddress, to, cc, bcc, subject, note, options, optionDefs, variant, variantDefs, html, text, attachments, warnings, confirmationToken, expiresAt]
       properties:
-        kind: { type: string, enum: [invoice, estimate, estimate_resend] }
+        kind: { type: string, enum: [invoice, estimate, estimate_resend, invoice_reminder, wet_check_report, irrigation_profile_report] }
         id: { type: integer }
         from:
           type: object
@@ -725,6 +744,15 @@ components:
         subject: { type: string }
         note: { type: string }
         options: { type: object, additionalProperties: { type: boolean } }
+        variant: { type: [string, "null"] }
+        variantDefs:
+          type: array
+          items:
+            type: object
+            required: [key, label]
+            properties:
+              key: { type: string }
+              label: { type: string }
         optionDefs:
           type: array
           items:
@@ -747,6 +775,17 @@ components:
         warnings: { type: array, items: { type: string } }
         confirmationToken: { type: string }
         expiresAt: { type: string, format: date-time }
+    OutgoingEmailRefusal:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        action:
+          type: object
+          required: [kind, label]
+          properties:
+            kind: { type: string, enum: [send_invoice, generate_pdf] }
+            label: { type: string }
     OutgoingEmailSent:
       type: object
       required: [sentTo, sentAt]

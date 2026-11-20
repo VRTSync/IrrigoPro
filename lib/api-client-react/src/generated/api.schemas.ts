@@ -159,6 +159,8 @@ export interface OutgoingEmailDraftInput {
   /** @maxLength 1000 */
   note?: string;
   options?: OutgoingEmailDraftInputOptions;
+  /** Template key; omission uses the default */
+  variant?: string;
 }
 
 export type OutgoingEmailSendInput = OutgoingEmailDraftInput & {
@@ -172,6 +174,9 @@ export const OutgoingEmailPreviewKind = {
   invoice: "invoice",
   estimate: "estimate",
   estimate_resend: "estimate_resend",
+  invoice_reminder: "invoice_reminder",
+  wet_check_report: "wet_check_report",
+  irrigation_profile_report: "irrigation_profile_report",
 } as const;
 
 export type OutgoingEmailPreviewFrom = {
@@ -180,6 +185,11 @@ export type OutgoingEmailPreviewFrom = {
 };
 
 export type OutgoingEmailPreviewOptions = { [key: string]: boolean };
+
+export type OutgoingEmailPreviewVariantDefsItem = {
+  key: string;
+  label: string;
+};
 
 export type OutgoingEmailPreviewOptionDefsItem = {
   key: string;
@@ -205,6 +215,9 @@ export interface OutgoingEmailPreview {
   subject: string;
   note: string;
   options: OutgoingEmailPreviewOptions;
+  /** @nullable */
+  variant: string | null;
+  variantDefs: OutgoingEmailPreviewVariantDefsItem[];
   optionDefs: OutgoingEmailPreviewOptionDefsItem[];
   html: string;
   text: string;
@@ -212,6 +225,24 @@ export interface OutgoingEmailPreview {
   warnings: string[];
   confirmationToken: string;
   expiresAt: string;
+}
+
+export type OutgoingEmailRefusalActionKind =
+  (typeof OutgoingEmailRefusalActionKind)[keyof typeof OutgoingEmailRefusalActionKind];
+
+export const OutgoingEmailRefusalActionKind = {
+  send_invoice: "send_invoice",
+  generate_pdf: "generate_pdf",
+} as const;
+
+export type OutgoingEmailRefusalAction = {
+  kind: OutgoingEmailRefusalActionKind;
+  label: string;
+};
+
+export interface OutgoingEmailRefusal {
+  message: string;
+  action?: OutgoingEmailRefusalAction;
 }
 
 export interface OutgoingEmailSent {

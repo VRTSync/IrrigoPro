@@ -3,6 +3,7 @@ import { useParams, useLocation, useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth-context";
+import { ReviewAndSendDialog } from "@/components/email/review-and-send-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -207,7 +208,7 @@ export default function IrrigationProfile() {
   const branchName = new URLSearchParams(search).get("branchName") ?? "";
   const [showImportModal, setShowImportModal] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
-  const [sendLoading, setSendLoading] = useState(false);
+  const [reviewReportOpen, setReviewReportOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const { toast } = useToast();
 
@@ -326,38 +327,6 @@ export default function IrrigationProfile() {
     }
   }
 
-  async function handleSendReport() {
-    if (!customerId) return;
-    setSendLoading(true);
-    try {
-      const response = await fetch(
-        `/api/customers/${customerId}/irrigation-profile/report/send`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        },
-      );
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body?.message ?? "Failed to send report");
-      }
-      toast({
-        title: "Report sent",
-        description: body.to ? `Emailed to ${body.to}` : "Report emailed to customer",
-      });
-    } catch (err: any) {
-      toast({
-        title: "Failed to send report",
-        description: err?.message ?? "Please try again",
-        variant: "destructive",
-      });
-    } finally {
-      setSendLoading(false);
-    }
-  }
-
   if (isLoading) {
     return (
       <div className="container mx-auto p-4 max-w-4xl space-y-4">
@@ -431,7 +400,7 @@ export default function IrrigationProfile() {
                     className="gap-1.5"
                     disabled={controllers.length === 0}
                   >
-                    {(reportLoading || sendLoading) ? (
+                    {reportLoading ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <FileText className="w-4 h-4" />
@@ -453,15 +422,12 @@ export default function IrrigationProfile() {
                     Generate report
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={handleSendReport}
-                    disabled={sendLoading || controllers.length === 0}
+                    onSelect={() => setReviewReportOpen(true)}
+                    disabled={controllers.length === 0}
+                    data-testid="button-email-irrigation-profile"
                   >
-                    {sendLoading ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Mail className="w-4 h-4 mr-2" />
-                    )}
-                    Send report
+                    <Mail className="w-4 h-4 mr-2" />
+                    Email report
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>}
@@ -581,6 +547,13 @@ export default function IrrigationProfile() {
           />
         </CardContent>
       </Card>
+      {customerId && <ReviewAndSendDialog
+        open={reviewReportOpen}
+        onOpenChange={setReviewReportOpen}
+        kind="irrigation_profile_report"
+        entityId={Number(customerId)}
+        title="Email irrigation system profile"
+      />}
     </div>
   );
 }

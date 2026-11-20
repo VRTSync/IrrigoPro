@@ -3,8 +3,7 @@ import { Router, type Express, type Request, type RequestHandler } from "express
 import { PreviewOutgoingEmailResponse, SendOutgoingEmailResponse } from "@workspace/api-zod";
 import { createSingleUseConfirmation } from "../lib/single-use-confirmation";
 import { logger } from "../lib/logger";
-import { createOutgoingEmailHandlers } from "../outgoing-email/registry";
-import { draftInputSchema, INVOICE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "../outgoing-email/types";
+import { draftInputSchema, draftRefusalSchema, INVOICE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "../outgoing-email/types";
 
 const messages = {
   required: "Review the email before sending. Nothing was sent.",
@@ -19,23 +18,22 @@ const recipients = (values: string[]) => values.map(value => value.toLowerCase()
 function fingerprint(draft: BuiltDraft) {
   return digest(JSON.stringify([
     draft.to, recipients(draft.cc), recipients(draft.bcc), draft.subject, digest(draft.note),
+    draft.variant ?? "",
     Object.entries(draft.options).sort(([a], [b]) => a.localeCompare(b)),
     draft.sender.from.name, draft.sender.from.email, draft.sender.replyTo ?? null,
-    draft.sender.usingCompanyAddress, draft.html, draft.text, draft.attachments, draft.warnings,
+    draft.sender.usingCompanyAddress, draft.html, draft.text, draft.attachments, draft.attachmentStamp, draft.warnings,
   ]));
 }
 
 export function registerOutgoingEmailRoutes(app: Express, {
   requireAuthentication,
   handlers,
-  recordLifecycleAudit,
 }: {
   requireAuthentication: RequestHandler;
-  handlers?: Iterable<OutgoingEmailHandler<any>>;
-  recordLifecycleAudit?: Parameters<typeof createOutgoingEmailHandlers>[0];
+  handlers: Iterable<OutgoingEmailHandler<any>>;
 }) {
   const router = Router();
-  for (const handler of handlers ?? createOutgoingEmailHandlers(recordLifecycleAudit)) {
+  for (const handler of handlers) {
     const action = (operation: "preview" | "send" | "attachment"): RequestHandler<{ id: string }> => async (req, res) => {
       res.set("Cache-Control", "no-store");
       const id = Number(req.params.id);
@@ -55,37 +53,56 @@ export function registerOutgoingEmailRoutes(app: Express, {
           res.status(400).json({ message: `${issue.path.join(".") || "Draft"}: ${issue.message}` });
           return;
         }
-        const draft = await handler.draft(entity, parsed.data);
+        const variant = parsed.data.variant ?? handler.defaultVariant;
+        if (variant !== undefined && !handler.variants?.some(def => def.key === variant)) {
+          res.status(400).json({ message: "Unknown email template." });
+          return;
+        }
         const claims = [
           req.authenticatedUserId, req.authenticatedUserRole === "super_admin" ? "global" : req.authenticatedUserCompanyId,
           handler.kind, id,
         ];
-        const version = digest(draft.versionStamp);
-        const content = fingerprint(draft);
         const bound = (v: string, c: string) => JSON.stringify([...claims, v, c]);
         const now = new Date();
+        const supplied: unknown = req.body?.confirmationToken;
+        const review = typeof supplied === "string" ? /^([\w-]{43})\.([\w-]{43})\.(\d+\.[\w-]+\.[\w-]+)$/.exec(supplied) : null;
+        // Authenticate the original review first. This also detects replay if
+        // a successful send has already made this document ineligible.
+        if (operation !== "preview") {
+          const check = confirmation.verify(review?.[3] ?? supplied, bound(review?.[1] ?? "", review?.[2] ?? ""), now, { consume: false });
+          if (!check.ok) {
+            res.status(check.status).json({ reason: check.reason, message: check.message });
+            return;
+          }
+        }
+        let draft: BuiltDraft;
+        try {
+          draft = await handler.draft(entity, { ...parsed.data, variant }, req);
+        } catch (err) {
+          const refusal = draftRefusalSchema.safeParse(err);
+          if (refusal.success) {
+            const status = operation === "send" && handler.kind === "invoice_reminder" ? 409 : 422;
+            const detail = err instanceof OutgoingEmailError ? err.detail : { action: refusal.data.action };
+            throw new OutgoingEmailError(status, refusal.data.message, detail);
+          }
+          throw err;
+        }
+        const version = digest(draft.versionStamp);
+        const content = fingerprint(draft);
         if (operation === "preview") {
           const { token, expiresAt } = confirmation.issue(bound(version, content), now);
-          const { sender, versionStamp: _, ...visibleDraft } = draft;
+          const { sender, versionStamp: _, attachmentStamp: _attachmentStamp, ...visibleDraft } = draft;
           res.json(PreviewOutgoingEmailResponse.parse({
             ...visibleDraft, kind: handler.kind, id, from: sender.from,
             replyTo: sender.replyTo ?? null, usingCompanyAddress: sender.usingCompanyAddress,
-            optionDefs: handler.options ?? [], confirmationToken: `${version}.${content}.${token}`, expiresAt,
+            optionDefs: handler.options ?? [], variantDefs: handler.variants ?? [],
+            confirmationToken: `${version}.${content}.${token}`, expiresAt,
           }));
           return;
         }
 
         if (operation === "send" && !draft.to) {
           res.status(422).json({ message: handler.noRecipientMessage ?? "This customer has no billing email. Enter one, or add it in QuickBooks and resync." });
-          return;
-        }
-        const supplied: unknown = req.body?.confirmationToken;
-        const review = typeof supplied === "string" ? /^([\w-]{43})\.([\w-]{43})\.(\d+\.[\w-]+\.[\w-]+)$/.exec(supplied) : null;
-        // Authenticate the original snapshot first, so we can distinguish an
-        // invoice edit from a field edit and detect replay after state changes.
-        const check = confirmation.verify(review?.[3] ?? supplied, bound(review?.[1] ?? version, review?.[2] ?? content), now, { consume: false });
-        if (!check.ok) {
-          res.status(check.status).json({ reason: check.reason, message: check.message });
           return;
         }
         if (!review || review[1] !== version || (operation === "send" && review[2] !== content)) {
@@ -102,9 +119,12 @@ export function registerOutgoingEmailRoutes(app: Express, {
           res.attachment(file.filename).type("application/pdf").send(file.buffer);
           return;
         }
-        // No await between the check and consumption: concurrent requests in
-        // the same process cannot share a review.
-        confirmation.verify(review[3], bound(version, content), now);
+        // The draft may await storage, so check again when consuming the review.
+        const consumed = confirmation.verify(review[3], bound(version, content), new Date());
+        if (!consumed.ok) {
+          res.status(consumed.status).json({ reason: consumed.reason, message: consumed.message });
+          return;
+        }
         res.json(SendOutgoingEmailResponse.parse(await handler.send(entity, draft, req as Request)));
       } catch (err) {
         if (err instanceof OutgoingEmailError) {

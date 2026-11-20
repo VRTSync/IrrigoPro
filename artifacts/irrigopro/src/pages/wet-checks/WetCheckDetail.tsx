@@ -3,13 +3,11 @@ import { ActivityTab } from "@/components/activity/ActivityTab";
 import { useLocation, Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, ChevronLeft, CheckCircle2, Wrench, AlertTriangle, Camera, Download, Droplets, Send, FileText } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { countZonePhotos } from "@/lib/wet-check-photos";
 import { formatCurrency } from "@/lib/format-currency";
 import { apiRequest, asArray, queryClient, useArrayQuery, authedPdfUrl } from "@/lib/queryClient";
+import { ReviewAndSendDialog } from "@/components/email/review-and-send-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -141,9 +139,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   const [preview, setPreview] = useState<SubmitPreview | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDownloadingReport, setIsDownloadingReport] = useState(false);
-  const [sendReportOpen, setSendReportOpen] = useState(false);
-  const [sendReportEmail, setSendReportEmail] = useState("");
-  const [sendReportNote, setSendReportNote] = useState("");
+  const [reviewReportOpen, setReviewReportOpen] = useState(false);
   const { user: authUser } = useAuth();
 
   // Manager-tier roles that may download/send the customer report
@@ -154,13 +150,6 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
     authUser?.role === "billing_manager"
   );
 
-  const { data: wcCustomer } = useQuery<import("@workspace/db/schema").Customer>({
-    queryKey: ["/api/customers", wc?.customerId],
-    queryFn: () => apiRequest(`/api/customers/${wc!.customerId}`),
-    enabled: !!wc?.customerId && canSeeCustomerReport,
-    staleTime: 5 * 60 * 1000,
-  });
-
   // Slice 3 — server-authoritative WET_CHECK_AUTO_BILL flag. When OFF,
   // the field UI must fall back to the Slice 2 plain-submit flow (no
   // preview modal, no chip rail, no auto-bill messaging).
@@ -170,18 +159,6 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
   });
   const autoBillEnabled = autoBillCfg?.enabled ?? true;
 
-  const sendReportMut = useMutation({
-    mutationFn: ({ to, note }: { to: string; note: string }) =>
-      apiRequest(`/api/wet-checks/${wc?.id ?? id}/report/send`, "POST", { to: to || undefined, note: note || undefined }),
-    onSuccess: (_res, vars) => {
-      toast({ title: "Report sent", description: `Inspection report emailed to ${vars.to || "customer"}.` });
-      setSendReportOpen(false);
-      setSendReportEmail("");
-      setSendReportNote("");
-    },
-    onError: (e: any) =>
-      toast({ title: "Couldn't send report", description: e?.message, variant: "destructive" }),
-  });
 
   const previewMut = useMutation({
     mutationFn: (): Promise<SubmitPreview> =>
@@ -796,11 +773,7 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
                     variant="outline"
                     size="sm"
                     data-testid="wet-check-send-report"
-                    onClick={() => {
-                      setSendReportEmail(wcCustomer?.email ?? "");
-                      setSendReportNote("");
-                      setSendReportOpen(true);
-                    }}
+                    onClick={() => setReviewReportOpen(true)}
                   >
                     <Send className="w-4 h-4 mr-1" />
                     Send to Customer
@@ -1195,58 +1168,13 @@ export function WetCheckDetail({ id, clientId: routeClientId }: { id?: number; c
         <ActivityTab resource="wet-checks" id={wc?.id ?? null} />
       </div>
 
-      {/* Send Customer Report modal */}
-      <Dialog open={sendReportOpen} onOpenChange={(o) => { if (!sendReportMut.isPending) setSendReportOpen(o); }}>
-        <DialogContent data-testid="send-report-dialog">
-          <DialogHeader>
-            <DialogTitle>Send Inspection Report to Customer</DialogTitle>
-            <DialogDescription>
-              A PDF condition report (zones, findings, photos — no pricing) will be emailed to the customer.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-1">
-            <div className="space-y-1.5">
-              <Label htmlFor="send-report-email">Recipient email</Label>
-              <Input
-                id="send-report-email"
-                type="email"
-                placeholder="customer@example.com (leave blank to use email on file)"
-                value={sendReportEmail}
-                onChange={e => setSendReportEmail(e.target.value)}
-                data-testid="send-report-email-input"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="send-report-note">Note to customer <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Textarea
-                id="send-report-note"
-                rows={3}
-                placeholder="Add a note that appears in the email body…"
-                value={sendReportNote}
-                onChange={e => setSendReportNote(e.target.value)}
-                data-testid="send-report-note-input"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setSendReportOpen(false)}
-              disabled={sendReportMut.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => sendReportMut.mutate({ to: sendReportEmail, note: sendReportNote })}
-              disabled={sendReportMut.isPending}
-              data-testid="send-report-confirm"
-            >
-              {sendReportMut.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
-              Send Report
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ReviewAndSendDialog
+        open={reviewReportOpen}
+        onOpenChange={setReviewReportOpen}
+        kind="wet_check_report"
+        entityId={wc.id}
+        title="Send inspection report to customer"
+      />
 
       {/* Submit-confirm modal — surfaces the server's preview of what
           will be auto-billed and what will land in the manager queue

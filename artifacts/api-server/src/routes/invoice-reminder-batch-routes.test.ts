@@ -140,6 +140,10 @@ function harness(opts: HarnessOptions = {}) {
     async getLatestInvoiceSentCopy(id: number) {
       return pdfs[id];
     },
+    async getCustomer(id: number) {
+      const row = Object.values(rows).find(row => row.customerId === id);
+      return row?.id === 1 ? { id, companyId: row.companyId, email: " current-ap1@customer.test " } : undefined;
+    },
     async getUser(_id: number) {
       return { id: 7, name: "Dana Books" };
     },
@@ -315,7 +319,7 @@ describe("POST /api/invoices/reminders/preview — the confirmation list", () =>
     );
     const row = res.body.willSend[0];
     // The address is present in full. A count would not be a confirmation.
-    assert.equal(row.recipientEmail, "ap1@customer.test");
+    assert.equal(row.recipientEmail, "current-ap1@customer.test");
     assert.equal(row.customerName, "Customer 1");
     assert.equal(row.invoiceNumber, "INV-1");
     assert.equal(row.templateKey, "firm");
@@ -469,7 +473,7 @@ describe("POST /api/invoices/reminders/batch — the confirmed send", () => {
     const res = await batch(h.app, { invoiceIds: ALL_IDS, templateKey: "firm" });
 
     assert.equal(res.status, 200);
-    assert.deepEqual(h.sent.map((e) => e.to), ["ap1@customer.test"]);
+    assert.deepEqual(h.sent.map((e) => e.to), ["current-ap1@customer.test"]);
     assert.deepEqual(res.body.summary, {
       selected: 9,
       sent: 1,
@@ -487,7 +491,7 @@ describe("POST /api/invoices/reminders/batch — the confirmed send", () => {
     for (const r of res.body.results) byId[r.invoiceId] = r;
 
     assert.equal(byId[1].outcome, "sent");
-    assert.equal(byId[1].recipientEmail, "ap1@customer.test");
+    assert.equal(byId[1].recipientEmail, "current-ap1@customer.test");
     assert.equal(byId[1].templateLabel, "Firm reminder");
     assert.equal(byId[2].outcome, "skipped");
     assert.equal(byId[2].reason, "paid");
@@ -596,7 +600,7 @@ describe("batch reminders — the preview payload is never trusted", () => {
       willSend: [{ invoiceId: 1, recipientEmail: "attacker@evil.test" }],
     });
 
-    assert.deepEqual(h.sent.map((e) => e.to), ["ap1@customer.test"]);
+    assert.deepEqual(h.sent.map((e) => e.to), ["current-ap1@customer.test"]);
   });
 });
 
@@ -650,7 +654,7 @@ describe("batch reminders — company isolation", () => {
     const h = foreign();
     const res = await batch(h.app, { invoiceIds: [1, 99], templateKey: "firm" });
 
-    assert.deepEqual(h.sent.map((e) => e.to), ["ap1@customer.test"]);
+    assert.deepEqual(h.sent.map((e) => e.to), ["current-ap1@customer.test"]);
     assert.equal(res.body.summary.sent, 1);
     assert.equal(res.body.summary.notFound, 1);
   });

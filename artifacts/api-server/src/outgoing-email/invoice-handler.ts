@@ -29,7 +29,7 @@ const noRecipient = "This customer has no billing email. Enter one, or add it in
 const shortDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
-export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps): OutgoingEmailHandler<InvoiceEmailEntity> {
+export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) {
   return {
     kind: "invoice",
     capabilities: [requireInvoiceSend],
@@ -72,11 +72,11 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps):
           dueDateLabel: Number.isFinite(dueDate.getTime()) ? shortDate.format(dueDate) : null, note,
         }),
         attachments: [{ filename: buildInvoicePdfFilename(invoice, customer, invoice.id), viewUrl: `/api/invoices/${invoice.id}/pdf/download` }],
-        warnings, versionStamp, options: {},
+        warnings, versionStamp, options: {}, variant: null,
       };
     },
     send: ({ invoice, customer }, draft, req) => sendInvoiceEmail(invoice, customer, draft, req.authenticatedUserId!, deps),
-  };
+  } satisfies OutgoingEmailHandler<InvoiceEmailEntity>;
 }
 
 /** Deliver exactly the reviewed content and preserve the PDF bytes the provider accepted. */

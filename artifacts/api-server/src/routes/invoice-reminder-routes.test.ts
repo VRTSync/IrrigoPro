@@ -24,11 +24,14 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import {
+  createReminderCore,
   registerInvoiceReminderRoutes,
   evaluateThrottle,
   DEFAULT_REMINDER_THROTTLE_DAYS,
   type ReminderMailer,
 } from "./invoice-reminder-routes";
+import { createReminderEmailHandler } from "../outgoing-email/reminder-handler";
+import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
 import { annotateInvoiceForAr } from "./invoice-list-routes";
 import {
   hasCapability,
@@ -75,6 +78,8 @@ interface SentEmail {
   replyTo?: string | null;
   categories?: string[];
   filename?: string;
+  cc?: string[];
+  bcc?: string[];
 }
 
 function invoice(overrides: Record<string, any> = {}) {
@@ -88,6 +93,7 @@ function invoice(overrides: Record<string, any> = {}) {
     status: "generated",
     // 45 days before NOW, so the invoice is squarely in the 30–59 bucket.
     createdAt: new Date(NOW.getTime() - 45 * DAY),
+    updatedAt: new Date(NOW.getTime() - 2 * DAY),
     dueDate: new Date(NOW.getTime() - 45 * DAY),
     sentAt: new Date(NOW.getTime() - 44 * DAY),
     paidAt: null,
@@ -114,6 +120,7 @@ interface HarnessOptions {
   throttleDays?: number;
   paymentTerms?: string | null;
   missingSavedFile?: boolean;
+  currentEmail?: string;
 }
 
 function harness(opts: HarnessOptions = {}) {
@@ -136,6 +143,7 @@ function harness(opts: HarnessOptions = {}) {
       replyTo: o.sender.replyTo,
       categories: o.categories,
       filename: o.filename,
+      cc: o.cc, bcc: o.bcc,
     });
     return opts.sendResult ?? { success: true };
   };
@@ -150,6 +158,7 @@ function harness(opts: HarnessOptions = {}) {
     async getLatestInvoiceSentCopy(id: number) {
       return pdfs[id];
     },
+    async getCustomer(id: number) { return { id, email: opts.currentEmail, companyId: 1 }; },
     async getUser(_id: number) {
       return { id: 7, name: "Dana Books" };
     },
@@ -184,10 +193,8 @@ function harness(opts: HarnessOptions = {}) {
 
   const app = express();
   app.use(express.json());
-  registerInvoiceReminderRoutes(app, {
-    requireAuthentication: makeAuth(opts.role ?? "bookkeeper", opts.companyId ?? 1),
-    requireInvoiceSend,
-    requireReminderHistoryRead,
+  const requireAuthentication = makeAuth(opts.role ?? "bookkeeper", opts.companyId === undefined ? 1 : opts.companyId);
+  const core = createReminderCore({
     _storageApi: storageApi,
     _resolveSender: async () => ({
       from: { email: "platform@example.com", name: "Acme Irrigation" },
@@ -200,6 +207,9 @@ function harness(opts: HarnessOptions = {}) {
     _now: opts.now ?? (() => NOW),
     _baseUrl: () => "https://irrigopro.test",
   });
+
+  registerInvoiceReminderRoutes(app, { requireAuthentication, requireInvoiceSend, requireReminderHistoryRead, _core: core });
+  registerOutgoingEmailRoutes(app, { requireAuthentication, handlers: [createReminderEmailHandler(core)] });
 
   return { app, sent, created, rows, reminders, storageApi };
 }
@@ -231,8 +241,16 @@ async function request(
   }
 }
 
-const send = (app: Express, body: unknown = { templateKey: "firm" }) =>
-  request(app, "POST", "/api/invoices/1/reminders", body);
+const reminderPath = "/api/outgoing-email/invoice_reminder/1";
+const preview = (app: Express, fields: Record<string, unknown> = {}) =>
+  request(app, "POST", `${reminderPath}/preview`, fields);
+const confirm = (app: Express, fields: Record<string, unknown>) =>
+  request(app, "POST", `${reminderPath}/send`, fields);
+async function send(app: Express, fields: Record<string, unknown> = { variant: "firm" }) {
+  const review = await preview(app, fields);
+  if (review.status !== 200) return review;
+  return confirm(app, { ...fields, confirmationToken: review.body.confirmationToken });
+}
 
 it("a missing saved object refuses without sending or recording a reminder", async () => {
   const h = harness({ missingSavedFile: true });
@@ -249,7 +267,7 @@ it("a missing saved object refuses without sending or recording a reminder", asy
 // promise of this feature is that the bookkeeper is told what is wrong rather
 // than handed a generic "cannot send".
 
-describe("POST /api/invoices/:id/reminders — refusals", () => {
+describe("Reviewed reminders — refusals", () => {
   async function refusalFor(overrides: Record<string, any>, pdfs?: Record<number, any>) {
     const h = harness({ invoices: { 1: invoice(overrides) }, ...(pdfs ? { pdfs } : {}) });
     const res = await send(h.app);
@@ -377,16 +395,16 @@ describe("POST /api/invoices/:id/reminders — refusals", () => {
 
   it("refuses an unknown template rather than picking a tone for the sender", async () => {
     const h = harness();
-    const { status, body } = await send(h.app, {});
+    const { status, body } = await preview(h.app, { variant: "unknown" });
     assert.equal(status, 400);
-    assert.match(body.message, /choose which reminder/i);
+    assert.match(body.message, /unknown email template/i);
     assert.equal(h.sent.length, 0);
   });
 });
 
 // ── (f) Company isolation ───────────────────────────────────────────────────
 
-describe("POST /api/invoices/:id/reminders — company isolation", () => {
+describe("Reviewed reminders — company isolation", () => {
   it("404s for a company B invoice and attempts no email", async () => {
     const h = harness({ invoices: { 1: invoice({ companyId: 999 }) }, companyId: 1 });
     const { status, body } = await send(h.app);
@@ -414,7 +432,7 @@ describe("invoice reminder endpoints — capability matrix", () => {
     it(`allows ${role} to send`, async () => {
       const h = harness({ role, companyId: role === "super_admin" ? null : 1 });
       const { status } = await send(h.app);
-      assert.equal(status, 201);
+      assert.equal(status, 200);
       assert.equal(h.sent.length, 1);
     });
   }
@@ -437,11 +455,66 @@ describe("invoice reminder endpoints — capability matrix", () => {
 
 // ── Happy path ──────────────────────────────────────────────────────────────
 
-describe("POST /api/invoices/:id/reminders — sending", () => {
+describe("Reviewed reminders — sending", () => {
+  it("requires review and binds the reviewed template, overrides and saved attachment", async () => {
+    const h = harness({ currentEmail: " new@acme.test " });
+    const rejected = await confirm(h.app, { variant: "firm" });
+    assert.equal(rejected.status, 400);
+    assert.equal(h.sent.length, 0);
+    const defaults = await preview(h.app);
+    assert.equal(defaults.body.to, "new@acme.test");
+    assert.equal(defaults.body.variant, "suggested");
+    assert.equal(defaults.body.variantDefs[0].label, "Suggested for this invoice");
+    assert.deepEqual(defaults.body.attachments, [{ filename: "Saved invoice.pdf", viewUrl: "/api/invoices/1/sent-copy" }]);
+    assert.equal(h.sent.length, 0);
+    const fields = { variant: "firm", to: "someone@acme.test", cc: ["cc@acme.test"], bcc: ["bcc@acme.test"], subject: "A reviewed subject", note: "Please <confirm>." };
+    const review = await preview(h.app, fields);
+    assert.equal(review.status, 200);
+    assert.match(review.body.html, /Please &lt;confirm&gt;\./);
+    assert.match(review.body.text, /Please <confirm>\./);
+    const confirmationToken = review.body.confirmationToken;
+    assert.equal((await confirm(h.app, { ...fields, variant: "suggested", confirmationToken })).status, 409);
+    assert.equal(h.sent.length, 0);
+    const result = await confirm(h.app, { ...fields, confirmationToken });
+    assert.equal(result.status, 200);
+    const [mail] = h.sent;
+    assert.equal(mail.to, fields.to);
+    assert.deepEqual(mail.cc, fields.cc);
+    assert.deepEqual(mail.bcc, fields.bcc);
+    assert.equal(mail.subject, fields.subject);
+    assert.equal(mail.html, review.body.html);
+    assert.equal(mail.text, review.body.text);
+    assert.equal(h.created[0].recipientEmail, fields.to);
+    assert.equal((await confirm(h.app, { ...fields, confirmationToken })).body.reason, "confirmation_used");
+    assert.equal(h.sent.length, 1);
+  });
+
+  it("requires a fresh review if a different reminder went out after preview", async () => {
+    const h = harness();
+    const first = await preview(h.app, { variant: "firm" });
+    const second = await send(h.app);
+    assert.equal(second.status, 200);
+    const stale = await confirm(h.app, { variant: "firm", confirmationToken: first.body.confirmationToken });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.reason, "throttled");
+    assert.equal(h.sent.length, 1);
+  });
+
+  it("invalidates a review when the latest reminder row changes even without a throttle", async () => {
+    const h = harness();
+    const first = await preview(h.app);
+    h.reminders.push({ id: 42, companyId: 1, invoiceId: 1, sentAt: NOW, deliveryStatus: "failed" });
+    const stale = await confirm(h.app, { confirmationToken: first.body.confirmationToken });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.reason, "confirmation_mismatch");
+    assert.equal(h.sent.length, 0);
+  });
+
   it("sends the chosen tone with the invoice PDF attached and records it", async () => {
     const h = harness();
-    const { status, body } = await send(h.app, { templateKey: "final_notice" });
-    assert.equal(status, 201);
+    const { status, body } = await send(h.app, { variant: "final_notice" });
+    assert.equal(body.sentTo, "ap@acme.test");
+    assert.equal(status, 200);
     assert.equal(h.sent.length, 1);
     const mail = h.sent[0];
     assert.equal(mail.to, "ap@acme.test");
@@ -455,17 +528,17 @@ describe("POST /api/invoices/:id/reminders — sending", () => {
     assert.deepEqual(mail.categories, ["invoice-payment-reminder"]);
     // Recorded exactly once, as reminder number one.
     assert.equal(h.created.length, 1);
-    assert.equal(body.reminder.sequenceNumber, 1);
-    assert.equal(body.reminder.deliveryStatus, "sent");
-    assert.equal(body.reminder.templateKey, "final_notice");
-    assert.equal(body.reminder.sentByName, "Dana Books");
+    assert.equal(h.created[0].sequenceNumber, 1);
+    assert.equal(h.created[0].deliveryStatus, "sent");
+    assert.equal(h.created[0].templateKey, "final_notice");
+    assert.equal(h.created[0].sentByName, "Dana Books");
   });
 
   it("honours the sender's tone rather than the bucket's suggestion", async () => {
     // A 45-day-old invoice suggests 'firm'; the sender picked 'friendly'.
     const h = harness();
-    const { status } = await send(h.app, { templateKey: "friendly" });
-    assert.equal(status, 201);
+    const { status } = await send(h.app, { variant: "friendly" });
+    assert.equal(status, 200);
     assert.match(h.sent[0].subject, /friendly reminder/i);
     assert.equal(h.created[0].templateKey, "friendly");
   });
@@ -487,9 +560,9 @@ describe("POST /api/invoices/:id/reminders — sending", () => {
         },
       ],
     });
-    const { status, body } = await send(h.app);
-    assert.equal(status, 201);
-    assert.equal(body.reminder.sequenceNumber, 2);
+    const { status } = await send(h.app);
+    assert.equal(status, 200);
+    assert.equal(h.created[0].sequenceNumber, 2);
   });
 });
 
@@ -541,7 +614,7 @@ describe("reminder throttle", () => {
       ],
     });
     const { status, body } = await send(h.app);
-    assert.equal(status, 429);
+    assert.equal(status, 422);
     assert.equal(body.reason, "throttled");
     // Never a silent no-op: the response carries the timestamp the button
     // needs in order to say when the next reminder can go out.
@@ -569,9 +642,9 @@ describe("reminder throttle", () => {
         },
       ],
     });
-    const { status, body } = await send(h.app);
-    assert.equal(status, 201);
-    assert.equal(body.reminder.sequenceNumber, 2);
+    const { status } = await send(h.app);
+    assert.equal(status, 200);
+    assert.equal(h.created[0].sequenceNumber, 2);
     assert.equal(h.sent.length, 1);
   });
 
@@ -595,7 +668,7 @@ describe("reminder throttle", () => {
       ],
     });
     const { status, body } = await send(h.app);
-    assert.equal(status, 429);
+    assert.equal(status, 422);
     assert.equal(body.windowDays, 30);
     assert.equal(h.sent.length, 0);
   });
@@ -619,7 +692,7 @@ describe("reminder throttle", () => {
       ],
     });
     const { status } = await send(h.app);
-    assert.equal(status, 201, "a bounce must not lock the invoice for a week");
+    assert.equal(status, 200, "a bounce must not lock the invoice for a week");
   });
 
   it("evaluateThrottle reports the window, not just a boolean", () => {
@@ -643,7 +716,7 @@ describe("failed reminder sends", () => {
     const { status, body } = await send(h.app);
     assert.equal(status, 502);
     assert.equal(body.reason, "send_failed");
-    assert.match(body.message, /does not count as a reminder/i);
+    assert.match(body.message, /550 mailbox unavailable/i);
     assert.equal(h.created.length, 1);
     assert.equal(h.created[0].deliveryStatus, "failed");
     assert.equal(h.created[0].deliveryError, "550 mailbox unavailable");
@@ -665,10 +738,10 @@ describe("failed reminder sends", () => {
       daysOverdueAtSend: 12,
     };
     const h = harness({ reminders: [failed] });
-    const { status, body } = await send(h.app);
-    assert.equal(status, 201);
+    const { status } = await send(h.app);
+    assert.equal(status, 200);
     assert.equal(
-      body.reminder.sequenceNumber,
+      h.created[0].sequenceNumber,
       1,
       "a bounce is not a reminder the customer received",
     );
@@ -680,7 +753,7 @@ describe("failed reminder sends", () => {
 describe("GET /api/invoices/:id/reminders — history", () => {
   it("keeps the captured balance, days overdue and address after the invoice and customer change", async () => {
     const h = harness();
-    await send(h.app, { templateKey: "firm" });
+    await send(h.app, { variant: "firm" });
     const recorded = h.created[0];
     assert.equal(recorded.balanceAtSend, "300.00");
     assert.equal(recorded.recipientEmail, "ap@acme.test");
@@ -712,7 +785,7 @@ describe("GET /api/invoices/:id/reminders — history", () => {
 
   it("reports who sent it, to where, which template and when", async () => {
     const h = harness();
-    await send(h.app, { templateKey: "firm" });
+    await send(h.app, { variant: "firm" });
     const { body } = await request(h.app, "GET", "/api/invoices/1/reminders");
     const row = body.reminders[0];
     assert.equal(row.sentByName, "Dana Books");

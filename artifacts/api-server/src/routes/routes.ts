@@ -344,7 +344,6 @@ import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerCustomerRecordsRoutes, resolveExternalCustomer } from "./customer-records-routes";
 import { registerCompanyEmailSenderRoutes, updateCompanyHandler } from "./company-email-sender-routes";
-import { resolveCompanySender } from "../lib/company-sender";
 import { registerCustomerReviewRoutes, type QbReadIntegration, type QbReadError } from "./customer-review-routes";
 import { getCustomerRecordsLock } from "../lib/customer-records-lock";
 import { registerBudgetRoutes } from "./budget-routes";
@@ -373,7 +372,9 @@ import {
 } from "./invoice-reminder-routes";
 import { registerInvoiceReminderBatchRoutes } from "./invoice-reminder-batch-routes";
 import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
+import { createOutgoingEmailHandlers } from "../outgoing-email/registry";
 import { registerInvoiceBatchSendRoutes } from "./invoice-batch-send-routes";
+import { isWetCheckManagerRole, requireWetCheckReportSend } from "./report-email-guards";
 import { registerInvoiceArNoteRoutes } from "./invoice-ar-note-routes";
 import { applyArNoteVisibility } from "./ar-note-visibility";
 import { registerInvoiceCorrectionRoutes } from "./invoice-correction-routes";
@@ -7447,7 +7448,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     _core: reminderCore,
   });
   registerInvoiceBatchSendRoutes(app, { requireAuthentication, requireInvoiceSend });
-  registerOutgoingEmailRoutes(app, { requireAuthentication, recordLifecycleAudit });
+  registerOutgoingEmailRoutes(app, {
+    requireAuthentication,
+    handlers: createOutgoingEmailHandlers(reminderCore, recordLifecycleAudit),
+  });
   // Task #1889 — internal A/R notes. GET + POST only; there is deliberately no
   // update or delete route in that module and there must never be one.
   // Gated on requireArNotesAccess (CAN_READ_AR_NOTES), which is NARROWER than
@@ -15680,10 +15684,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   const isFieldRole = (role: string | undefined) =>
     role === "field_tech" || role === "irrigation_manager" || role === "company_admin" || role === "super_admin" || role === "billing_manager";
-  // Manager-level routes (review / route / approve / convert) — explicitly
-  // exclude field_tech.
-  const isWetCheckManagerRole = (role: string | undefined) =>
-    role === "irrigation_manager" || role === "company_admin" || role === "super_admin" || role === "billing_manager";
 
   app.get("/api/wet-checks/issue-types", requireAuthentication, async (req, res) => {
     const cid = requireCompanyId(req, res); if (!cid) return;
@@ -16499,18 +16499,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Separate from the internal /pdf route — no labor, PSI/GPM, or pricing.
   // Only manager/admin/billing roles may download or send this report.
 
-  app.get("/api/wet-checks/:id/report-pdf", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isWetCheckManagerRole(req.authenticatedUserRole)) {
-      res.status(403).json({ message: "Access restricted to manager/admin/billing roles" }); return;
-    }
+  app.get("/api/wet-checks/:id/report-pdf", requireAuthentication, requireWetCheckReportSend, async (req, res) => {
+    const cid = req.authenticatedUserRole === "super_admin" ? null : req.authenticatedUserCompanyId ?? null;
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(String(req.params.id), 10);
       if (Number.isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
       const wc = await storage.getWetCheck(id, cid);
       if (!wc) { res.status(404).json({ message: "Not found" }); return; }
 
-      const company = await storage.getCompanyProfile(cid);
+      const company = await storage.getCompanyProfile(wc.companyId);
       const { renderWetCheckReportPdf } = await import("../wet-check-report-pdf");
       const pdf = await renderWetCheckReportPdf(wc, { company: company ?? null });
 
@@ -16540,63 +16537,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         op: "wetCheckReportPdf",
         ctx: { cid, wetCheckId: req.params.id },
         fallbackMessage: "Failed to generate customer report PDF",
-      });
-      res.status(status).json({ message });
-    }
-  });
-
-  app.post("/api/wet-checks/:id/report/send", requireAuthentication, async (req, res) => {
-    const cid = requireCompanyId(req, res); if (!cid) return;
-    if (!isWetCheckManagerRole(req.authenticatedUserRole)) {
-      res.status(403).json({ message: "Access restricted to manager/admin/billing roles" }); return;
-    }
-    try {
-      const id = parseInt(req.params.id);
-      if (Number.isNaN(id)) { res.status(400).json({ message: "Invalid id" }); return; }
-      const wc = await storage.getWetCheck(id, cid);
-      if (!wc) { res.status(404).json({ message: "Not found" }); return; }
-
-      const { to, note } = req.body ?? {};
-      // Determine recipient: explicit override or customer email on file
-      let toEmail: string | null = typeof to === "string" && to.trim() ? to.trim() : null;
-      if (!toEmail) {
-        const customer = await storage.getCustomer(wc.customerId);
-        toEmail = customer?.email ?? null;
-      }
-      if (!toEmail) {
-        res.status(422).json({ message: "No email address on file for this customer. Provide a 'to' email." });
-        return;
-      }
-
-      const company = await storage.getCompanyProfile(cid);
-      const { renderWetCheckReportPdf } = await import("../wet-check-report-pdf");
-      const pdf = await renderWetCheckReportPdf(wc, { company: company ?? null });
-
-      const inspectionDate = wc.startedAt
-        ? new Date(wc.startedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
-        : "—";
-
-      await EmailService.sendWetCheckReport({
-        sender: await resolveCompanySender(cid),
-        to: toEmail,
-        customerName: wc.customerName ?? "",
-        propertyAddress: wc.propertyAddress ?? null,
-        technicianName: wc.technicianName ?? null,
-        inspectionDate,
-        companyName: company?.name ?? "IrrigoPro",
-        companyEmail: company?.email ?? null,
-        companyPhone: company?.phone ?? null,
-        pdfBuffer: pdf,
-        wetCheckId: id,
-        note: typeof note === "string" ? note : undefined,
-      });
-
-      res.json({ sent: true, to: toEmail });
-    } catch (e: any) {
-      const { status, message } = classifyAndLog(req, e, {
-        op: "wetCheckReportSend",
-        ctx: { cid, wetCheckId: req.params.id },
-        fallbackMessage: "Failed to send customer report",
       });
       res.status(status).json({ message });
     }

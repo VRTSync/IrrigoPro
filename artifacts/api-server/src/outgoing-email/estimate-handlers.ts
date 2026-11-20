@@ -110,7 +110,7 @@ export function createEstimateEmailHandler(
         attachments: attachPdf
           ? [{ filename: estimatePdfAttachmentFilename(estimate.estimateNumber), viewUrl: `/api/outgoing-email/${kind}/${estimate.id}/attachment` }]
           : [],
-        warnings, options: { attachPdf },
+        warnings, options: { attachPdf }, variant: null,
         versionStamp: [
           estimate.updatedAt.toISOString(), estimate.lifecycleStatus, estimate.totalAmount,
           attachPdf ? attachmentVersion(entity) : "no-pdf",

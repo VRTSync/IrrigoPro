@@ -14,3 +14,5 @@ A successful SendGrid send and an empty Activity API lookup can coexist with con
 **Why:** The app recorded two accepted synthetic messages and read back their PDFs. Scoped Activity lookups returned no matches, but the test inbox owner confirmed receipt.
 
 **How to apply:** Report provider acceptance, Activity results, and inbox confirmation as separate evidence. Do not send again just because an Activity lookup has no matches.
+
+If a live acceptance script loses its response capture after clicking Send, check the running server's completed request status before trying again. A capture failure is not a delivery failure: the provider can have accepted the message already. Do not resend a successful or unresolved attempt just to get cleaner evidence; ask the inbox owner to verify receipt. Provider acceptance and inbox receipt are separate checks.

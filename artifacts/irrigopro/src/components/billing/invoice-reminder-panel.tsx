@@ -2,45 +2,18 @@
 //
 // Two jobs, in this order of importance:
 //
-//   1. Never show a dead button. When the server refuses, this panel shows the
-//      refusal's own sentence, and where the refusal names an action ("send
-//      the invoice", "generate the PDF first") that sentence is what occupies
-//      the space the button would have taken. A greyed-out control with a
-//      shrug for a tooltip is the thing this replaces.
+//   1. Let staff review the reminder and see the server's reason if it
+//      cannot be sent, including an action when the invoice needs attention.
 //   2. Show the reminder history as it was, not as the invoice is now. Every
 //      value in the table below comes off the recorded row — the balance and
 //      the address are the ones the customer actually saw.
 //
-// Sending is always deliberate: a tone has to be chosen and a confirmation
-// naming the recipient has to be accepted.
-
-import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Clock, Loader2, Send } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import {
-  apiRequest,
-  INVOICE_EXPANSION_GC_MS,
-  INVOICE_EXPANSION_STALE_MS,
-} from "@/lib/queryClient";
+import { Button } from "@/components/ui/button";
+import { ReviewAndSendDialog } from "@/components/email/review-and-send-dialog";
+import { INVOICE_EXPANSION_GC_MS, INVOICE_EXPANSION_STALE_MS } from "@/lib/queryClient";
 
 interface ReminderRow {
   id: number;
@@ -59,7 +32,6 @@ interface ReminderRow {
 
 interface ReminderState {
   reminders: ReminderRow[];
-  canSend: boolean;
   refusal: {
     reason: string;
     message: string;
@@ -72,11 +44,8 @@ interface ReminderState {
     throttled: boolean;
     message: string | null;
   };
-  suggestedTemplateKey: string;
-  templates: { key: string; label: string }[];
   balanceDue: string;
   daysOverdue: number;
-  recipientEmail: string | null;
 }
 
 function formatWhen(iso: string): string {
@@ -108,56 +77,18 @@ export function InvoiceReminderPanel({
   historyOnly?: boolean;
   onSendInvoice?: () => void;
 }) {
-  const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [templateKey, setTemplateKey] = useState<string>("");
-  const [confirming, setConfirming] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const refreshHistory = () => queryClient.invalidateQueries({ queryKey: ["/api/invoices", invoiceId, "reminders"] });
 
   const { data, isLoading } = useQuery<ReminderState>({
     queryKey: ["/api/invoices", invoiceId, "reminders"],
     enabled: open,
     // Task #1922 — reopening a row within the window renders from cache and
-    // issues no request. Reminder history changes only through sends, which
-    // invalidate this key on success AND on error (a failed attempt is still
-    // recorded), so the window never hides a send.
+    // issues no request. Review and Send invalidates this key on success and
+    // on error, since a failed delivery attempt is still part of the history.
     staleTime: INVOICE_EXPANSION_STALE_MS,
     gcTime: INVOICE_EXPANSION_GC_MS,
-  });
-
-  // The bucket only *suggests* a tone — it pre-selects, and the sender is free
-  // to override it before sending. Nothing auto-escalates.
-  useEffect(() => {
-    if (data?.suggestedTemplateKey && !templateKey) setTemplateKey(data.suggestedTemplateKey);
-  }, [data?.suggestedTemplateKey, templateKey]);
-
-  const sendMutation = useMutation({
-    mutationFn: async () =>
-      apiRequest(`/api/invoices/${invoiceId}/reminders`, "POST", { templateKey }),
-    onSuccess: () => {
-      toast({
-        title: "Reminder sent",
-        description: `A payment reminder for ${invoiceNumber} was sent to ${data?.recipientEmail ?? "the customer"}.`,
-      });
-      setConfirming(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices", invoiceId, "reminders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-    },
-    onError: (err: any) => {
-      // The server's refusal text is the message. It already names what to do
-      // next, so restating it in our own words would only lose information.
-      let description = err?.message ?? "The reminder could not be sent.";
-      const match = /^(\d+):\s*([\s\S]*)$/.exec(String(description));
-      if (match) {
-        try {
-          description = JSON.parse(match[2]).message ?? match[2];
-        } catch {
-          description = match[2];
-        }
-      }
-      toast({ title: "Reminder not sent", description, variant: "destructive" });
-      setConfirming(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices", invoiceId, "reminders"] });
-    },
   });
 
   if (!open) return null;
@@ -187,10 +118,7 @@ export function InvoiceReminderPanel({
         )}
       </div>
 
-      {/* The send control, or the reason there isn't one. Absent entirely in
-          history-only mode: nothing here can send, so nothing here explains
-          why a send is or is not currently possible. */}
-      {historyOnly ? null : refusal ? (
+      {!historyOnly && refusal ? (
         <div
           className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2"
           data-testid={`reminder-refusal-${refusal.reason}`}
@@ -209,7 +137,7 @@ export function InvoiceReminderPanel({
             )}
           </div>
         </div>
-      ) : throttle.throttled ? (
+      ) : !historyOnly && throttle.throttled ? (
         <div
           className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-start gap-2"
           data-testid="reminder-throttled"
@@ -217,37 +145,13 @@ export function InvoiceReminderPanel({
           <Clock className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
           <p className="text-sm text-gray-700">{throttle.message}</p>
         </div>
-      ) : (
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">Tone</label>
-            <Select value={templateKey} onValueChange={setTemplateKey}>
-              <SelectTrigger className="w-52" data-testid="reminder-template-select">
-                <SelectValue placeholder="Choose a reminder" />
-              </SelectTrigger>
-              <SelectContent>
-                {data.templates.map((t) => (
-                  <SelectItem key={t.key} value={t.key} data-testid={`reminder-template-${t.key}`}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => setConfirming(true)}
-            disabled={!templateKey || sendMutation.isPending}
-            data-testid="button-send-reminder"
-          >
-            {sendMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4 mr-2" />
-            )}
-            Send reminder
-          </Button>
-        </div>
+      ) : null}
+
+      {!historyOnly && onSendInvoice && (
+        <Button size="sm" onClick={() => setReviewOpen(true)} data-testid="button-send-reminder">
+          <Send className="w-4 h-4 mr-2" />
+          Send reminder
+        </Button>
       )}
 
       {/* History — recorded values, not today's. */}
@@ -291,46 +195,26 @@ export function InvoiceReminderPanel({
         </ul>
       )}
 
-      {!historyOnly && (
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Send a payment reminder?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This sends the{" "}
-              <strong>
-                {data.templates.find((t) => t.key === templateKey)?.label ?? "selected"}
-              </strong>{" "}
-              for invoice <strong>{invoiceNumber}</strong>, with the invoice PDF attached, to:
-              <br />
-              <strong className="text-blue-600">{data.recipientEmail}</strong>
-              <br />
-              <br />
-              This reaches the customer's inbox immediately and is recorded permanently.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-reminder">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => sendMutation.mutate()}
-              disabled={sendMutation.isPending}
-              data-testid="button-confirm-reminder"
-            >
-              {sendMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Sending…
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 mr-2" />
-                  Send reminder
-                </>
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {!historyOnly && onSendInvoice && (
+        <ReviewAndSendDialog
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          kind="invoice_reminder"
+          entityId={invoiceId}
+          title={`Send payment reminder for ${invoiceNumber}`}
+          onAction={() => {
+            // Both refusal actions go through the invoice review. Only an
+            // emailed invoice creates a saved attachment for reminders.
+            setReviewOpen(false);
+            onSendInvoice();
+          }}
+          onSendError={() => void refreshHistory()}
+          onSent={() => {
+            // This includes both the history key and the invoice list counts.
+            void queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+            void queryClient.invalidateQueries({ queryKey: ["/api/invoices/reminder-eligibility"] });
+          }}
+        />
       )}
     </div>
   );

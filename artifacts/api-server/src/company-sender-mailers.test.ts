@@ -36,6 +36,28 @@ const report = {
   pdfBuffer: Buffer.from("test-pdf"),
 };
 describe("customer-facing mailers use the resolved identity", () => {
+  it("sends both reports with the exact reviewed content and copied recipients", async () => {
+    sent.length = 0;
+    const reviewed = { subject: "Reviewed subject", html: "<p>Reviewed report</p>", text: "Reviewed report", filename: "Reviewed.pdf" };
+    const recipients = { cc: ["cc@example.com"], bcc: ["bcc@example.com"] };
+    const reviewedReport = { ...report, ...recipients, sender: companySender, reviewed };
+    await EmailService.sendWetCheckReport({ ...reviewedReport, wetCheckId: 1, technicianName: null, inspectionDate: "November 18, 2026" });
+    await EmailService.sendIrrigationProfileReport({ ...reviewedReport, customerId: 1 });
+    assert.equal(sent.length, 2);
+    for (const message of sent) {
+      assert.equal(message.to, report.to);
+      assert.deepEqual(message.cc, recipients.cc);
+      assert.deepEqual(message.bcc, recipients.bcc);
+      assert.equal(message.subject, reviewed.subject);
+      assert.equal(message.html, reviewed.html);
+      assert.equal(message.text, reviewed.text);
+      assert.equal(message.attachments[0].filename, reviewed.filename);
+      assert.equal(message.attachments[0].type, "application/pdf");
+      assert.equal(message.attachments[0].content, report.pdfBuffer.toString("base64"));
+    }
+    assert.deepEqual(sent.map(message => message.categories), [["wet-check-report"], ["irrigation-profile-report"]]);
+  });
+
   for (const [label, sender] of [
     ["authenticated", companySender],
     ["platform fallback", senderFromCompany({

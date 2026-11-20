@@ -3,7 +3,6 @@ import { resolveCompanySender, type CompanySender } from "../lib/company-sender"
 //
 //   GET  /api/invoices/:id/reminders  — history + whether a reminder can be
 //                                       sent right now, and if not, why not.
-//   POST /api/invoices/:id/reminders  — send one.
 //
 // This is the one endpoint in the product where a misclick reaches a
 // customer's inbox, so three rules shape the whole module:
@@ -21,10 +20,8 @@ import { resolveCompanySender, type CompanySender } from "../lib/company-sender"
 // Nothing here runs on a schedule. Every reminder is a person pressing send.
 
 import type { Express, RequestHandler } from "express";
+import type { Company, Invoice, InvoicePdf } from "@workspace/db";
 import { storage as storageModule } from "../storage";
-import { db as dbModule } from "../db";
-import { customers } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
 import {
   classifyAgingBucket,
   computeEffectiveDueDate,
@@ -40,8 +37,10 @@ import {
   REMINDER_TEMPLATE_LABELS,
   type ReminderTemplateKey,
 } from "../invoice-reminder-templates";
-import { EmailService } from "../email-service";
+import { EmailService, invoiceEmailNoteBlock } from "../email-service";
+import { OutgoingEmailError, type BuiltDraft } from "../outgoing-email/types";
 import { readInvoiceSentCopy } from "../invoice-pdf-service";
+import { ObjectStorageService } from "../objectStorage";
 import { resolveCompanyLogoUrl } from "../logo-url";
 
 // ── The refusal matrix ──────────────────────────────────────────────────────
@@ -95,6 +94,7 @@ export interface ReminderInvoiceLike {
 export function evaluateReminderEligibility(args: {
   invoice: ReminderInvoiceLike;
   hasStoredPdf: boolean;
+  recipientEmail?: string | null;
 }): ReminderRefusal | null {
   const { invoice, hasStoredPdf } = args;
   const num = `#${invoice.invoiceNumber}`;
@@ -136,7 +136,7 @@ export function evaluateReminderEligibility(args: {
       message: `Invoice ${num} is still a draft. Finalise and send it before asking the customer to pay it.`,
     };
   }
-  if (!invoice.customerEmail || String(invoice.customerEmail).trim() === "") {
+  if (!(args.recipientEmail === undefined ? invoice.customerEmail : args.recipientEmail)?.trim()) {
     return {
       reason: "no_customer_email",
       message: `There is no billing email on this customer, so a reminder for invoice ${num} has nowhere to go. Add a billing email to the customer first.`,
@@ -308,6 +308,8 @@ export type ReminderMailer = (
     sender: CompanySender;
     filename?: string;
     categories?: string[];
+    cc?: string[];
+    bcc?: string[];
   },
 ) => Promise<{ success: boolean; error?: string }>;
 
@@ -326,14 +328,6 @@ export interface RegisterInvoiceReminderRoutesDeps extends ReminderCoreDeps {
    * one instance so there is literally one send path in the process.
    */
   _core?: ReminderCore;
-}
-
-async function loadPaymentTermsFromDb(customerId: number): Promise<string | null> {
-  const [row] = await dbModule
-    .select({ paymentTerms: customers.paymentTerms })
-    .from(customers)
-    .where(eq(customers.id, customerId));
-  return row?.paymentTerms ?? null;
 }
 
 function emailBaseUrl(): string {
@@ -371,14 +365,24 @@ export interface ReminderCoreDeps {
 
 /** One invoice, resolved: the row, its PDF, its age, and its first refusal. */
 export interface ReminderContext {
-  invoice: any;
-  pdf: any;
+  invoice: Invoice;
+  pdf: InvoicePdf | undefined;
+  recipientEmail: string | null;
   now: Date;
   effectiveDueDate: Date;
   daysOverdue: number;
   agingBucket: AgingBucketKey;
   balanceDue: number;
   refusal: ReminderRefusal | null;
+}
+
+interface ReminderOverrides {
+  to?: string;
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  note?: string;
+  reviewed?: BuiltDraft;
 }
 
 /** Why a preview or a batch send passed an invoice over. */
@@ -461,6 +465,11 @@ export interface ReminderCore {
     now: Date,
   ): Promise<ThrottleState>;
   history(req: any, invoiceId: number): Promise<any[]>;
+  companyFor(ctx: ReminderContext): Promise<Company | undefined>;
+  senderFor(ctx: ReminderContext): Promise<CompanySender>;
+  versionStamp(req: any, ctx: ReminderContext): Promise<string>;
+  hasSavedCopy(ctx: ReminderContext): Promise<boolean>;
+  renderOne(ctx: ReminderContext, templateKey: ReminderTemplateKey, company: Company | undefined, note?: string): ReturnType<typeof renderReminderEmail>;
   /** Dry run. Reads only — it must never reach the mailer. */
   previewOne(
     req: any,
@@ -472,13 +481,13 @@ export interface ReminderCore {
     req: any,
     invoiceId: number,
     choice: ReminderTemplateChoice,
+    overrides?: ReminderOverrides,
   ): Promise<ReminderSendOutcome>;
 }
 
 export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
   const storage = deps._storageApi ?? storageModule;
   const mailer = deps._mailer ?? defaultMailer;
-  const loadPaymentTerms = deps._loadPaymentTerms ?? loadPaymentTermsFromDb;
   const nowFn = deps._now ?? (() => new Date());
   const baseUrlFn = deps._baseUrl ?? emailBaseUrl;
 
@@ -497,10 +506,19 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     req: any,
     invoiceId: number,
   ): Promise<ReminderContext | null> {
-    const invoice = await storage.getInvoiceById(invoiceId, callerCompanyId(req));
+    const companyId = callerCompanyId(req);
+    if (companyId == null && req.authenticatedUserRole !== "super_admin") return null;
+    const invoice: Invoice | undefined = await storage.getInvoiceById(invoiceId, companyId);
     if (!invoice) return null;
-    const pdf = await storage.getLatestInvoiceSentCopy(invoiceId);
-    const paymentTerms = await loadPaymentTerms(invoice.customerId);
+    const [pdf, customer] = await Promise.all([
+      storage.getLatestInvoiceSentCopy(invoiceId, invoice.companyId),
+      storage.getCustomer(invoice.customerId),
+    ]);
+    const ownedCustomer = customer?.companyId === invoice.companyId ? customer : undefined;
+    const recipientEmail = ownedCustomer?.email?.trim() || invoice.customerEmail?.trim() || null;
+    const paymentTerms = deps._loadPaymentTerms
+      ? await deps._loadPaymentTerms(invoice.customerId)
+      : ownedCustomer?.paymentTerms ?? null;
     const now = nowFn();
     const effectiveDueDate = computeEffectiveDueDate(
       invoice.dueDate,
@@ -515,12 +533,13 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     return {
       invoice,
       pdf,
+      recipientEmail,
       now,
       effectiveDueDate,
       daysOverdue: days,
       agingBucket: bucket,
       balanceDue: resolveBalanceDue(invoice),
-      refusal: evaluateReminderEligibility({ invoice, hasStoredPdf: !!pdf }),
+      refusal: evaluateReminderEligibility({ invoice, hasStoredPdf: !!pdf, recipientEmail }),
     };
   }
 
@@ -529,7 +548,7 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     companyId: number | null,
     now: Date,
   ): Promise<ThrottleState> {
-    const last = await storage.getLastDeliveredInvoiceReminder(invoiceId);
+    const last = await storage.getLastDeliveredInvoiceReminder(invoiceId, companyId);
     let windowDays = DEFAULT_REMINDER_THROTTLE_DAYS;
     if (companyId != null) {
       try {
@@ -546,6 +565,48 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
 
   async function history(req: any, invoiceId: number): Promise<any[]> {
     return (await storage.getInvoiceReminders(invoiceId, callerCompanyId(req))) ?? [];
+  }
+
+  function companyFor(ctx: ReminderContext): Promise<Company | undefined> {
+    return storage.getCompanyProfile(ctx.invoice.companyId);
+  }
+
+  function senderFor(ctx: ReminderContext): Promise<CompanySender> {
+    return (deps._resolveSender ?? resolveCompanySender)(ctx.invoice.companyId);
+  }
+
+  async function versionStamp(req: any, ctx: ReminderContext): Promise<string> {
+    const [latest] = await history(req, ctx.invoice.id);
+    return `${ctx.invoice.updatedAt.toISOString()}|${ctx.pdf?.id ?? 0}|${latest?.id ?? 0}`;
+  }
+
+  async function hasSavedCopy(ctx: ReminderContext): Promise<boolean> {
+    if (!ctx.pdf) return false;
+    return Boolean(deps._readSentCopy
+      ? await deps._readSentCopy(ctx.pdf.pdfUrl)
+      : await new ObjectStorageService().searchPublicObject(ctx.pdf.pdfUrl));
+  }
+
+  function renderOne(ctx: ReminderContext, templateKey: ReminderTemplateKey, company: Company | undefined, note?: string) {
+    const rendered = renderReminderEmail({
+      templateKey,
+      customerName: ctx.invoice.customerName,
+      invoiceNumber: ctx.invoice.invoiceNumber,
+      effectiveDueDate: ctx.effectiveDueDate,
+      daysOverdue: ctx.daysOverdue,
+      balanceDue: ctx.balanceDue,
+      company: {
+        name: company?.name || "IrrigoPro",
+        logo: company?.logo ? resolveCompanyLogoUrl(company.logo, baseUrlFn()) : null,
+        email: company?.email ?? null,
+        phone: company?.phone ?? null,
+      },
+    });
+    return note ? {
+      ...rendered,
+      html: rendered.html.replace(/<body[^>]*>/, body => body + invoiceEmailNoteBlock(note)),
+      text: `${note}\n\n${rendered.text}`,
+    } : rendered;
   }
 
   async function previewOne(
@@ -583,7 +644,7 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     return {
       ...head,
       outcome: "send",
-      recipientEmail: String(ctx.invoice.customerEmail),
+      recipientEmail: ctx.recipientEmail!,
       templateKey,
       templateLabel: REMINDER_TEMPLATE_LABELS[templateKey],
       balanceDue: ctx.balanceDue.toFixed(2),
@@ -595,6 +656,7 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     req: any,
     invoiceId: number,
     choice: ReminderTemplateChoice,
+    overrides?: ReminderOverrides,
   ): Promise<ReminderSendOutcome> {
     // Company-scoped resolution first, before anything reads a template or
     // touches the mailer. Another company's invoice never gets this far.
@@ -632,33 +694,29 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     }
 
     const templateKey = resolveTemplateChoice(choice, ctx.agingBucket);
-
-    const company = ctx.invoice.companyId
-      ? await storage.getCompanyProfile(ctx.invoice.companyId)
-      : null;
-    const logo = company?.logo ? resolveCompanyLogoUrl(company.logo, baseUrlFn()) : null;
-
-    const rendered = renderReminderEmail({
-      templateKey,
-      customerName: ctx.invoice.customerName,
-      invoiceNumber: ctx.invoice.invoiceNumber,
-      effectiveDueDate: ctx.effectiveDueDate,
-      daysOverdue: ctx.daysOverdue,
-      balanceDue: ctx.balanceDue,
-      company: {
-        name: company?.name || "IrrigoPro",
-        logo,
-        email: company?.email ?? null,
-        phone: company?.phone ?? null,
-      },
-    });
-
+    const reviewed = overrides?.reviewed;
+    const rendered = renderOne(ctx, templateKey, await companyFor(ctx), overrides?.note);
+    const changed = () => new OutgoingEmailError(409, "This reminder changed after you reviewed it. Review it again before sending.");
+    if (reviewed && (reviewed.html !== rendered.html || reviewed.text !== rendered.text)) throw changed();
     const buf = await (deps._readSentCopy ?? readInvoiceSentCopy)(ctx.pdf!.pdfUrl);
     if (!buf) {
-      const refusal = evaluateReminderEligibility({ invoice: ctx.invoice, hasStoredPdf: false })!;
+      const refusal = evaluateReminderEligibility({ invoice: ctx.invoice, hasStoredPdf: false, recipientEmail: ctx.recipientEmail })!;
       return { ...head, outcome: "skipped", reason: refusal.reason, message: refusal.message, refusal, throttle: null };
     }
-    const recipientEmail = String(ctx.invoice.customerEmail);
+    if (reviewed) {
+      // Reading the saved file can take time. Check the current data before
+      // delivering, and use the exact sender and body from the verified draft.
+      const current = await resolveContext(req, invoiceId);
+      if (!current) return { invoiceId, outcome: "not_found" };
+      const currentStamp = await versionStamp(req, current);
+      if (current.refusal || current.pdf?.id !== ctx.pdf!.id || currentStamp !== reviewed.versionStamp
+        || resolveTemplateChoice(choice, current.agingBucket) !== templateKey
+        || current.daysOverdue !== ctx.daysOverdue || current.balanceDue !== ctx.balanceDue
+        || current.effectiveDueDate.getTime() !== ctx.effectiveDueDate.getTime()) {
+        throw changed();
+      }
+    }
+    const recipientEmail = overrides?.to ?? ctx.recipientEmail!;
     const sendResult = await mailer(
       recipientEmail,
       ctx.invoice.customerName,
@@ -666,12 +724,14 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
       // Non-null by construction: the no_pdf refusal above returned early.
       buf,
       {
-        subject: rendered.subject,
-        html: rendered.html,
-        text: rendered.text,
-        sender: await (deps._resolveSender ?? resolveCompanySender)(ctx.invoice.companyId),
+        subject: overrides?.subject ?? rendered.subject,
+        html: reviewed?.html ?? rendered.html,
+        text: reviewed?.text ?? rendered.text,
+        sender: reviewed?.sender ?? await senderFor(ctx),
         filename: ctx.pdf!.filename,
         categories: ["invoice-payment-reminder"],
+        cc: overrides?.cc,
+        bcc: overrides?.bcc,
       },
     );
 
@@ -750,6 +810,11 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     resolveContext,
     throttleFor,
     history,
+    companyFor,
+    senderFor,
+    versionStamp,
+    hasSavedCopy,
+    renderOne,
     previewOne,
     sendOne,
   };
@@ -778,8 +843,7 @@ export function registerInvoiceReminderRoutes(
     "/api/invoices/:id/reminders",
     deps.requireAuthentication,
     // Task #1921 — history is a read. A role with invoice-read but no send
-    // authority (irrigation_manager) may see what already went out; the POST
-    // below keeps the send capability.
+    // authority (irrigation_manager) may see what already went out.
     deps.requireReminderHistoryRead ?? deps.requireInvoiceSend,
     async (req: any, res) => {
       try {
@@ -817,7 +881,7 @@ export function registerInvoiceReminderRoutes(
           daysOverdue: ctx.daysOverdue,
           agingBucket: ctx.agingBucket,
           effectiveDueDate: ctx.effectiveDueDate.toISOString(),
-          recipientEmail: ctx.invoice.customerEmail ?? null,
+          recipientEmail: ctx.recipientEmail,
         });
       } catch (error) {
         console.error("Error loading invoice reminders:", error);
@@ -917,98 +981,4 @@ export function registerInvoiceReminderRoutes(
     },
   );
 
-  // ── Send ──────────────────────────────────────────────────────────────────
-
-  app.post(
-    "/api/invoices/:id/reminders",
-    deps.requireAuthentication,
-    deps.requireInvoiceSend,
-    async (req: any, res) => {
-      try {
-        const id = parseId(req, res);
-        if (id == null) return;
-
-        // Company-scoped resolution first, before anything reads a template or
-        // touches the mailer. Cross-company gets a 404 and nothing is sent.
-        // The refusal and the throttle are answered from this same context, in
-        // this order, so each one keeps its own status code and its own
-        // sentence; `sendOne` then re-checks all of it at send time.
-        const ctx = await core.resolveContext(req, id);
-        if (!ctx) {
-          res.status(404).json({ message: "Invoice not found" });
-          return;
-        }
-        if (ctx.refusal) {
-          res.status(422).json(ctx.refusal);
-          return;
-        }
-        const preThrottle = await core.throttleFor(
-          id,
-          ctx.invoice.companyId ?? null,
-          ctx.now,
-        );
-        if (preThrottle.throttled) {
-          res.status(429).json({
-            reason: "throttled",
-            message: throttleMessage(ctx.invoice.invoiceNumber, preThrottle),
-            lastSentAt: preThrottle.lastSentAt?.toISOString() ?? null,
-            nextAllowedAt: preThrottle.nextAllowedAt?.toISOString() ?? null,
-            windowDays: preThrottle.windowDays,
-          });
-          return;
-        }
-
-        // The tone is always an explicit choice. Nothing picks it for the
-        // sender, so an absent or unknown key is a refusal, not a default.
-        // (The single send takes a concrete key only; "suggested" is a batch
-        // affordance, where one choice has to cover invoices of many ages.)
-        const templateKey = (req.body ?? {}).templateKey;
-        if (!isReminderTemplateKey(templateKey)) {
-          res.status(400).json({
-            message: `Choose which reminder to send: ${REMINDER_TEMPLATE_KEYS.join(", ")}.`,
-          });
-          return;
-        }
-
-        const result = await core.sendOne(req, id, templateKey);
-
-        if (result.outcome === "not_found") {
-          res.status(404).json({ message: "Invoice not found" });
-          return;
-        }
-        if (result.outcome === "skipped") {
-          if (result.reason === "throttled") {
-            const throttle = result.throttle!;
-            res.status(429).json({
-              reason: "throttled",
-              message: result.message,
-              lastSentAt: throttle.lastSentAt?.toISOString() ?? null,
-              nextAllowedAt: throttle.nextAllowedAt?.toISOString() ?? null,
-              windowDays: throttle.windowDays,
-            });
-            return;
-          }
-          res.status(422).json(result.refusal);
-          return;
-        }
-        if (result.outcome === "failed") {
-          res.status(502).json({
-            reason: "send_failed",
-            message: result.message,
-            error: result.error,
-            reminder: result.reminder,
-          });
-          return;
-        }
-
-        res.status(201).json({
-          message: result.message,
-          reminder: result.reminder,
-        });
-      } catch (error) {
-        console.error("Error sending invoice reminder:", error);
-        res.status(500).json({ message: "Failed to send reminder" });
-      }
-    },
-  );
 }

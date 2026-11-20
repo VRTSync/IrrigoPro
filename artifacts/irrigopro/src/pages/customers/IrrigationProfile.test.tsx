@@ -6,7 +6,7 @@
  * - Eyebrow "Irrigation profile" label is present
  * - Stat pills for 0/1/many counts
  * - "Updated by" footer: present when lastUpdated exists, absent otherwise
- * - Report dropdown fires both handlers with correct disabled/loading states
+ * - Report dropdown opens the customer email preview without sending
  * - More button hidden for roles where canImport is false (field_tech, billing_manager)
  * - More button visible for roles where canImport is true (company_admin, irrigation_manager, super_admin)
  * - Add Controller regression: renders for canManageControllers roles only (not field_tech or billing_manager)
@@ -287,14 +287,35 @@ describe("IrrigationProfile header — Report dropdown", () => {
     expect(screen.getByRole("button", { name: /Report/i })).toBeDisabled();
   });
 
-  it("clicking Report opens dropdown with Generate report and Send report items", async () => {
+  it("offers report generation and opens an email review without sending", async () => {
     const user = userEvent.setup();
-    setup("company_admin");
-    await user.click(screen.getByRole("button", { name: /Report/i }));
-    await waitFor(() => {
-      expect(screen.getByText("Generate report")).toBeInTheDocument();
-      expect(screen.getByText("Send report")).toBeInTheDocument();
+    const requests: string[] = [];
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+      const url = String(input);
+      if (!url.includes("/api/outgoing-email/")) return Response.json([]);
+      requests.push(url);
+      return Response.json({
+        kind: "irrigation_profile_report", id: 42,
+        from: { email: "office@example.com", name: "Example Irrigation" },
+        replyTo: "office@example.com", usingCompanyAddress: true,
+        to: "customer@example.com", cc: [], bcc: [], subject: "Your Irrigation System Profile",
+        note: "", html: "<p>Your report is attached.</p>", text: "Your report is attached.",
+        attachments: [{ filename: "Irrigation Profile.pdf", viewUrl: "/api/customers/42/irrigation-profile/report-pdf" }],
+        options: {}, optionDefs: [], variant: null, variantDefs: [], warnings: [],
+        confirmationToken: "review-token", expiresAt: "2026-11-19T12:15:00Z",
+      });
     });
+    try {
+      setup("company_admin");
+      await user.click(screen.getByRole("button", { name: /Report/i }));
+      expect(await screen.findByRole("menuitem", { name: "Generate report" })).toBeInTheDocument();
+      await user.click(screen.getByRole("menuitem", { name: "Email report" }));
+      expect(await screen.findByRole("dialog", { name: "Email irrigation system profile" })).toBeInTheDocument();
+      expect(await screen.findByText("Irrigation Profile.pdf")).toBeInTheDocument();
+      expect(requests).toEqual(["/api/outgoing-email/irrigation_profile_report/42/preview"]);
+    } finally {
+      fetch.mockRestore();
+    }
   });
 });
 
