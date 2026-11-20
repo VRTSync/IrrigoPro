@@ -11,6 +11,81 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /outgoing-email/invoice/batch/preview:
+    post:
+      operationId: previewInvoiceBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceBatchSelection" }
+      responses:
+        "200":
+          description: Invoices to send and skip, with single-use confirmation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvoiceBatchPreview" }
+        "400": { description: Invalid selection }
+  /outgoing-email/invoice/batch:
+    post:
+      operationId: startInvoiceBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceBatchConfirmation" }
+      responses:
+        "202":
+          description: Confirmed batch queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvoiceBatchStarted" }
+        "400": { description: Invalid selection or review required }
+        "409": { description: Review no longer valid or another batch is sending }
+  /outgoing-email/batches/active:
+    get:
+      operationId: getActiveInvoiceBatch
+      parameters:
+        - $ref: "#/components/parameters/InvoiceBatchCompany"
+      responses:
+        "200":
+          description: Active batch summary or null
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/InvoiceBatchSummary"
+                  - type: "null"
+  /outgoing-email/batches/{id}:
+    get:
+      operationId: getInvoiceBatch
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - $ref: "#/components/parameters/InvoiceBatchCompany"
+      responses:
+        "200":
+          description: Batch with items in selection order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvoiceBatchProgress" }
+        "404": { description: Batch not found in this company }
+  /outgoing-email/batches/{id}/resume:
+    post:
+      operationId: resumeInvoiceBatch
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceBatchScope" }
+      responses:
+        "202":
+          description: Remaining items queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvoiceBatchStarted" }
+        "404": { description: Batch not found in this company }
+        "409": { description: Batch is not interrupted or another batch is sending }
   /outgoing-email/{kind}/{id}/preview:
     parameters:
       - { name: kind, in: path, required: true, schema: { type: string, enum: [invoice, estimate, estimate_resend] } }
@@ -490,6 +565,11 @@ paths:
                 $ref: "#/components/schemas/HealthStatus"
 components:
   parameters:
+    InvoiceBatchCompany:
+      name: companyId
+      in: query
+      description: Explicit company context required for a super administrator
+      schema: { type: integer, minimum: 1 }
     MarkupCompany:
       name: companyId
       in: query
@@ -501,6 +581,114 @@ components:
       required: [confirmationToken]
       properties:
         confirmationToken: { type: string }
+    InvoiceBatchScope:
+      type: object
+      properties:
+        companyId: { type: integer, minimum: 1 }
+    InvoiceBatchSelection:
+      type: object
+      required: [invoiceIds]
+      properties:
+        companyId: { type: integer, minimum: 1 }
+        invoiceIds:
+          type: array
+          minItems: 1
+          maxItems: 200
+          uniqueItems: true
+          items: { type: integer, minimum: 1, maximum: 2147483647 }
+        note: { type: string, maxLength: 1000 }
+    InvoiceBatchConfirmation:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceBatchSelection"
+        - type: object
+          required: [confirmationToken]
+          properties:
+            confirmationToken: { type: string }
+    InvoiceBatchInvoiceLabel:
+      type: object
+      required: [invoiceId, invoiceNumber, customerLabel]
+      properties:
+        invoiceId: { type: integer }
+        invoiceNumber: { type: string }
+        customerLabel: { type: string }
+    InvoiceBatchSendRow:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceBatchInvoiceLabel"
+        - type: object
+          required: [to, subject, amountDue]
+          properties:
+            to: { type: string }
+            subject: { type: string }
+            amountDue: { type: number }
+    InvoiceBatchSkipRow:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceBatchInvoiceLabel"
+        - type: object
+          required: [reason, message]
+          properties:
+            reason: { type: string, enum: [not_sendable, already_sent, no_email, qb_voided] }
+            message: { type: string }
+    InvoiceBatchPreview:
+      type: object
+      required: [from, replyTo, willSend, willSkip, notFound, confirmationToken, expiresAt]
+      properties:
+        from:
+          type: object
+          required: [name, email]
+          properties:
+            name: { type: string }
+            email: { type: string }
+        replyTo: { type: [string, "null"] }
+        willSend: { type: array, items: { $ref: "#/components/schemas/InvoiceBatchSendRow" } }
+        willSkip: { type: array, items: { $ref: "#/components/schemas/InvoiceBatchSkipRow" } }
+        notFound: { type: array, items: { type: integer } }
+        confirmationToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+    InvoiceBatchStarted:
+      type: object
+      required: [batchId]
+      properties:
+        batchId: { type: integer }
+    InvoiceBatchSummary:
+      type: object
+      required: [id, companyId, status, total, queued, sending, sent, skipped, failed]
+      properties:
+        id: { type: integer }
+        companyId: { type: integer }
+        status: { type: string, enum: [running, interrupted, completed] }
+        total: { type: integer }
+        queued: { type: integer }
+        sending: { type: integer }
+        sent: { type: integer }
+        skipped: { type: integer }
+        failed: { type: integer }
+    InvoiceBatchProgressItem:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceBatchInvoiceLabel"
+        - type: object
+          required: [id, batchId, companyId, position, status, toEmail, subject, message, sentAt]
+          properties:
+            id: { type: integer }
+            batchId: { type: integer }
+            companyId: { type: integer }
+            position: { type: integer }
+            status: { type: string, enum: [queued, sending, sent, skipped, failed] }
+            toEmail: { type: [string, "null"] }
+            subject: { type: [string, "null"] }
+            message: { type: [string, "null"] }
+            sentAt: { type: [string, "null"], format: date-time }
+    InvoiceBatchProgress:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceBatchSummary"
+        - type: object
+          required: [kind, note, createdByUserId, createdAt, completedAt, items]
+          properties:
+            kind: { type: string, enum: [invoice] }
+            note: { type: string }
+            createdByUserId: { type: integer }
+            createdAt: { type: string, format: date-time }
+            completedAt: { type: [string, "null"], format: date-time }
+            items: { type: array, items: { $ref: "#/components/schemas/InvoiceBatchProgressItem" } }
     OutgoingEmailDraftInput:
       type: object
       properties:

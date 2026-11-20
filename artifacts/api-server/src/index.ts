@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { resolveChromiumExecutable } from "./chromium-resolver";
 import { logger } from "./lib/logger";
 import { auditQbTokenEnvironments } from "./qb-boot-audit";
+import { recoverInterruptedEmailBatches } from "./routes/invoice-batch-send-routes";
 
 try {
   const chromiumPath = resolveChromiumExecutable();
@@ -48,6 +49,7 @@ function auditProductionEnv(): void {
 auditProductionEnv();
 
 const { httpServer } = await createApp();
+await recoverInterruptedEmailBatches();
 
 // Phase 5a — QB Harden #5: scan existing QB rows for credential/env mismatches.
 // Fire-and-forget; must not block the server from accepting requests.

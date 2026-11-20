@@ -108,7 +108,7 @@
   "api-field": [
     {
       "name": "invoice-email-review",
-      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/outgoing-email-routes.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts"
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/outgoing-email-routes.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts src/routes/invoice-batch-send-routes.test.ts"
     },
     {
       "name": "company-email-sender",
@@ -266,7 +266,7 @@
     },
     {
       "name": "invoice-batch-reminders-ui",
-      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/invoices-batch-reminders.test.tsx"
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/invoices-batch-reminders.test.tsx src/components/billing/batch-invoice-send-dialog.test.tsx"
     },
     {
       "name": "invoice-row-expansion-ui",

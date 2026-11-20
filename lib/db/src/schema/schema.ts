@@ -1144,6 +1144,36 @@ export const invoicePdfs = pgTable("invoice_pdfs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const emailBatches = pgTable("email_batches", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  kind: text("kind", { enum: ["invoice"] }).notNull(),
+  status: text("status", { enum: ["running", "completed", "interrupted"] }).notNull(),
+  note: text("note").notNull().default(""),
+  confirmationDigest: text("confirmation_digest").notNull(),
+  createdByUserId: integer("created_by_user_id").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+}, (t) => ({
+  companyIdx: index("email_batches_company_idx").on(t.companyId),
+  confirmationUnique: uniqueIndex("email_batches_confirmation_unique").on(t.companyId, t.confirmationDigest),
+}));
+
+export const emailBatchItems = pgTable("email_batch_items", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").references(() => emailBatches.id).notNull(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  invoiceId: integer("invoice_id").references(() => invoices.id).notNull(),
+  position: integer("position").notNull(),
+  status: text("status", { enum: ["queued", "sending", "sent", "skipped", "failed"] }).notNull(),
+  toEmail: text("to_email"),
+  subject: text("subject"),
+  message: text("message"),
+  sentAt: timestamp("sent_at"),
+  // A queued row must not email content that changed after confirmation.
+  reviewedDraft: text("reviewed_draft"),
+}, (t) => ({ batchIdx: index("email_batch_items_batch_idx").on(t.batchId) }));
+
 // Task #1887 — Invoice payment reminders.
 //
 // One row per reminder *attempt* against an invoice. A row is written only

@@ -373,6 +373,7 @@ import {
 } from "./invoice-reminder-routes";
 import { registerInvoiceReminderBatchRoutes } from "./invoice-reminder-batch-routes";
 import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
+import { registerInvoiceBatchSendRoutes } from "./invoice-batch-send-routes";
 import { registerInvoiceArNoteRoutes } from "./invoice-ar-note-routes";
 import { applyArNoteVisibility } from "./ar-note-visibility";
 import { registerInvoiceCorrectionRoutes } from "./invoice-correction-routes";
@@ -7445,6 +7446,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireInvoiceSend,
     _core: reminderCore,
   });
+  registerInvoiceBatchSendRoutes(app, { requireAuthentication, requireInvoiceSend });
   registerOutgoingEmailRoutes(app, { requireAuthentication, recordLifecycleAudit });
   // Task #1889 — internal A/R notes. GET + POST only; there is deliberately no
   // update or delete route in that module and there must never be one.

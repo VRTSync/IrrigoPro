@@ -1077,6 +1077,20 @@ storage_version_token = "1795134523910422"
 content_type = "image/png"
 
 [[outputs]]
+id = "v76WbJNA6_Iu7KKlzIWvF"
+uri = "file://generated-artifacts/batch-invoice-send/review-375.png"
+type = "image"
+title = "Invoice batch review — 375 px"
+description = "Signed-in development review: two sendable invoices and one skipped because it has no billing email."
+logical_id = "04a90d3f-f5f5-4cb9-b0ba-6b2f5917a33d"
+content_hash = "sha256:798cfff92a23b5b6c636fba4f555cdfb02c6ff548910e1da460eb58955c0a982"
+size = 56839
+mtime_ms = 1795134580754
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/04a90d3f-f5f5-4cb9-b0ba-6b2f5917a33d/008c3065-8f18-4d3e-876e-b3854ee49227"
+storage_version_token = "1795134598743497"
+content_type = "image/png"
+
+[[outputs]]
 id = "4wofseEG7WKUW340AkZri"
 uri = "file://generated-artifacts/estimate-review/sent-redelivery-approval-buttons.png"
 type = "image"
@@ -1091,6 +1105,20 @@ storage_version_token = "1795134524351105"
 content_type = "image/png"
 
 [[outputs]]
+id = "MaQ3NWh077NknJdasQ0ir"
+uri = "file://generated-artifacts/batch-invoice-send/review-1280.png"
+type = "image"
+title = "Invoice batch review — 1280 px"
+description = "Desktop review showing the sender, recipients, individual subjects, and skip reason."
+logical_id = "6b948663-4a15-408e-a527-1507a8a6d806"
+content_hash = "sha256:f7c69d4d5b50837de5089715ed39134c4604fd9af85d876dd0d7e151c92d0956"
+size = 62461
+mtime_ms = 1795134581542
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/6b948663-4a15-408e-a527-1507a8a6d806/8abcad7f-f032-4b95-b3d7-f6f0ef7dba6e"
+storage_version_token = "1795134599173150"
+content_type = "image/png"
+
+[[outputs]]
 id = "wfRtNyO5b16KqlE-OK-Jk"
 uri = "file://generated-artifacts/estimate-review/expired-resend-approval-buttons.png"
 type = "image"
@@ -1102,4 +1130,74 @@ size = 212971
 mtime_ms = 1795134503803
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/af132089-5546-48e6-9f19-80194dc027de/f6ed1f64-61f9-4363-a385-27c6768c94ec"
 storage_version_token = "1795134524831914"
+content_type = "image/png"
+
+[[outputs]]
+id = "mrU3VCyMBxSNxa5AMq2sW"
+uri = "file://generated-artifacts/batch-invoice-send/expanded-email-1280.png"
+type = "image"
+title = "Expanded invoice email preview"
+description = "One rendered customer email before confirmation, with the attachment filename."
+logical_id = "d901a394-c683-4658-ab6d-407368d0ae7c"
+content_hash = "sha256:025da1929c7a9fbb0a955c6b9aa5e2f94ff68351454e3e46fbe23a53c8e59923"
+size = 101198
+mtime_ms = 1795134582190
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/d901a394-c683-4658-ab6d-407368d0ae7c/936cfcd2-071b-4b13-9706-9d05446e9640"
+storage_version_token = "1795134599672869"
+content_type = "image/png"
+
+[[outputs]]
+id = "tOQwQTRR5w8WMDoxpkHgO"
+uri = "file://generated-artifacts/batch-invoice-send/progress-banner.png"
+type = "image"
+title = "Invoice batch progress banner"
+description = "The batch continued in the background after the dialog was closed."
+logical_id = "5ad70025-0584-434c-a416-442196505b86"
+content_hash = "sha256:d58bda35bb7483be3244b05a421c80657c868e46ec5b214dd6650497a98c1328"
+size = 5055
+mtime_ms = 1795134582890
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/5ad70025-0584-434c-a416-442196505b86/aae382e6-3a10-41a5-8ba0-40d5c43d157b"
+storage_version_token = "1795134600059619"
+content_type = "image/png"
+
+[[outputs]]
+id = "Qjhkdo871v4574Ve_nIZW"
+uri = "file://generated-artifacts/batch-invoice-send/live-delivery.png"
+type = "image"
+title = "Live invoice batch — provider acceptance"
+description = "Development batch 3951E09B: two SendGrid-accepted sends with separate subjects and saved PDF attachments. This shows acceptance, not inbox delivery."
+logical_id = "944e8888-fdcc-4008-9663-325b9fddda86"
+content_hash = "sha256:317685b0373915f59ee729e3446224c1060f60db30927ebd2330679d761cda9a"
+size = 97822
+mtime_ms = 1795144567106
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/944e8888-fdcc-4008-9663-325b9fddda86/62f0b10c-cec7-4741-bf54-c8e9dd299402"
+storage_version_token = "1795144632957530"
+content_type = "image/png"
+
+[[outputs]]
+id = "akc5RBcm_OiIRkYdYpPXS"
+uri = "file://generated-artifacts/batch-invoice-send/reopened-progress.png"
+type = "image"
+title = "Reopened invoice batch progress"
+description = "Per-invoice progress after reopening from the banner."
+logical_id = "df7f8e43-da4b-4f23-94ec-5eef50e4173b"
+content_hash = "sha256:a464228b17986ec59e28c2b234dd5217f6b65f1f51db87a21de7ff74756c097c"
+size = 35101
+mtime_ms = 1795134583494
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/df7f8e43-da4b-4f23-94ec-5eef50e4173b/c0095b4a-32df-4e45-917b-4a7bd4666248"
+storage_version_token = "1795134600488966"
+content_type = "image/png"
+
+[[outputs]]
+id = "5gzKXS5g1JhHYuZlrBw7n"
+uri = "file://generated-artifacts/batch-invoice-send/completed.png"
+type = "image"
+title = "Invoice batch completed"
+description = "Two separately composed emails accepted by a local test transport; one invoice skipped. No customer mail was sent."
+logical_id = "917f4a2f-eac6-4cf2-aaf3-75a607f53535"
+content_hash = "sha256:74a6f2a234bb150cc4dabd9f5671e075ab96ea48dfe63e6ba91c2112b63486db"
+size = 34125
+mtime_ms = 1795134584930
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/917f4a2f-eac6-4cf2-aaf3-75a607f53535/8768a4ba-553b-492a-b20b-e2720f89efd3"
+storage_version_token = "1795134600969205"
 content_type = "image/png"

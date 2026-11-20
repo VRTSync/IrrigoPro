@@ -32,3 +32,9 @@ An attachment shown in Review and Send is a delivery commitment.
 **Why:** Sending after a PDF render failure would deliver a different email from the one the user approved.
 
 **How to apply:** Fail before sending or recording delivery. Let the user retry, or explicitly remove the attachment and review the new draft.
+
+Background delivery must carry the approved draft across the durable queue, not just verify it at enqueue time. Recovery must distinguish an abandoned worker from a worker still running in another replica.
+
+**Why:** A recipient or sender can change while the batch is queued, and a rolling restart can overlap processes. Neither should cause new, unreviewed mail or retry an uncertain send. A process-local consumed-token map alone cannot protect a durable action across replicas.
+
+**How to apply:** Store a review fingerprint and a durable confirmation digest, recheck the draft before each send, and let recovery mark only running work that no worker still owns.

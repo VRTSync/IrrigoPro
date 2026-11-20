@@ -10,7 +10,7 @@ import { requireInvoiceSend } from "../routes/role-guards";
 import { storage } from "../storage";
 import { INVOICE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "./types";
 
-interface InvoiceEmailEntity { invoice: Invoice; customer: Customer; company: Company }
+export interface InvoiceEmailEntity { invoice: Invoice; customer: Customer; company: Company }
 interface InvoiceEmailDeps {
   storage: Pick<typeof storage, "getInvoiceById" | "getCustomerById" | "getCompanyProfile" | "getLatestInvoiceSentCopy" | "createInvoicePdf" | "stampInvoiceSent">;
   pdf: Pick<InvoicePdfService, "getDocumentVersion" | "generatePdfBuffer">;
@@ -80,6 +80,12 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps):
 }
 
 /** Deliver exactly the reviewed content and preserve the PDF bytes the provider accepted. */
+export class InvoiceDeliveryError extends OutgoingEmailError {
+  constructor(readonly providerMessage: string) {
+    super(500, "Failed to send PDF.");
+  }
+}
+
 export async function sendInvoiceEmail(
   invoice: Invoice, customer: Customer, draft: BuiltDraft, userId: number, deps: InvoiceEmailDeps = defaultDeps,
 ): Promise<{ sentTo: string; sentAt: Date }> {
@@ -129,7 +135,7 @@ export async function sendInvoiceEmail(
       logger.error({ err: cleanupError, invoiceId: invoice.id }, "Failed to remove rejected invoice upload");
     }
     logger.error({ err, invoiceId: invoice.id }, "Failed to send invoice PDF");
-    throw new OutgoingEmailError(500, "Failed to send PDF.");
+    throw new InvoiceDeliveryError(err instanceof Error ? err.message : "Email provider rejected the message");
   }
   const sentAt = new Date();
   await deps.storage.createInvoicePdf({

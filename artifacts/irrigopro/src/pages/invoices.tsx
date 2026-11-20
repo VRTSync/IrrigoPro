@@ -94,6 +94,8 @@ import {
   type InvoiceLineItem,
 } from "@/components/billing/invoice-line-items";
 import { BatchReminderDialog } from "@/components/billing/batch-reminder-dialog";
+import { BatchInvoiceSendDialog, ACTIVE_INVOICE_BATCH_KEY } from "@/components/billing/batch-invoice-send-dialog";
+import { useGetActiveInvoiceBatch } from "@workspace/api-client-react";
 // Task #1942 — the AR-first layout. Each of these owns one band of the page:
 // the header's totals, the aging strip, the collapsed filter bar, and the one
 // named action on a row.
@@ -174,6 +176,7 @@ function getCurrentUserCompanyId(): number | null {
 
 interface Invoice {
   id: number;
+  companyId?: number;
   invoiceNumber: string;
   revision?: number;
   customerId: number;
@@ -804,6 +807,8 @@ export default function InvoicesPage() {
   // still gets the checkboxes.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchReminderOpen, setBatchReminderOpen] = useState(false);
+  const [batchSendOpen, setBatchSendOpen] = useState(false);
+  const [batchSendTarget, setBatchSendTarget] = useState<{ id: number | null; companyId?: number }>({ id: null });
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
   const [survivingId, setSurvivingId] = useState<number | null>(null);
   // Task #1443 — invoice queued for a confirmed QuickBooks re-sync (it already
@@ -1754,6 +1759,31 @@ export default function InvoicesPage() {
   const [offPageSelectionTotals, setOffPageSelectionTotals] = useState<Map<number, string>>(
     new Map(),
   );
+  const [offPageSelectionCompanies, setOffPageSelectionCompanies] = useState<Map<number, number>>(new Map());
+  const [batchCompanyWarning, setBatchCompanyWarning] = useState(false);
+  const tenantCompanyId = getCurrentUserCompanyId();
+  const selectedCompanyIds = new Set(selectedInvoices.flatMap((row) => row.companyId == null ? [] : [row.companyId]));
+  for (const [id, companyId] of offPageSelectionCompanies) {
+    if (selectedIds.has(id)) selectedCompanyIds.add(companyId);
+  }
+  const selectedCompany = selectedCompanyIds.size === 1 ? [...selectedCompanyIds][0] : undefined;
+  const activeCompanyId = tenantCompanyId ?? batchSendTarget.companyId ?? selectedCompany;
+  const activeBatchQuery = useGetActiveInvoiceBatch(activeCompanyId == null ? undefined : { companyId: activeCompanyId }, { query: {
+    queryKey: [...ACTIVE_INVOICE_BATCH_KEY, activeCompanyId],
+    enabled: canBatchRemind && activeCompanyId != null,
+    refetchInterval: (query) => query.state.data ? 5000 : false,
+    retry: false,
+  } });
+  const activeBatch = activeBatchQuery.data;
+  const lastActiveBatch = useRef<{ id: number; companyId: number } | null>(null);
+  useEffect(() => {
+    if (!activeBatchQuery.isSuccess) return;
+    const previous = lastActiveBatch.current;
+    if (previous?.companyId === activeCompanyId && previous?.id !== activeBatch?.id) {
+      void queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    }
+    lastActiveBatch.current = activeBatch ?? null;
+  }, [activeBatchQuery.isSuccess, activeBatch, activeCompanyId, queryClient]);
   const loadedTotalsById = useMemo(
     () => new Map(invoices.map((inv) => [inv.id, inv.totalAmount])),
     [invoices],
@@ -1765,6 +1795,7 @@ export default function InvoicesPage() {
 
   const toggleSelected = (id: number) => {
     if (isPlaceholderData) return;
+    setBatchCompanyWarning(false);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -1776,6 +1807,8 @@ export default function InvoicesPage() {
   const clearSelection = () => {
     setSelectedIds(new Set());
     setOffPageSelectionTotals(new Map());
+    setOffPageSelectionCompanies(new Map());
+    setBatchCompanyWarning(false);
   };
 
   // Task #1888 — "select what I am looking at". The visible set is whatever
@@ -1825,6 +1858,7 @@ export default function InvoicesPage() {
           if (generation !== selectionGeneration.current) return;
           const selectable = rows.filter(isMergeable);
           setOffPageSelectionTotals(new Map(selectable.map((r) => [r.id, r.totalAmount])));
+          setOffPageSelectionCompanies(new Map(selectable.flatMap((r) => r.companyId == null ? [] : [[r.id, r.companyId]])));
           setSelectedIds(new Set(selectable.map((r) => r.id)));
           return;
         }
@@ -1847,8 +1881,11 @@ export default function InvoicesPage() {
     selectionGeneration.current += 1;
     setSelectedIds(new Set());
     setOffPageSelectionTotals(new Map());
+    setOffPageSelectionCompanies(new Map());
+    setBatchCompanyWarning(false);
     setSelectAllPending(false);
     setBatchReminderOpen(false);
+    if (batchSendTarget.id == null) setBatchSendOpen(false);
     setMergeConfirmOpen(false);
     setSurvivingId(null);
   }, [arParams]);
@@ -2214,6 +2251,21 @@ export default function InvoicesPage() {
           monthOptions={monthOptions}
           onMonthChange={(value) => patchArQuery({ month: value === "all" ? "" : value })}
         />
+
+        {canBatchRemind && activeBatch && (
+          <div data-testid="banner-invoice-batch" role="status"
+            className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm ${
+              activeBatch.status === "interrupted" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-sky-200 bg-sky-50 text-sky-900"
+            }`}>
+            <p>{activeBatch.status === "interrupted"
+              ? `Invoice batch interrupted — ${activeBatch.queued} not sent`
+              : `Sending invoices: ${activeBatch.sent + activeBatch.failed + activeBatch.skipped} of ${activeBatch.total}`}</p>
+            <Button type="button" size="sm" variant="outline" data-testid="button-view-invoice-batch" onClick={() => {
+              setBatchSendTarget({ id: activeBatch.id, companyId: activeBatch.companyId });
+              setBatchSendOpen(true);
+            }}>View</Button>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center min-h-64 p-8" data-testid="invoice-list-loading">
@@ -2770,9 +2822,10 @@ export default function InvoicesPage() {
                 {canMerge && !mergeValidation.ok && (
                   <p className="text-xs text-amber-600 truncate">{mergeValidation.reason}</p>
                 )}
+                {batchCompanyWarning && <p role="alert" className="text-xs text-amber-800">Select invoices from one company to send a batch.</p>}
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {/* Task #1888 — nothing is sent from this button. It opens the
                   confirmation list, which is where the send actually lives. */}
               {canBatchRemind && (
@@ -2783,6 +2836,20 @@ export default function InvoicesPage() {
                 >
                   <Send className="w-4 h-4 mr-2" />
                   Send reminders
+                </Button>
+              )}
+              {canBatchRemind && (
+                <Button variant="outline" data-testid="button-batch-send-invoices" onClick={() => {
+                  const companyId = tenantCompanyId ?? selectedCompany;
+                  if (companyId == null) {
+                    setBatchCompanyWarning(true);
+                    return;
+                  }
+                  setBatchSendTarget({ id: null, companyId });
+                  setBatchSendOpen(true);
+                }}>
+                  <Send className="w-4 h-4 mr-2" />
+                  Send invoices
                 </Button>
               )}
               {canMerge && (
@@ -2808,6 +2875,19 @@ export default function InvoicesPage() {
           onOpenChange={setBatchReminderOpen}
           invoiceIds={Array.from(selectedIds)}
           onSent={clearSelection}
+        />
+      )}
+      {canBatchRemind && (
+        <BatchInvoiceSendDialog
+          open={batchSendOpen}
+          onOpenChange={setBatchSendOpen}
+          invoiceIds={Array.from(selectedIds)}
+          batchId={batchSendTarget.id}
+          companyId={batchSendTarget.companyId}
+          onStarted={(id) => {
+            setBatchSendTarget((target) => ({ ...target, id }));
+            clearSelection();
+          }}
         />
       )}
 

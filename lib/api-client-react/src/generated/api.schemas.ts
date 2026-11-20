@@ -9,6 +9,139 @@ export interface OutgoingEmailAttachmentInput {
   confirmationToken: string;
 }
 
+export interface InvoiceBatchScope {
+  /** @minimum 1 */
+  companyId?: number;
+}
+
+export interface InvoiceBatchSelection {
+  /** @minimum 1 */
+  companyId?: number;
+  /**
+   * @minItems 1
+   * @maxItems 200
+   */
+  invoiceIds: number[];
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type InvoiceBatchConfirmation = InvoiceBatchSelection & {
+  confirmationToken: string;
+};
+
+export interface InvoiceBatchInvoiceLabel {
+  invoiceId: number;
+  invoiceNumber: string;
+  customerLabel: string;
+}
+
+export type InvoiceBatchSendRow = InvoiceBatchInvoiceLabel & {
+  to: string;
+  subject: string;
+  amountDue: number;
+};
+
+export type InvoiceBatchSkipRowReason =
+  (typeof InvoiceBatchSkipRowReason)[keyof typeof InvoiceBatchSkipRowReason];
+
+export const InvoiceBatchSkipRowReason = {
+  not_sendable: "not_sendable",
+  already_sent: "already_sent",
+  no_email: "no_email",
+  qb_voided: "qb_voided",
+} as const;
+
+export type InvoiceBatchSkipRow = InvoiceBatchInvoiceLabel & {
+  reason: InvoiceBatchSkipRowReason;
+  message: string;
+};
+
+export type InvoiceBatchPreviewFrom = {
+  name: string;
+  email: string;
+};
+
+export interface InvoiceBatchPreview {
+  from: InvoiceBatchPreviewFrom;
+  /** @nullable */
+  replyTo: string | null;
+  willSend: InvoiceBatchSendRow[];
+  willSkip: InvoiceBatchSkipRow[];
+  notFound: number[];
+  confirmationToken: string;
+  expiresAt: string;
+}
+
+export interface InvoiceBatchStarted {
+  batchId: number;
+}
+
+export type InvoiceBatchSummaryStatus =
+  (typeof InvoiceBatchSummaryStatus)[keyof typeof InvoiceBatchSummaryStatus];
+
+export const InvoiceBatchSummaryStatus = {
+  running: "running",
+  interrupted: "interrupted",
+  completed: "completed",
+} as const;
+
+export interface InvoiceBatchSummary {
+  id: number;
+  companyId: number;
+  status: InvoiceBatchSummaryStatus;
+  total: number;
+  queued: number;
+  sending: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+}
+
+export type InvoiceBatchProgressItemStatus =
+  (typeof InvoiceBatchProgressItemStatus)[keyof typeof InvoiceBatchProgressItemStatus];
+
+export const InvoiceBatchProgressItemStatus = {
+  queued: "queued",
+  sending: "sending",
+  sent: "sent",
+  skipped: "skipped",
+  failed: "failed",
+} as const;
+
+export type InvoiceBatchProgressItem = InvoiceBatchInvoiceLabel & {
+  id: number;
+  batchId: number;
+  companyId: number;
+  position: number;
+  status: InvoiceBatchProgressItemStatus;
+  /** @nullable */
+  toEmail: string | null;
+  /** @nullable */
+  subject: string | null;
+  /** @nullable */
+  message: string | null;
+  /** @nullable */
+  sentAt: string | null;
+};
+
+export type InvoiceBatchProgressKind =
+  (typeof InvoiceBatchProgressKind)[keyof typeof InvoiceBatchProgressKind];
+
+export const InvoiceBatchProgressKind = {
+  invoice: "invoice",
+} as const;
+
+export type InvoiceBatchProgress = InvoiceBatchSummary & {
+  kind: InvoiceBatchProgressKind;
+  note: string;
+  createdByUserId: number;
+  createdAt: string;
+  /** @nullable */
+  completedAt: string | null;
+  items: InvoiceBatchProgressItem[];
+};
+
 export type OutgoingEmailDraftInputOptions = { [key: string]: boolean };
 
 export interface OutgoingEmailDraftInput {
@@ -694,9 +827,30 @@ export interface HealthStatus {
 }
 
 /**
+ * Explicit company context required for a super administrator
+ */
+export type InvoiceBatchCompanyParameter = number;
+
+/**
  * Required explicit company context for an unscoped super administrator
  */
 export type MarkupCompanyParameter = number;
+
+export type GetActiveInvoiceBatchParams = {
+  /**
+   * Explicit company context required for a super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
+
+export type GetInvoiceBatchParams = {
+  /**
+   * Explicit company context required for a super administrator
+   * @minimum 1
+   */
+  companyId?: number;
+};
 
 export type PreviewMarkupRecalculationParams = {
   /**

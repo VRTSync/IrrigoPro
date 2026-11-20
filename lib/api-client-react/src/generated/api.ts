@@ -34,12 +34,21 @@ import type {
   DocumentationSiteBlock,
   DocumentationSiteInput,
   DocumentationSites,
+  GetActiveInvoiceBatchParams,
   GetActiveMarkupScheduleParams,
   GetCustomerMarkupOverrideParams,
   GetDocumentationSiteParams,
+  GetInvoiceBatchParams,
   GetMarkupScheduleOptionsParams,
   GetMarkupScheduleParams,
   HealthStatus,
+  InvoiceBatchConfirmation,
+  InvoiceBatchPreview,
+  InvoiceBatchProgress,
+  InvoiceBatchScope,
+  InvoiceBatchSelection,
+  InvoiceBatchStarted,
+  InvoiceBatchSummary,
   ListMarkupSchedulesParams,
   MarkupActionResult,
   MarkupOverrideInput,
@@ -74,6 +83,451 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getPreviewInvoiceBatchUrl = () => {
+  return `/api/outgoing-email/invoice/batch/preview`;
+};
+
+export const previewInvoiceBatch = async (
+  invoiceBatchSelection: InvoiceBatchSelection,
+  options?: RequestInit,
+): Promise<InvoiceBatchPreview> => {
+  return customFetch<InvoiceBatchPreview>(getPreviewInvoiceBatchUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(invoiceBatchSelection),
+  });
+};
+
+export const getPreviewInvoiceBatchMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewInvoiceBatch>>,
+    TError,
+    { data: BodyType<InvoiceBatchSelection> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewInvoiceBatch>>,
+  TError,
+  { data: BodyType<InvoiceBatchSelection> },
+  TContext
+> => {
+  const mutationKey = ["previewInvoiceBatch"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewInvoiceBatch>>,
+    { data: BodyType<InvoiceBatchSelection> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return previewInvoiceBatch(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewInvoiceBatchMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewInvoiceBatch>>
+>;
+export type PreviewInvoiceBatchMutationBody = BodyType<InvoiceBatchSelection>;
+export type PreviewInvoiceBatchMutationError = ErrorType<void>;
+
+export const usePreviewInvoiceBatch = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewInvoiceBatch>>,
+    TError,
+    { data: BodyType<InvoiceBatchSelection> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewInvoiceBatch>>,
+  TError,
+  { data: BodyType<InvoiceBatchSelection> },
+  TContext
+> => {
+  return useMutation(getPreviewInvoiceBatchMutationOptions(options));
+};
+
+export const getStartInvoiceBatchUrl = () => {
+  return `/api/outgoing-email/invoice/batch`;
+};
+
+export const startInvoiceBatch = async (
+  invoiceBatchConfirmation: InvoiceBatchConfirmation,
+  options?: RequestInit,
+): Promise<InvoiceBatchStarted> => {
+  return customFetch<InvoiceBatchStarted>(getStartInvoiceBatchUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(invoiceBatchConfirmation),
+  });
+};
+
+export const getStartInvoiceBatchMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startInvoiceBatch>>,
+    TError,
+    { data: BodyType<InvoiceBatchConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startInvoiceBatch>>,
+  TError,
+  { data: BodyType<InvoiceBatchConfirmation> },
+  TContext
+> => {
+  const mutationKey = ["startInvoiceBatch"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startInvoiceBatch>>,
+    { data: BodyType<InvoiceBatchConfirmation> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return startInvoiceBatch(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartInvoiceBatchMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startInvoiceBatch>>
+>;
+export type StartInvoiceBatchMutationBody = BodyType<InvoiceBatchConfirmation>;
+export type StartInvoiceBatchMutationError = ErrorType<void>;
+
+export const useStartInvoiceBatch = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startInvoiceBatch>>,
+    TError,
+    { data: BodyType<InvoiceBatchConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startInvoiceBatch>>,
+  TError,
+  { data: BodyType<InvoiceBatchConfirmation> },
+  TContext
+> => {
+  return useMutation(getStartInvoiceBatchMutationOptions(options));
+};
+
+export const getGetActiveInvoiceBatchUrl = (
+  params?: GetActiveInvoiceBatchParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/outgoing-email/batches/active?${stringifiedParams}`
+    : `/api/outgoing-email/batches/active`;
+};
+
+export const getActiveInvoiceBatch = async (
+  params?: GetActiveInvoiceBatchParams,
+  options?: RequestInit,
+): Promise<InvoiceBatchSummary | null> => {
+  return customFetch<InvoiceBatchSummary | null>(
+    getGetActiveInvoiceBatchUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetActiveInvoiceBatchQueryKey = (
+  params?: GetActiveInvoiceBatchParams,
+) => {
+  return [
+    `/api/outgoing-email/batches/active`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetActiveInvoiceBatchQueryOptions = <
+  TData = Awaited<ReturnType<typeof getActiveInvoiceBatch>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetActiveInvoiceBatchParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getActiveInvoiceBatch>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetActiveInvoiceBatchQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getActiveInvoiceBatch>>
+  > = ({ signal }) =>
+    getActiveInvoiceBatch(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getActiveInvoiceBatch>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetActiveInvoiceBatchQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getActiveInvoiceBatch>>
+>;
+export type GetActiveInvoiceBatchQueryError = ErrorType<unknown>;
+
+export function useGetActiveInvoiceBatch<
+  TData = Awaited<ReturnType<typeof getActiveInvoiceBatch>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetActiveInvoiceBatchParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getActiveInvoiceBatch>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetActiveInvoiceBatchQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getGetInvoiceBatchUrl = (
+  id: number,
+  params?: GetInvoiceBatchParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/outgoing-email/batches/${id}?${stringifiedParams}`
+    : `/api/outgoing-email/batches/${id}`;
+};
+
+export const getInvoiceBatch = async (
+  id: number,
+  params?: GetInvoiceBatchParams,
+  options?: RequestInit,
+): Promise<InvoiceBatchProgress> => {
+  return customFetch<InvoiceBatchProgress>(getGetInvoiceBatchUrl(id, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetInvoiceBatchQueryKey = (
+  id: number,
+  params?: GetInvoiceBatchParams,
+) => {
+  return [
+    `/api/outgoing-email/batches/${id}`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetInvoiceBatchQueryOptions = <
+  TData = Awaited<ReturnType<typeof getInvoiceBatch>>,
+  TError = ErrorType<void>,
+>(
+  id: number,
+  params?: GetInvoiceBatchParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInvoiceBatch>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetInvoiceBatchQueryKey(id, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getInvoiceBatch>>> = ({
+    signal,
+  }) => getInvoiceBatch(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getInvoiceBatch>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetInvoiceBatchQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getInvoiceBatch>>
+>;
+export type GetInvoiceBatchQueryError = ErrorType<void>;
+
+export function useGetInvoiceBatch<
+  TData = Awaited<ReturnType<typeof getInvoiceBatch>>,
+  TError = ErrorType<void>,
+>(
+  id: number,
+  params?: GetInvoiceBatchParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInvoiceBatch>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetInvoiceBatchQueryOptions(id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getResumeInvoiceBatchUrl = (id: number) => {
+  return `/api/outgoing-email/batches/${id}/resume`;
+};
+
+export const resumeInvoiceBatch = async (
+  id: number,
+  invoiceBatchScope: InvoiceBatchScope,
+  options?: RequestInit,
+): Promise<InvoiceBatchStarted> => {
+  return customFetch<InvoiceBatchStarted>(getResumeInvoiceBatchUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(invoiceBatchScope),
+  });
+};
+
+export const getResumeInvoiceBatchMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resumeInvoiceBatch>>,
+    TError,
+    { id: number; data: BodyType<InvoiceBatchScope> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resumeInvoiceBatch>>,
+  TError,
+  { id: number; data: BodyType<InvoiceBatchScope> },
+  TContext
+> => {
+  const mutationKey = ["resumeInvoiceBatch"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resumeInvoiceBatch>>,
+    { id: number; data: BodyType<InvoiceBatchScope> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return resumeInvoiceBatch(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResumeInvoiceBatchMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resumeInvoiceBatch>>
+>;
+export type ResumeInvoiceBatchMutationBody = BodyType<InvoiceBatchScope>;
+export type ResumeInvoiceBatchMutationError = ErrorType<void>;
+
+export const useResumeInvoiceBatch = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resumeInvoiceBatch>>,
+    TError,
+    { id: number; data: BodyType<InvoiceBatchScope> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resumeInvoiceBatch>>,
+  TError,
+  { id: number; data: BodyType<InvoiceBatchScope> },
+  TContext
+> => {
+  return useMutation(getResumeInvoiceBatchMutationOptions(options));
+};
 
 export const getPreviewOutgoingEmailUrl = (
   kind: "invoice" | "estimate" | "estimate_resend",

@@ -7,6 +7,175 @@
  */
 import * as zod from "zod";
 
+export const previewInvoiceBatchBodyInvoiceIdsItemMax = 2147483647;
+
+export const previewInvoiceBatchBodyInvoiceIdsMax = 200;
+
+export const previewInvoiceBatchBodyNoteMax = 1000;
+
+export const PreviewInvoiceBatchBody = zod.object({
+  companyId: zod.number().min(1).optional(),
+  invoiceIds: zod
+    .array(zod.number().min(1).max(previewInvoiceBatchBodyInvoiceIdsItemMax))
+    .min(1)
+    .max(previewInvoiceBatchBodyInvoiceIdsMax),
+  note: zod.string().max(previewInvoiceBatchBodyNoteMax).optional(),
+});
+
+export const PreviewInvoiceBatchResponse = zod.object({
+  from: zod.object({
+    name: zod.string(),
+    email: zod.string(),
+  }),
+  replyTo: zod.string().nullable(),
+  willSend: zod.array(
+    zod
+      .object({
+        invoiceId: zod.number(),
+        invoiceNumber: zod.string(),
+        customerLabel: zod.string(),
+      })
+      .and(
+        zod.object({
+          to: zod.string(),
+          subject: zod.string(),
+          amountDue: zod.number(),
+        }),
+      ),
+  ),
+  willSkip: zod.array(
+    zod
+      .object({
+        invoiceId: zod.number(),
+        invoiceNumber: zod.string(),
+        customerLabel: zod.string(),
+      })
+      .and(
+        zod.object({
+          reason: zod.enum([
+            "not_sendable",
+            "already_sent",
+            "no_email",
+            "qb_voided",
+          ]),
+          message: zod.string(),
+        }),
+      ),
+  ),
+  notFound: zod.array(zod.number()),
+  confirmationToken: zod.string(),
+  expiresAt: zod.coerce.date(),
+});
+
+export const startInvoiceBatchBodyOneInvoiceIdsItemMax = 2147483647;
+
+export const startInvoiceBatchBodyOneInvoiceIdsMax = 200;
+
+export const startInvoiceBatchBodyOneNoteMax = 1000;
+
+export const StartInvoiceBatchBody = zod
+  .object({
+    companyId: zod.number().min(1).optional(),
+    invoiceIds: zod
+      .array(zod.number().min(1).max(startInvoiceBatchBodyOneInvoiceIdsItemMax))
+      .min(1)
+      .max(startInvoiceBatchBodyOneInvoiceIdsMax),
+    note: zod.string().max(startInvoiceBatchBodyOneNoteMax).optional(),
+  })
+  .and(
+    zod.object({
+      confirmationToken: zod.string(),
+    }),
+  );
+
+export const GetActiveInvoiceBatchQueryParams = zod.object({
+  companyId: zod.coerce
+    .number()
+    .min(1)
+    .optional()
+    .describe("Explicit company context required for a super administrator"),
+});
+
+export const GetActiveInvoiceBatchResponse = zod.union([
+  zod.object({
+    id: zod.number(),
+    companyId: zod.number(),
+    status: zod.enum(["running", "interrupted", "completed"]),
+    total: zod.number(),
+    queued: zod.number(),
+    sending: zod.number(),
+    sent: zod.number(),
+    skipped: zod.number(),
+    failed: zod.number(),
+  }),
+  zod.null(),
+]);
+
+export const GetInvoiceBatchQueryParams = zod.object({
+  companyId: zod
+    .number()
+    .min(1)
+    .optional()
+    .describe("Explicit company context required for a super administrator"),
+});
+
+export const GetInvoiceBatchResponse = zod
+  .object({
+    id: zod.number(),
+    companyId: zod.number(),
+    status: zod.enum(["running", "interrupted", "completed"]),
+    total: zod.number(),
+    queued: zod.number(),
+    sending: zod.number(),
+    sent: zod.number(),
+    skipped: zod.number(),
+    failed: zod.number(),
+  })
+  .and(
+    zod.object({
+      kind: zod.enum(["invoice"]),
+      note: zod.string(),
+      createdByUserId: zod.number(),
+      createdAt: zod.date(),
+      completedAt: zod.date().nullable(),
+      items: zod.array(
+        zod
+          .object({
+            invoiceId: zod.number(),
+            invoiceNumber: zod.string(),
+            customerLabel: zod.string(),
+          })
+          .and(
+            zod.object({
+              id: zod.number(),
+              batchId: zod.number(),
+              companyId: zod.number(),
+              position: zod.number(),
+              status: zod.enum([
+                "queued",
+                "sending",
+                "sent",
+                "skipped",
+                "failed",
+              ]),
+              toEmail: zod.string().nullable(),
+              subject: zod.string().nullable(),
+              message: zod.string().nullable(),
+              sentAt: zod.date().nullable(),
+            }),
+          ),
+      ),
+    }),
+  );
+
+export const ResumeInvoiceBatchParams = zod.object({
+  id: zod.coerce.number().min(1),
+});
+
+export const ResumeInvoiceBatchBody = zod.object({
+  companyId: zod.number().min(1).optional(),
+});
+
 export const PreviewOutgoingEmailParams = zod.object({
   kind: zod.enum(["invoice", "estimate", "estimate_resend"]),
   id: zod.coerce.number().min(1),

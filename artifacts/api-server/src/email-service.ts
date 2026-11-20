@@ -1193,10 +1193,11 @@ ${companyName}
       return { success: true };
     } catch (error) {
       console.error('Failed to send invoice detail PDF:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
-      };
+      const errors = (error as { response?: { body?: { errors?: unknown } } })?.response?.body?.errors;
+      const reason = Array.isArray(errors)
+        ? errors.map((entry) => entry?.message).filter((message): message is string => typeof message === "string" && !!message).join("; ")
+        : "";
+      return { success: false, error: reason || (error instanceof Error ? error.message : "Unknown error") };
     }
   }
 

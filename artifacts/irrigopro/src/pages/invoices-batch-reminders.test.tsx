@@ -26,7 +26,7 @@ const { roleRef } = vi.hoisted(() => ({ roleRef: { current: "bookkeeper" } }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/utils/safeStorage", () => ({
   safeGet: (key: string) =>
-    key === "user" ? JSON.stringify({ id: 1, role: roleRef.current }) : null,
+    key === "user" ? JSON.stringify({ id: 1, companyId: 1, role: roleRef.current }) : null,
   safeSet: vi.fn(),
   safeRemove: vi.fn(),
 }));
@@ -196,6 +196,7 @@ beforeEach(() => {
 
       if (url.includes("/api/invoices/reminders/preview")) return json(previewResponse);
       if (url.includes("/api/invoices/reminders/batch")) return json(batchResponse);
+      if (url.includes("/api/outgoing-email/batches/active")) return json(null);
       if (url.includes("/api/invoices")) {
         return new Response(JSON.stringify(rowsForResponse), {
           status: 200,
@@ -447,12 +448,17 @@ describe("A/R list selection", () => {
   });
 
   it("offers the batch action to a bookkeeper and never to a field tech", async () => {
+    const bookkeeper = renderInvoices();
+    await openConfirmation(1);
+    expect(screen.getByTestId("button-batch-send-invoices")).toBeTruthy();
+    bookkeeper.unmount();
     roleRef.current = "field_tech";
     renderInvoices();
     await waitFor(() => expect(listRequestCount()).toBeGreaterThan(0));
 
     expect(screen.queryByTestId("checkbox-select-invoice-1")).toBeNull();
     expect(screen.queryByTestId("button-batch-remind")).toBeNull();
+    expect(screen.queryByTestId("button-batch-send-invoices")).toBeNull();
   });
 });
 
