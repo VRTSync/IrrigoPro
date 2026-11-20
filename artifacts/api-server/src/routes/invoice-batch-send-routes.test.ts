@@ -24,10 +24,10 @@ const detail = (id: number) => `${prefix}/batches/${id}`;
 
 after(async () => { await pool.end(); });
 
-it("classifies the exact skip messages in priority order and formats cross-month subjects", () => {
+it("classifies the exact skip messages in priority order and only returns a recipient when sendable", () => {
   const customer = { name: "QB Ranch", irrigoName: "The Ranch", email: " ranch@example.invalid " };
   const invoice = { status: "generated", invoiceNumber: "IR-1008", sentAt: null, qbVoidDetectedAt: null,
-    periodStart: new Date("2026-09-01"), periodEnd: date, customerEmail: "old@example.invalid" };
+    customerEmail: "old@example.invalid" };
   for (const status of ["cancelled", "superseded", "merged"]) {
     assert.deepEqual(classifyForBatch({ ...invoice, status, sentAt: date }, customer), {
       send: false, reason: "not_sendable", message: `Invoice IR-1008 is ${status} and can't be sent.`,
@@ -42,9 +42,8 @@ it("classifies the exact skip messages in priority order and formats cross-month
   assert.deepEqual(classifyForBatch({ ...invoice, customerEmail: " " }, { ...customer, email: " " }), {
     send: false, reason: "no_email", message: "No billing email for The Ranch. Add one in QuickBooks and resync.",
   });
-  const subject = "Irrigation Invoice IR-1008 – The Ranch – September–October 2026";
-  assert.deepEqual(classifyForBatch(invoice, customer), { send: true, to: "ranch@example.invalid", subject });
-  assert.deepEqual(classifyForBatch(invoice, { ...customer, email: " " }), { send: true, to: "old@example.invalid", subject });
+  assert.deepEqual(classifyForBatch(invoice, customer), { send: true, to: "ranch@example.invalid" });
+  assert.deepEqual(classifyForBatch(invoice, { ...customer, email: " " }), { send: true, to: "old@example.invalid" });
 });
 
 async function harness(t: TestContext) {
@@ -175,6 +174,8 @@ it("previews, confirms and sends separate emails in order with exact saved PDFs 
   assert.equal(preview.willSend[0].subject, "Irrigation Invoice IR-1001 – The Ranch – October 2026");
   assert.equal(h.mail.length, 0);
   const row = await h.request(`${prefix}/invoice/${one.id}/preview`, { note: body.note });
+  assert.equal(row.status, 200);
+  assert.equal(preview.willSend[0].subject, row.data.subject);
   const started = await h.request(httpStart, body);
   assert.equal(started.status, 202);
   const { batchId } = started.data;
@@ -189,6 +190,7 @@ it("previews, confirms and sends separate emails in order with exact saved PDFs 
     item.to, item.subject, pdfBuffer,
   ]));
   assert.equal(h.mail[0][4].html, row.data.html);
+  assert.equal(h.mail[0][4].text, row.data.text);
   assert.equal(h.mail[0][4].filename, row.data.attachments[0].filename);
   for (const invoice of [one, three]) {
     const copy = await storage.getLatestInvoiceSentCopy(invoice.id, h.a.id);

@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { Company, Customer, Invoice } from "@workspace/db";
 import { computeEffectiveDueDate, resolveBalanceDue } from "@workspace/shared";
-import { buildInvoiceEmailBody, EmailService } from "../email-service";
-import { buildInvoiceEmailSubject, buildInvoicePdfFilename, invoiceBillingPeriod, InvoicePdfService } from "../invoice-pdf-service";
+import { EmailService } from "../email-service";
+import { buildInvoicePdfFilename, invoiceBillingPeriod, InvoicePdfService } from "../invoice-pdf-service";
 import { senderFromCompany } from "../lib/company-sender";
 import { logger } from "../lib/logger";
 import { ObjectStorageService } from "../objectStorage";
 import { requireInvoiceSend } from "../routes/role-guards";
 import { storage } from "../storage";
+import { formatPhone, renderEmailLayout } from "./layout";
 import { INVOICE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "./types";
+import { fillWording, getEmailWording } from "./wording";
 
 export interface InvoiceEmailEntity { invoice: Invoice; customer: Customer; company: Company }
 interface InvoiceEmailDeps {
@@ -27,7 +29,15 @@ const defaultDeps: InvoiceEmailDeps = {
 const unsendable = new Set(["cancelled", "superseded", "merged"]);
 const noRecipient = "This customer has no billing email. Enter one, or add it in QuickBooks and resync.";
 const shortDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const monthAndDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+
+function billingDateRange(invoice: Invoice): string {
+  const start = new Date(invoice.periodStart);
+  const end = new Date(invoice.periodEnd);
+  const startFormat = start.getUTCFullYear() === end.getUTCFullYear() ? monthAndDay : shortDate;
+  return `${startFormat.format(start)} – ${shortDate.format(end)}`;
+}
 
 export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) {
   return {
@@ -47,13 +57,25 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
     async draft({ invoice, customer, company }, input) {
       const sender = senderFromCompany(company);
       const to = input.to || customer.email?.trim() || invoice.customerEmail?.trim() || "";
-      const subject = input.subject || buildInvoiceEmailSubject(invoice, customer);
       const note = input.note ?? "";
       const dueDate = computeEffectiveDueDate(invoice.dueDate, invoice.createdAt, customer.paymentTerms);
-      const [latest, versionStamp] = await Promise.all([
+      const values = {
+        customerName: customer.irrigoName ?? customer.name,
+        companyName: company.name,
+        companyPhone: formatPhone(company.phone),
+        companyEmail: company.email?.trim() ?? "",
+        invoiceNumber: invoice.invoiceNumber,
+        billingMonth: invoiceBillingPeriod(invoice),
+        balanceDue: currency.format(resolveBalanceDue(invoice)),
+        dueDate: Number.isFinite(dueDate.getTime()) ? shortDate.format(dueDate) : "",
+      };
+      const filename = buildInvoicePdfFilename(invoice, customer, invoice.id);
+      const [latest, versionStamp, wording] = await Promise.all([
         deps.storage.getLatestInvoiceSentCopy(invoice.id, invoice.companyId),
         deps.pdf.getDocumentVersion(invoice.id, invoice.companyId),
+        getEmailWording(invoice.companyId, "invoice"),
       ]);
+      const subject = input.subject || fillWording(wording.subject, values);
       const warnings: string[] = [];
       if (invoice.qbVoidDetectedAt) warnings.push("QuickBooks shows this invoice as voided.");
       if (latest?.sentAt && latest.sentToEmail) {
@@ -65,13 +87,24 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
       if (!to) warnings.push(noRecipient);
       return {
         sender, to, cc: input.cc ?? [], bcc: input.bcc ?? [], subject, note,
-        ...buildInvoiceEmailBody({
-          companyName: company.name, companyEmail: company.email, companyPhone: company.phone,
-          customerLabel: customer.irrigoName ?? customer.name, invoiceNumber: invoice.invoiceNumber,
-          periodLabel: invoiceBillingPeriod(invoice), amountDue: currency.format(resolveBalanceDue(invoice)),
-          dueDateLabel: Number.isFinite(dueDate.getTime()) ? shortDate.format(dueDate) : null, note,
+        ...renderEmailLayout({
+          company, subject, docType: "Invoice", docNumber: invoice.invoiceNumber, stripe: "green",
+          wording: {
+            eyebrow: fillWording(wording.eyebrow, values),
+            headline: fillWording(wording.headline, values),
+            intro: fillWording(wording.intro, values),
+            closing: fillWording(wording.closing, values),
+          },
+          customerName: values.customerName, note,
+          facts: [
+            { label: "Invoice", value: invoice.invoiceNumber },
+            { label: "Billing period", value: billingDateRange(invoice) },
+            ...(values.dueDate ? [{ label: "Due", value: values.dueDate }] : []),
+          ],
+          total: { label: "Amount due", value: values.balanceDue },
+          attachments: [{ title: "Billing detail report", filename }],
         }),
-        attachments: [{ filename: buildInvoicePdfFilename(invoice, customer, invoice.id), viewUrl: `/api/invoices/${invoice.id}/pdf/download` }],
+        attachments: [{ filename, viewUrl: `/api/invoices/${invoice.id}/pdf/download` }],
         warnings, versionStamp, options: {}, variant: null,
       };
     },

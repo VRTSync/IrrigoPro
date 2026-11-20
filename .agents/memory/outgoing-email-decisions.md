@@ -45,8 +45,8 @@ A refused preview and a stale confirmed send are different outcomes. A fresh rem
 
 **How to apply:** Authenticate the submitted review before rebuilding the draft, then check and consume it again at the point of delivery because rebuilding it can await storage.
 
-The Email Template family uses one shared, email-safe layout with company branding, not staff names. Companies may customize wording, not the layout. The versioned invoice guide is one platform-wide document, attached only to single and batch invoice emails unless a company opts out.
+The Email Template family uses one shared, email-safe layout with company branding, not staff names. The layout and palette are locked; companies may customize wording, not HTML. Only estimates get action buttons. The versioned invoice guide is platform-owned and attached only to single and batch invoice emails, after the billing detail report, unless a company opts out. Internal messages are outside the family.
 
 **Why:** The user locked these design decisions on 2026-11-20 so customer emails have a consistent company identity and the office can audit which guide was sent.
 
-**How to apply:** Use the assigned Email Template slice and its embedded Design Context as the source of truth. Live email tests must run from development and go only to a test inbox the user approves, never to a real customer. Before any Publish, list the database changes and wait for the user's approval.
+**How to apply:** Use the assigned slice and its embedded Design Context as the source of truth. Keep the invoice guide, wording overrides and other email migrations in their ordered slices. Send live tests only from development to an approved test inbox. Before any Publish, list the database changes and wait for approval.

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { Customer, Invoice, InvoicePdf } from "@workspace/db";
-import { buildInvoiceEmailSubject } from "../invoice-pdf-service";
 import type { BuiltDraft } from "./types";
 
 const shortDate = new Intl.DateTimeFormat("en-US", {
@@ -9,11 +8,11 @@ const shortDate = new Intl.DateTimeFormat("en-US", {
 const unsendable = new Set(["cancelled", "superseded", "merged"]);
 
 export function classifyForBatch(
-  invoice: Pick<Invoice, "status" | "invoiceNumber" | "sentAt" | "qbVoidDetectedAt" | "customerEmail" | "periodStart" | "periodEnd">,
+  invoice: Pick<Invoice, "status" | "invoiceNumber" | "sentAt" | "qbVoidDetectedAt" | "customerEmail">,
   customer: Pick<Customer, "email" | "name" | "irrigoName">,
   latestSentCopy?: Pick<InvoicePdf, "sentAt" | "createdAt">,
 ):
-  | { send: true; to: string; subject: string }
+  | { send: true; to: string }
   | { send: false; reason: "not_sendable" | "already_sent" | "no_email" | "qb_voided"; message: string } {
   const { status, invoiceNumber } = invoice;
   if (unsendable.has(status)) {
@@ -30,7 +29,7 @@ export function classifyForBatch(
   if (!to) {
     return { send: false, reason: "no_email", message: `No billing email for ${customer.irrigoName ?? customer.name}. Add one in QuickBooks and resync.` };
   }
-  return { send: true, to, subject: buildInvoiceEmailSubject(invoice, customer) };
+  return { send: true, to };
 }
 
 export const emailReviewDigest = (value: string) => createHash("sha256").update(value).digest("base64url");

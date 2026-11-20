@@ -107,6 +107,10 @@
   ],
   "api-field": [
     {
+      "name": "customer-email-layout",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/outgoing-email/layout.test.ts"
+    },
+    {
       "name": "invoice-email-review",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/outgoing-email-routes.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts src/routes/invoice-batch-send-routes.test.ts"
     },

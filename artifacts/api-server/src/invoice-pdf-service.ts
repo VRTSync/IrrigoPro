@@ -9,7 +9,6 @@ import type { WorkOrder, WorkOrderItem, BillingSheet, BillingSheetItem, WetCheck
 import type { WetCheckBillingView } from './wet-check-billing-view';
 import { buildWcbZonePhotoGroups } from './wcb-zone-photo-groups';
 import { ObjectStorageService } from './objectStorage';
-import type { Customer, Invoice } from '@workspace/db';
 
 const invoiceMonth = new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" });
 const invoiceMonthAndYear = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -24,13 +23,6 @@ export function invoiceBillingPeriod(invoice: { periodStart: Date | string; peri
     return `${invoiceMonth.format(start)}–${invoiceMonthAndYear.format(end)}`;
   }
   return invoiceMonthAndYear.format(start);
-}
-
-export function buildInvoiceEmailSubject(
-  invoice: Pick<Invoice, "invoiceNumber"> & { periodStart: Date | string; periodEnd: Date | string },
-  customer: Pick<Customer, "name" | "irrigoName">,
-): string {
-  return `Irrigation Invoice ${invoice.invoiceNumber} – ${customer.irrigoName ?? customer.name} – ${invoiceBillingPeriod(invoice)}`;
 }
 
 export function buildInvoicePdfFilename(

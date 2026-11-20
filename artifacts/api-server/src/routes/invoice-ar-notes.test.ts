@@ -17,9 +17,9 @@
 //       list with no note fields at all — absent keys, not zeroed ones
 //   (f) multi-tenant: a note in company A is invisible and unreachable from
 //       company B, in both directions
-//   (g) the three customer-facing surfaces — invoice PDF, every customer email
-//       including the reminder templates, and the CSV export — proven against
-//       generated output
+//   (g) customer-facing invoice PDF, reminder templates and CSV export —
+//       proven against generated output. Invoice email is covered at the
+//       preview/send endpoints in outgoing-email-routes.test.ts.
 //
 // Membership assertions are preferred to exact row counts throughout: the
 // api-server integration tests share one development database.
@@ -48,11 +48,10 @@ import { registerInvoiceListRoutes, type InvoiceRowLike } from "./invoice-list-r
 import { applyArNoteVisibility } from "./ar-note-visibility";
 import { requireInvoiceRead } from "./role-guards";
 
-// The three customer-facing generators, imported for group (g).
+// The customer-facing generators, imported for group (g).
 import { buildPdfViewModel, type InvoiceDetailData } from "../pdf-view-model";
 import { coverPage, reconciliationPage, ticketPageWO } from "../pdf-helpers";
 import { renderReminderEmail, REMINDER_TEMPLATE_KEYS } from "../invoice-reminder-templates";
-import { buildInvoiceEmailBody } from "../email-service";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -771,16 +770,7 @@ describe("A/R notes never reach a customer — PDF, email, CSV", () => {
     }
   });
 
-  // ── Surface 2: every customer-facing email ────────────────────────────────
-  it("the invoice-detail email body carries no note text", () => {
-    const body = buildInvoiceEmailBody({
-      companyName: "Test Company", companyEmail: null, companyPhone: null,
-      customerLabel: "Test Customer", invoiceNumber: "INV-0001", periodLabel: "October 2026",
-      amountDue: "$100.00", dueDateLabel: null, note: "",
-    });
-    assertNoNotes(`${body.html}\n${body.text}`, "invoice-detail email");
-  });
-
+  // ── Surface 2: customer-facing reminder emails ────────────────────────────
   it("every reminder template carries no note text", () => {
     for (const templateKey of REMINDER_TEMPLATE_KEYS) {
       const rendered = renderReminderEmail({

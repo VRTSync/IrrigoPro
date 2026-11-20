@@ -85,7 +85,7 @@ async function previewBatch(companyId: number, invoiceIds: number[], note: strin
       const draft = await draftInvoice({ invoice, customer, company }, { note });
       return {
         found: true, send: true, value: {
-          ...label, to: verdict.to, subject: verdict.subject, amountDue: resolveBalanceDue(invoice),
+          ...label, to: verdict.to, subject: draft.subject, amountDue: resolveBalanceDue(invoice),
           versionStamp: draft.versionStamp, reviewedDraft: reviewedInvoiceDraft(draft),
         },
       } as const;

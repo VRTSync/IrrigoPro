@@ -38,6 +38,7 @@ import {
   type ReminderTemplateKey,
 } from "../invoice-reminder-templates";
 import { EmailService, invoiceEmailNoteBlock } from "../email-service";
+import { emailBaseUrl } from "../lib/email-base-url";
 import { OutgoingEmailError, type BuiltDraft } from "../outgoing-email/types";
 import { readInvoiceSentCopy } from "../invoice-pdf-service";
 import { ObjectStorageService } from "../objectStorage";
@@ -328,13 +329,6 @@ export interface RegisterInvoiceReminderRoutesDeps extends ReminderCoreDeps {
    * one instance so there is literally one send path in the process.
    */
   _core?: ReminderCore;
-}
-
-function emailBaseUrl(): string {
-  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/$/, "");
-  const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0];
-  if (replitDomain) return `https://${replitDomain}`;
-  return "https://irrigopro.com";
 }
 
 const defaultMailer: ReminderMailer = (to, name, number, pdfBuffer, overrides) =>

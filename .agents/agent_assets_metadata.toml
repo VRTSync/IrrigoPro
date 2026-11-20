@@ -1271,3 +1271,59 @@ mtime_ms = 1795134366669
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/45a62a41-6993-4525-97b5-f2afd2a07d66/2dbf2930-91e2-421b-b1dc-bce828d5e382"
 storage_version_token = "1795134522891574"
 content_type = "image/png"
+
+[[outputs]]
+id = "uC-h88YmCn_qc1WiMuhVL"
+uri = "file://generated-artifacts/email-template-acceptance/invoice-browser-desktop.png"
+type = "image"
+title = "Invoice email — desktop browser preview"
+description = "The reviewed development invoice rendered in Chromium. This is not a Gmail or Outlook inbox screenshot."
+logical_id = "47bebc3a-42a5-4cde-a6eb-236c25ababba"
+content_hash = "sha256:d3bb2d487b8cd3fd073980b2f85cae84d869865f90dd4c779f17873ee0fe5b65"
+size = 113607
+mtime_ms = 1795197128587
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/47bebc3a-42a5-4cde-a6eb-236c25ababba/eb1d26ac-5764-45fe-b23e-8f4494afc7ac"
+storage_version_token = "1795197146759304"
+content_type = "image/png"
+
+[[outputs]]
+id = "CB6zu8r2oaUhbcX9xLXo5"
+uri = "file://generated-artifacts/email-template-acceptance/invoice-browser-phone.png"
+type = "image"
+title = "Invoice email — phone browser preview"
+description = "The same reviewed development invoice at 390 pixels wide. This is not an iPhone Mail screenshot."
+logical_id = "a06edb32-7e30-453f-9649-926e5c9fc519"
+content_hash = "sha256:1960f90c06c91c950d529426694407e4188abf8650f35b8eac0d555d761021aa"
+size = 109631
+mtime_ms = 1795197129515
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/a06edb32-7e30-453f-9649-926e5c9fc519/f99ce2e3-043f-449d-a628-fe13d35c1f51"
+storage_version_token = "1795197147809300"
+content_type = "image/png"
+
+[[outputs]]
+id = "ui_dxfpF21oiuKhBRws9o"
+uri = "file://generated-artifacts/email-template-acceptance/invoice-browser-desktop-high-plains.png"
+type = "image"
+title = "Invoice with High Plains logo — desktop preview"
+description = "The corrected development draft, rendered in Chromium with the approved white High Plains logo."
+logical_id = "c9529496-bddb-4674-945b-f9eb8d1b6d09"
+content_hash = "sha256:dc83e47e8de104993690512a31985c5a814102a8c01ca085003eecf389df3237"
+size = 114039
+mtime_ms = 1795201319407
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/c9529496-bddb-4674-945b-f9eb8d1b6d09/b1299bee-81e0-47e7-8148-fdd3e5ac056e"
+storage_version_token = "1795201342798834"
+content_type = "image/png"
+
+[[outputs]]
+id = "FcDefi1TsWJRw96T3bZS2"
+uri = "file://generated-artifacts/email-template-acceptance/invoice-browser-phone-high-plains.png"
+type = "image"
+title = "Invoice with High Plains logo — phone preview"
+description = "The corrected development draft at phone width. This is a browser preview, not an iPhone Mail screenshot."
+logical_id = "10f6e175-f46c-401f-9fb5-9be96eca7de8"
+content_hash = "sha256:100d70bbff5ea7fecaf52b156f5b2e7d28480e7db03140fe9e7d616d5c13e41d"
+size = 109503
+mtime_ms = 1795201320383
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/10f6e175-f46c-401f-9fb5-9be96eca7de8/f3e8472c-14b9-4697-a15a-e1fab88d526e"
+storage_version_token = "1795201343299409"
+content_type = "image/png"

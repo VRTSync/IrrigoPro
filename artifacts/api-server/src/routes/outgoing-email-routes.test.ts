@@ -32,7 +32,7 @@ const { registerOutgoingEmailRoutes } = await import("./outgoing-email-routes");
 const { createInvoiceEmailHandler } = await import("../outgoing-email/invoice-handler");
 const { createEstimateEmailHandler } = await import("../outgoing-email/estimate-handlers");
 const { createReportEmailHandlers } = await import("../outgoing-email/report-handlers");
-const { buildInvoiceEmailSubject, buildInvoicePdfFilename, InvoicePdfService, readInvoiceSentCopy } = await import("../invoice-pdf-service");
+const { buildInvoicePdfFilename, InvoicePdfService, readInvoiceSentCopy } = await import("../invoice-pdf-service");
 const { ObjectStorageService } = await import("../objectStorage");
 
 const bytes = Buffer.from("%PDF-1.7\nexact generated invoice bytes");
@@ -129,6 +129,7 @@ function harness(opts: {
   };
   const company = {
     name: sender.from.name, email: sender.replyTo, phone: "970-555-0100",
+    logo: "company-logos/high-plains-test-logo", address: "100 Main St", website: "https://www.highplainsprop.com/",
     emailFromName: sender.from.name, emailFromAddress: sender.from.email,
     emailReplyTo: sender.replyTo, emailSendingDomain: "example.invalid", emailDomainVerifiedAt: new Date(),
   };
@@ -590,11 +591,42 @@ it("previews current email, company sender, period, amount, due date and filenam
     assert.deepEqual(body.attachments, [{ filename, viewUrl: "/api/invoices/1008/pdf/download" }]);
     assert.ok(body.confirmationToken);
     assert.match(body.html, /High Plains Property Maintenance/);
-    assert.match(body.html, /\$1,234\.56/);
+    assert.match(body.html, /\/api\/company-logo\/high-plains-test-logo/);
+    assert.match(body.html, /October 2026 · Irrigation/);
+    assert.match(body.html, /Your October 2026 invoice is ready/);
+    assert.match(body.html, /Oct 1 – Oct 31, 2026/);
+    assert.match(body.html, /bgcolor="#1e5c99">\s*<th[^>]+>Amount due<\/th>\s*<td[^>]+>\$1,234\.56/);
     assert.match(body.html, /Nov 30, 2026/);
-    assert.doesNotMatch(body.html, /IrrigoPro/);
+    assert.match(body.html, /Billing detail report/);
+    assert.match(body.html, /100 Main St · \(970\) 555-0100/);
+    assert.match(body.html, /Sent with[\s\S]*\/email\/irrigopro-wordmark\.png/);
+    assert.match(body.text, /Attached: The Ranch - Irrigation Billing Detail/);
+    assert.doesNotMatch(body.html, /A note from|Pay now|Understanding Your Invoice/);
     assert.equal(h.generated(), 0);
     assert.deepEqual(h.events, []);
+  });
+});
+
+it("does not expose internal A/R notes in the preview or the email sent to the customer", async () => {
+  const h = harness();
+  Object.assign(h.invoice, {
+    arNotes: [{ note: "Private note: customer disputed the second ticket." }],
+    arNoteCount: 1,
+    arNotePreview: "Private note: talked to collections.",
+    lastArNotePreview: "Private note: hold for review.",
+  });
+  await withServer(h, async request => {
+    const fields = { note: "Customer-facing note" };
+    const preview = await request("/preview", "POST", fields);
+    assert.equal(preview.status, 200);
+    assert.equal((await request("/send", "POST", { ...fields, confirmationToken: preview.body.confirmationToken })).status, 200);
+    const message = h.sent[0][4];
+    for (const { html, text } of [preview.body, message]) {
+      for (const part of [html, text]) {
+        assert.match(part, /Customer-facing note/);
+        assert.doesNotMatch(part, /Private note|arNotePreview|lastArNotePreview/);
+      }
+    }
   });
 });
 
@@ -752,6 +784,10 @@ it("rejects a missing review, changed subject or changed sender without delivery
     const subject = await request("/send", "POST", { confirmationToken, subject: "Unreviewed subject" });
     assert.equal(subject.status, 409);
     assert.equal(subject.body.reason, "confirmation_mismatch");
+    const address = h.company.address;
+    h.company.address = "New footer address";
+    assert.equal((await request("/send", "POST", { confirmationToken })).status, 409);
+    h.company.address = address;
     h.company.emailReplyTo = "new@example.com";
     assert.equal((await request("/send", "POST", { confirmationToken })).status, 409);
     assert.deepEqual(h.events, []);
@@ -808,13 +844,22 @@ it("refuses cancelled, superseded and merged invoices", async () => {
   });
 });
 
-it("formats invoice subjects for same-month, cross-month and cross-year periods in UTC", () => {
-  const customer = { name: "QB Ranch", irrigoName: "The Ranch" };
-  const subject = (periodStart: string, periodEnd: string) =>
-    buildInvoiceEmailSubject({ invoiceNumber: "IR-1008", periodStart, periodEnd }, customer);
-  assert.equal(subject("2026-10-01", "2026-10-31"), "Irrigation Invoice IR-1008 – The Ranch – October 2026");
-  assert.equal(subject("2026-09-30", "2026-10-31"), "Irrigation Invoice IR-1008 – The Ranch – September–October 2026");
-  assert.equal(subject("2026-12-31", "2027-01-01"), "Irrigation Invoice IR-1008 – The Ranch – December 2026–January 2027");
+it("formats invoice subjects and billing date ranges for same-month, cross-month and cross-year periods in UTC", async () => {
+  const h = harness();
+  await withServer(h, async request => {
+    for (const [start, end, month, range] of [
+      ["2026-10-01", "2026-10-31", "October 2026", "Oct 1 – Oct 31, 2026"],
+      ["2026-09-30", "2026-10-31", "September–October 2026", "Sep 30 – Oct 31, 2026"],
+      ["2026-12-31", "2027-01-01", "December 2026–January 2027", "Dec 31, 2026 – Jan 1, 2027"],
+    ]) {
+      h.invoice.periodStart = new Date(start);
+      h.invoice.periodEnd = new Date(end);
+      const { status, body } = await request("/preview");
+      assert.equal(status, 200);
+      assert.equal(body.subject, `Irrigation Invoice IR-1008 – The Ranch – ${month}`);
+      assert.ok(body.text.includes(`Billing period: ${range}`));
+    }
+  });
 });
 
 it("uses a single filename builder including the documented fallback", () => {

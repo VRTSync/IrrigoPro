@@ -286,7 +286,7 @@ describe("Command Center Approve & Send", () => {
       expect(rows[0].internalStatus).toBe("approved_internal");
       return Response.json({
         kind: "estimate", id: 42, to: "test@example.invalid", cc: [], bcc: [],
-        subject: "Irrigation Estimate #50123 – The Ranch", note: "", options: {}, optionDefs: [],
+        subject: "Irrigation Estimate #50123 – The Ranch", note: "", options: {}, optionDefs: [], variantDefs: [],
         from: { email: "office@example.invalid", name: "Office" }, replyTo: "reply@example.invalid",
         usingCompanyAddress: true, html: "<p>Rendered estimate</p>", text: "Rendered estimate",
         attachments: [], warnings: [], confirmationToken: "reviewed", expiresAt: new Date().toISOString(),

@@ -3,7 +3,11 @@ import { storage } from './storage';
 import { formatEstimateNumber } from '@workspace/shared';
 import { resolveCompanyLogoUrl } from './logo-url';
 import { DEFAULT_FROM_EMAIL, SENDGRID_FROM_NAME, type CompanySender } from './lib/company-sender';
+import { emailBaseUrl } from './lib/email-base-url';
+import { escapeHtml } from './outgoing-email/layout';
 import type { Company } from '@workspace/db';
+
+export { escapeHtml };
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 
@@ -98,57 +102,8 @@ export function buildEstimateApprovalEmail(
   return EmailService.buildEstimateApprovalEmail(data, links);
 }
 
-export function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 export function invoiceEmailNoteBlock(note?: string): string {
   return note ? `<div style="border-left:3px solid #1E5A99;background:#eff6ff;padding:12px;white-space:pre-wrap;">${escapeHtml(note)}</div>` : "";
-}
-
-// Only customer-facing fields go in this renderer, never internal A/R notes.
-export function buildInvoiceEmailBody({
-  companyName, companyPhone, companyEmail, customerLabel, invoiceNumber, periodLabel, amountDue, dueDateLabel, note,
-}: {
-  companyName: string; companyPhone: string | null; companyEmail: string | null;
-  customerLabel: string; invoiceNumber: string; periodLabel: string;
-  amountDue: string; dueDateLabel: string | null; note: string;
-}): { html: string; text: string } {
-  const signature = [companyName, companyPhone, companyEmail].filter((line): line is string => Boolean(line));
-  const questions = "Questions? Just reply to this email.";
-  return {
-    html: `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:12px;overflow-wrap:anywhere;">
-  <div style="background:#1E5A99;background:linear-gradient(135deg,#1E5A99,#0E3B6B);color:white;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="margin:0;font-size:24px;">${escapeHtml(companyName)}</h1>
-  </div>
-  <div style="background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:20px;">
-    <p style="margin-top:0;">Hello ${escapeHtml(customerLabel)},</p>
-    ${invoiceEmailNoteBlock(note)}
-    <p>Your irrigation invoice <strong>${escapeHtml(invoiceNumber)}</strong> for ${escapeHtml(periodLabel)} is attached.</p>
-    <table style="width:100%;text-align:left;background:#f1f5f9;border-radius:8px;border-spacing:0;">
-      <tr><th scope="row" style="padding:8px 12px;">Amount due</th><td style="padding:8px 12px;">${escapeHtml(amountDue)}</td></tr>
-      ${dueDateLabel ? `<tr><th scope="row" style="padding:8px 12px;">Due</th><td style="padding:8px 12px;">${escapeHtml(dueDateLabel)}</td></tr>` : ""}
-    </table>
-    <p>${questions}</p>
-    <p style="border-top:1px solid #e5e7eb;padding-top:12px;margin-bottom:0;">${signature.map(escapeHtml).join("<br>")}</p>
-  </div>
-</body>
-</html>`,
-    text: [
-      companyName, `Hello ${customerLabel},`, ...(note ? [note] : []),
-      `Your irrigation invoice ${invoiceNumber} for ${periodLabel} is attached.`,
-      [`Amount due: ${amountDue}`, ...(dueDateLabel ? [`Due: ${dueDateLabel}`] : [])].join("\n"),
-      questions, signature.join("\n"),
-    ].join("\n\n"),
-  };
 }
 
 interface ReportEmailArgs {
@@ -295,30 +250,7 @@ ${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.co
 }
 export class EmailService {
   private static get baseUrl() {
-    // APP_BASE_URL must be set to the public domain in production
-    // (e.g. https://irrigopro.com) so that logo <img> tags and approval-page
-    // links embedded in outgoing emails are reachable by email recipients.
-    // Without it, logo URLs and approval links will point to the Replit
-    // preview domain, which may not be publicly accessible.
-    if (process.env.APP_BASE_URL) {
-      return process.env.APP_BASE_URL.replace(/\/$/, '');
-    }
-
-    if (process.env.NODE_ENV === 'production') {
-      console.warn(
-        '[email-service] APP_BASE_URL is not set in production — ' +
-        'logo and approval-page URLs in outgoing emails may not be reachable by recipients.',
-      );
-      return 'https://irrigopro.com';
-    }
-
-    // Development: use the current Replit preview domain if available
-    const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
-    if (replitDomain) {
-      return `https://${replitDomain}`;
-    }
-
-    return `https://${process.env.REPL_ID}.${process.env.REPL_OWNER}.replit.dev`;
+    return emailBaseUrl();
   }
 
   static async sendEstimateApprovalEmail(data: EstimateEmailData): Promise<void> {
