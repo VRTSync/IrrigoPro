@@ -1,16 +1,18 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
+import type { Company, Estimate } from "@workspace/db";
 import type { CompanySender } from "./lib/company-sender";
 import type { EstimateEmailData } from "./email-service";
 
 const sent: any[] = [];
+let confirmationCompany: Partial<Company>;
 mock.module("./db", { namedExports: { db: {} } });
 mock.module("@sendgrid/mail", { defaultExport: {
   setApiKey() {},
   async send(message: unknown) { sent.push(message); return [{ statusCode: 202 }]; },
 } });
 mock.module("./storage", { namedExports: { storage: {
-  async getCompanyProfile() { return { name: "Company signature", email: "signature@example.com" }; },
+  async getCompanyProfile() { return confirmationCompany; },
 } } });
 // Test-only configuration; no real credential is read or used.
 mock.property(process, "env", {
@@ -28,8 +30,10 @@ const estimate: EstimateEmailData = {
   sender: companySender, estimateId: 1, estimateNumber: "50000", customerName: "Customer",
   customerLabel: "Customer",
   customerEmail: "customer@example.com", projectName: "Test project", totalAmount: "$10.00",
-  approvalToken: "test-token", estimateDate: "2026-11-18", createdBy: "Office", companyId: 1,
+  approvalToken: "test-token", estimateDate: "2026-11-18", companyId: 1,
+  companyProfile: { name: "Company signature", email: "signature@example.com" } as Company,
 };
+const decidedEstimate = { ...estimate, customerId: null, totalAmount: "10.00" } as unknown as Estimate;
 const report = {
   to: "customer@example.com",
   pdfBuffer: Buffer.from("test-pdf"),
@@ -72,20 +76,28 @@ describe("customer-facing mailers use the resolved identity", () => {
     assert.deepEqual(sent.map(message => message.categories), [["wet-check-report"], ["irrigation-profile-report"]]);
   });
 
-  for (const [label, sender] of [
-    ["authenticated", companySender],
-    ["platform fallback", senderFromCompany({
+  for (const [label, company, expected] of [
+    ["authenticated", {
+      name: "Company", emailSendingDomain: "company.test", emailDomainVerifiedAt: new Date(),
+      emailFromAddress: "billing@company.test", emailReplyTo: "replies@company.test",
+    }, companySender],
+    ["platform fallback", {
       name: "Company", email: "office@company.test", emailSendingDomain: null,
       emailDomainVerifiedAt: null, emailFromName: "Company", emailFromAddress: null,
       emailReplyTo: "replies@company.test",
-    })],
-    ["no Reply-To", { ...companySender, replyTo: undefined }],
+    }, { from: { email: "platform@example.com", name: "Company" }, replyTo: "replies@company.test", usingCompanyAddress: false }],
+    ["no Reply-To", { name: "Company" },
+      { from: { email: "platform@example.com", name: "Company" }, replyTo: undefined, usingCompanyAddress: false }],
   ] as const) {
     it(`uses ${label} in all six customer email paths without changing signatures or attachments`, async () => {
       sent.length = 0;
+      confirmationCompany = company;
+      const sender = senderFromCompany(company as Company);
+      assert.deepEqual(sender, expected);
       await EmailService.sendEstimateApprovalEmail({ ...estimate, sender });
-      await EmailService.sendApprovalConfirmation("customer@example.com", "50000", true, sender);
-      await EmailService.sendApprovalConfirmation("customer@example.com", "50000", false, sender);
+      const confirmation = { to: estimate.customerEmail, estimate: decidedEstimate, decidedAt: new Date("2026-11-20T18:00:00Z") };
+      await EmailService.sendApprovalConfirmation({ ...confirmation, approved: true });
+      await EmailService.sendApprovalConfirmation({ ...confirmation, approved: false });
       assert.equal((await EmailService.sendInvoiceDetailPdf("customer@example.com", "Customer", "IR-1008", Buffer.from("test-pdf"), {
         sender, subject: "Reviewed invoice", html: "<p>Reviewed body</p>", text: "Reviewed body",
         cc: ["cc@example.com"], bcc: ["bcc@example.com"], filename: "Reviewed invoice.pdf",

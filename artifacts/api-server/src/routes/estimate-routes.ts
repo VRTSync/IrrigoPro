@@ -1,4 +1,3 @@
-import { resolveCompanySender } from "../lib/company-sender";
 // All `/api/estimates*` HTTP route handlers (Task #640).
 //
 // Previously most of these routes lived in the 16k-line `routes.ts`
@@ -2141,12 +2140,9 @@ export function registerEstimateRoutes(
 
       // ── Confirmation email ─────────────────────────────────────────────────────────────
       const { EmailService } = await import("../email-service");
-      await EmailService.sendApprovalConfirmation(
-        estimate.customerEmail,
-        estimate.estimateNumber,
-        true,
-        await resolveCompanySender(estimate.companyId),
-      );
+      await EmailService.sendApprovalConfirmation({
+        to: estimate.customerEmail, estimate, approved: true, decidedAt: new Date(),
+      });
 
       // ── Pre-sign photos for the confirmation screen ──────────────────────────────
       let photoSignedUrls: Array<{ photoId: string; url: string | null }> = [];
@@ -2363,12 +2359,9 @@ export function registerEstimateRoutes(
 
       // Send confirmation email
       const { EmailService } = await import("../email-service");
-      await EmailService.sendApprovalConfirmation(
-        auditEmail,
-        estimate.estimateNumber,
-        false,
-        await resolveCompanySender(estimate.companyId),
-      );
+      await EmailService.sendApprovalConfirmation({
+        to: auditEmail, estimate, approved: false, decidedAt: new Date(),
+      });
 
       res.json({
         success: true,

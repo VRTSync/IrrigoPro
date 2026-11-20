@@ -14,12 +14,13 @@ export interface EmailLayoutInput {
   wording: Omit<Wording, "subject">;
   customerName: string;
   note: string;
-  facts: { label: string; value: string }[];
+  facts: { label: string; value: string; href?: string }[];
   total?: { label: string; value: string };
   /** Trusted, pre-escaped estimate detail markup from the server. */
   detailHtml?: string;
   detailText?: string;
   actions?: { primary: Action; secondary?: Action; link?: Action };
+  actionsNote?: string;
   attachments: { title: string; filename: string }[];
 }
 
@@ -79,7 +80,7 @@ function renderAction(action: Action, primary: boolean): string {
 }
 
 export function renderEmailLayout(input: EmailLayoutInput): { html: string; text: string } {
-  const { company, subject, docType, docNumber, stripe, wording, customerName, note, facts, total, actions, attachments } = input;
+  const { company, subject, docType, docNumber, stripe, wording, customerName, note, facts, total, actions, actionsNote, attachments } = input;
   const esc = escapeHtml;
   const baseUrl = emailBaseUrl();
   const logo = resolveCompanyLogoUrl(company.logo, baseUrl);
@@ -100,20 +101,28 @@ export function renderEmailLayout(input: EmailLayoutInput): { html: string; text
   ].filter(Boolean).join(" · ");
   const hasNote = Boolean(note.trim());
   const colors = COLORS[stripe];
-  const factRows = facts.map(({ label, value }, index) => {
+  const linkedFacts = facts.map(({ label, value, href }) => ({
+    label, value, href: href?.startsWith("https://") ? webHref(href) : null,
+  }));
+  const factRows = linkedFacts.map(({ label, value, href }, index) => {
     const border = index ? "border-top:1px solid #edf1f5;" : "";
+    const display = href ? `<a href="${esc(href)}" style="color:#1e5c99;font-weight:bold;">${esc(value)}</a>` : esc(value);
     return `<tr><th scope="row" align="left" style="${border}padding:11px 14px;font-size:14px;font-weight:normal;color:#52606d;">${esc(label)}</th>
-      <td align="right" style="${border}padding:11px 14px;font-size:14px;color:#102a43;">${esc(value)}</td></tr>`;
+      <td align="right" style="${border}padding:11px 14px;font-size:14px;color:#102a43;">${display}</td></tr>`;
   }).join("");
   const totalRow = total ? `<tr bgcolor="#1e5c99">
     <th scope="row" align="left" style="padding:12px 14px;font-size:15px;font-weight:bold;color:#ffffff;">${esc(total.label)}</th>
     <td align="right" style="padding:12px 14px;font-size:22px;font-weight:bold;color:#ffffff;">${esc(total.value)}</td>
   </tr>` : "";
-  const textActions = actions ? [actions.primary, actions.secondary, actions.link].flatMap(action => {
-    const href = action && actionHref(action);
-    return action && href ? [`${action.label}: ${href}`] : [];
-  }) : [];
   const textLink = actions?.link && actionHref(actions.link);
+  const textActions = actions ? [
+    ...[actions.primary, actions.secondary].flatMap(action => {
+      const href = action && actionHref(action);
+      return action && href ? [`${action.label}: ${href}`] : [];
+    }),
+    actionsNote,
+    actions.link && textLink ? `${actions.link.label}: ${textLink}` : "",
+  ].filter(Boolean).join("\n") : "";
 
   return {
     html: `<!doctype html>
@@ -153,6 +162,7 @@ export function renderEmailLayout(input: EmailLayoutInput): { html: string; text
           ${factRows || totalRow ? `<table cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 18px;border:1px solid #dbe4ee;border-radius:10px;overflow:hidden;">${factRows}${totalRow}</table>` : ""}
           ${input.detailHtml ?? ""}
           ${actions ? `${renderAction(actions.primary, true)}${actions.secondary ? renderAction(actions.secondary, false) : ""}
+            ${actionsNote ? `<p style="margin:0 0 10px;font-size:13px;color:#52606d;">${esc(actionsNote)}</p>` : ""}
             ${actions.link && textLink ? `<p style="${PARAGRAPH}"><a href="${esc(textLink)}" style="color:#1e5c99;font-weight:bold;">${esc(actions.link.label)}</a></p>` : ""}` : ""}
           ${attachments.map(({ title, filename }) => `<table ${TABLE} width="100%" bgcolor="#f5f8fb" style="margin:0 0 14px;border-radius:8px;"><tr><td style="padding:12px 14px;font-size:14px;line-height:1.5;">
             <strong style="color:#102a43;">${esc(title)}</strong><br><span style="color:#52606d;">${esc(filename)}</span>
@@ -183,8 +193,9 @@ export function renderEmailLayout(input: EmailLayoutInput): { html: string; text
     text: [
       company.name, wording.headline, `Hello ${customerName},`, wording.intro,
       hasNote ? `A note from ${company.name}: ${note}` : "",
-      [...facts, ...(total ? [total] : [])].map(({ label, value }) => `${label}: ${value}`).join("\n"),
-      input.detailText, textActions.join("\n"),
+      [...linkedFacts.map(({ label, value, href }) => `${label}: ${value}${href ? ` (${href})` : ""}`),
+        ...(total ? [`${total.label}: ${total.value}`] : [])].join("\n"),
+      input.detailText, textActions,
       attachments.map(({ filename }) => `Attached: ${filename}`).join("\n"),
       wording.closing, `Thank you,\n${company.name}`,
       [addressLine, [email, website].filter(Boolean).join(" · ")].filter(Boolean).join("\n"),

@@ -90,6 +90,20 @@ it("omits the company logo, blank contacts and a whitespace-only note without st
   assert.match(text, /\n\n100 Main St$/);
 });
 
+it("links only HTTPS facts and escapes the visible value and URL", () => {
+  const { html, text } = renderEmailLayout({
+    ...fixture,
+    facts: [
+      { label: "Pinned spot", value: "East & west", href: "https://example.invalid/map?a=1&b=2" },
+      { label: "Insecure spot", value: "Plain text", href: "http://other.example.invalid" },
+      { label: "Unsafe spot", value: "Also plain", href: "javascript:alert(1)" },
+    ],
+  });
+  assert.match(html, /href="https:\/\/example\.invalid\/map\?a=1&amp;b=2" style="color:#1e5c99;font-weight:bold;">East &amp; west<\/a>/);
+  assert.match(text, /Pinned spot: East & west \(https:\/\/example\.invalid\/map\?a=1&b=2\)\nInsecure spot: Plain text\nUnsafe spot: Also plain/);
+  assert.doesNotMatch(html + text, /other\.example\.invalid|javascript:/);
+});
+
 it("renders optional estimate content in the shared layout with escaped action labels and URLs", () => {
   const { html, text } = renderEmailLayout({
     ...fixture, docType: "Estimate", total: undefined,

@@ -56,7 +56,6 @@ export function estimateEmailData(
     isInspectionOrigin,
     approvalToken: "",
     estimateDate: effectiveEstimateDate.toLocaleDateString(),
-    createdBy: estimateWithItems.createdBy,
     companyId: estimateWithItems.companyId!,
     workDescription: estimateWithItems.workDescription ?? null,
     items: items.map((item) => ({
@@ -175,6 +174,7 @@ export async function sendEstimateApprovalEmailFlow(
     await EmailService.sendEstimateApprovalEmail({
       ...data, approvalToken, subject: opts.subject, to: resolvedTo, cc: resolvedCc,
       bcc: resolvedBcc, attachments: pdfAttachments, deliveryAttemptId: attemptId,
+      attachmentFilename: pdfAttachments?.[0]?.filename,
     });
   } catch (error) {
     if (error instanceof EstimateEmailNotSubmittedError) {

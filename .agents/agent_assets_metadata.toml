@@ -1383,3 +1383,17 @@ mtime_ms = 1795209365578
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9b867e23-def9-431b-ab4a-033ba3dc9db4/b258c875-5268-48c0-b661-659a5ceedfe3"
 storage_version_token = "1795209399888622"
 content_type = "image/png"
+
+[[outputs]]
+id = "XXOHQL5oya_oBpeoTUWOb"
+uri = "file://generated-artifacts/estimate-email/review-and-send.png"
+type = "image"
+title = "Estimate Review and Send preview"
+description = "Development screenshot from a disposable estimate. The preview contains placeholder links only; no email was sent."
+logical_id = "ff6ba103-9094-4aef-98fd-e2220052454c"
+content_hash = "sha256:e7ce2c5a831a903290298a3a654e498f85dc8c5b8028e9bbf45813d20c9282d1"
+size = 148483
+mtime_ms = 1795206160462
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ff6ba103-9094-4aef-98fd-e2220052454c/01080320-2e75-4707-88ba-33b1055cb88b"
+storage_version_token = "1795206185638669"
+content_type = "image/png"

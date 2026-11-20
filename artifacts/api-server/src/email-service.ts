@@ -1,12 +1,12 @@
 import sgMail from '@sendgrid/mail';
 import { storage } from './storage';
 import { formatEstimateNumber } from '@workspace/shared';
-import { resolveCompanyLogoUrl } from './logo-url';
-import { DEFAULT_FROM_EMAIL, SENDGRID_FROM_NAME, type CompanySender } from './lib/company-sender';
+import { DEFAULT_FROM_EMAIL, SENDGRID_FROM_NAME, senderFromCompany, type CompanySender } from './lib/company-sender';
 import { emailBaseUrl } from './lib/email-base-url';
+import { buildEstimateApprovalEmail, buildEstimateConfirmationEmail } from './outgoing-email/estimate-email';
 import { escapeHtml } from './outgoing-email/layout';
 import { logger } from './lib/logger';
-import type { Company } from '@workspace/db';
+import type { Company, Estimate } from '@workspace/db';
 
 export { escapeHtml };
 
@@ -52,7 +52,6 @@ export interface EstimateEmailData {
   approvalToken: string;
   deliveryAttemptId?: string;
   estimateDate: string;
-  createdBy: string;
   companyId: number;
   companyProfile?: Company | null;
   subject?: string;
@@ -79,6 +78,7 @@ export interface EstimateEmailData {
   cc?: string[];
   bcc?: string[];
   note?: string;
+  attachmentFilename?: string;
   // Task #1791 — optional PDF attachment (base64-encoded PDF buffer).
   // When present, the attachment is forwarded to SendGrid as a file
   // attachment so the customer receives the estimate as a PDF document.
@@ -90,22 +90,8 @@ export interface EstimateEmailData {
   }>;
 }
 
-type EstimateApprovalLinks = { approveUrl: string; rejectUrl: string; viewUrl: string };
-export const ESTIMATE_PREVIEW_LINK = 'about:blank#link-created-when-sent';
-
 // Only this error permits releasing a delivery claim and trying again.
 export class EstimateEmailNotSubmittedError extends Error {}
-
-export function buildEstimateApprovalSubject(data: Pick<EstimateEmailData, 'estimateNumber' | 'customerLabel'>): string {
-  return `Irrigation Estimate #${String(data.estimateNumber).replace(/^EST-?/i, '')} – ${data.customerLabel}`;
-}
-
-export function buildEstimateApprovalEmail(
-  data: EstimateEmailData,
-  links: EstimateApprovalLinks,
-): Promise<{ subject: string; html: string; text: string }> {
-  return EmailService.buildEstimateApprovalEmail(data, links);
-}
 
 interface ReportDelivery {
   sender: CompanySender;
@@ -155,7 +141,7 @@ export class EmailService {
         to: toAddr,
         ...(ccList.length ? { cc: ccList } : {}),
         ...(bccList.length ? { bcc: bccList } : {}),
-        subject: data.subject ?? subject,
+        subject,
         html,
         text,
         categories: ['estimate-approval'],
@@ -196,487 +182,7 @@ export class EmailService {
     logger.info({ estimateId: data.estimateId, companyId: data.companyId, attemptId: data.deliveryAttemptId }, 'SendGrid accepted estimate email');
   }
 
-  static async buildEstimateApprovalEmail(data: EstimateEmailData, { approveUrl, rejectUrl, viewUrl }: EstimateApprovalLinks) {
-    // Get company information including logo. Reviewed mail reuses the
-    // company profile already loaded for the draft.
-    const company = data.companyProfile === undefined ? await storage.getCompanyProfile(data.companyId) : data.companyProfile;
-    const companyInfo = {
-      name: company?.name || 'IrrigoPro',
-      logo: company?.logo ? this.getCompanyLogoUrl(company.logo) : null,
-      email: company?.email || DEFAULT_FROM_EMAIL,
-      phone: company?.phone || '',
-      website: company?.website || '',
-    };
-    return {
-      subject: buildEstimateApprovalSubject(data),
-      html: this.generateEstimateEmailHTML(data, approveUrl, rejectUrl, viewUrl, companyInfo, approveUrl === ESTIMATE_PREVIEW_LINK),
-      text: this.generateEstimateEmailText(data, approveUrl, rejectUrl, companyInfo),
-    };
-  }
-
   private static escapeHtml = escapeHtml;
-
-  private static getCompanyLogoUrl(logoPath: string): string | null {
-    return resolveCompanyLogoUrl(logoPath, this.baseUrl);
-  }
-
-  // ── Zone-grouping for inspection-origin estimates ─────────────────────────
-
-  private static buildEmailZoneGroups(
-    items: NonNullable<EstimateEmailData['items']>,
-    laborRate: number,
-  ) {
-    type EmailZoneGroup = {
-      controllerLetter: string;
-      zoneNumber: number;
-      zoneLabel: string;
-      items: NonNullable<EstimateEmailData['items']>;
-      partsTotal: number;
-      laborHrs: number;
-      laborAmt: number;
-      zoneTotal: number;
-    };
-    const groupMap = new Map<string, EmailZoneGroup>();
-    for (const item of items) {
-      const cl = item.controllerLetter ?? '';
-      const zn = item.zoneNumber ?? 0;
-      const key = `${cl}|${zn}`;
-      let group = groupMap.get(key);
-      if (!group) {
-        const zoneLabel =
-          cl && zn
-            ? `Controller ${cl} \u00b7 Zone ${zn}`
-            : cl
-            ? `Controller ${cl}`
-            : `Zone ${zn}`;
-        group = {
-          controllerLetter: cl,
-          zoneNumber: zn,
-          zoneLabel,
-          items: [],
-          partsTotal: 0,
-          laborHrs: 0,
-          laborAmt: 0,
-          zoneTotal: 0,
-        };
-        groupMap.set(key, group);
-      }
-      group.items.push(item);
-      group.partsTotal += item.partsCost;
-      group.laborHrs += item.laborHours;
-    }
-    for (const g of groupMap.values()) {
-      g.laborAmt = g.laborHrs * laborRate;
-      g.zoneTotal = g.partsTotal + g.laborAmt;
-    }
-    return [...groupMap.values()].sort((a, b) => {
-      const cl = a.controllerLetter.localeCompare(b.controllerLetter);
-      if (cl !== 0) return cl;
-      return a.zoneNumber - b.zoneNumber;
-    });
-  }
-
-  private static fmt(n: number): string {
-    return `$${n.toFixed(2)}`;
-  }
-
-  private static renderEmailTotalsBlock(
-    partsSubtotal: number,
-    laborSubtotal: number,
-    totalLaborHours: number,
-    laborRate: number,
-    grandTotal: string,
-  ): string {
-    const laborLabel = `Labor (${totalLaborHours.toFixed(2)}h \u00d7 ${this.fmt(laborRate)}/hr)`;
-    return `
-      <table role="presentation" style="width: 100%; max-width: 320px; margin: 16px 0 0 auto; border-collapse: collapse; font-size: 14px;">
-        <tr>
-          <td style="padding: 5px 8px; color: #6b7280;">Parts Subtotal</td>
-          <td style="padding: 5px 8px; text-align: right; color: #1f2937;">${this.fmt(partsSubtotal)}</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px 8px; color: #6b7280;">${this.escapeHtml(laborLabel)}</td>
-          <td style="padding: 5px 8px; text-align: right; color: #1f2937;">${this.fmt(laborSubtotal)}</td>
-        </tr>
-        <tr style="border-top: 2px solid #1E5A99;">
-          <td style="padding: 8px 8px; font-weight: 700; color: #1f2937; font-size: 15px;">Total</td>
-          <td style="padding: 8px 8px; text-align: right; font-weight: 700; color: #1E5A99; font-size: 18px;">${this.escapeHtml(grandTotal)}</td>
-        </tr>
-      </table>`;
-  }
-
-  private static renderZoneGroupedEmailHTML(
-    data: EstimateEmailData,
-  ): string {
-    const items = data.items ?? [];
-    const laborRate = data.laborRate ?? 0;
-    const groups = this.buildEmailZoneGroups(items, laborRate);
-    const th = (label: string, align: string = 'left') =>
-      `<th style="padding: 7px 9px; text-align: ${align}; background: #143F6B; color: white; font-size: 12px; font-weight: 600;">${label}</th>`;
-    const tdStyle = (extra = '') =>
-      `padding: 7px 9px; border-bottom: 1px solid #e5e7eb; font-size: 13px; vertical-align: top; ${extra}`;
-
-    const summaryRows = groups
-      .map(
-        (g, idx) => `
-        <tr style="${idx % 2 === 1 ? 'background: #f9fafb;' : ''}">
-          <td style="${tdStyle('font-weight: 600;')}">${this.escapeHtml(g.zoneLabel)}</td>
-          <td style="${tdStyle('text-align: right;')}">${g.items.length}</td>
-          <td style="${tdStyle('text-align: right;')}">${this.fmt(g.partsTotal)}</td>
-          <td style="${tdStyle('text-align: right;')}">${g.laborHrs.toFixed(2)}h</td>
-          <td style="${tdStyle('text-align: right; font-weight: 600;')}">${this.fmt(g.zoneTotal)}</td>
-        </tr>`,
-      )
-      .join('');
-    const summaryTotals = `
-        <tr style="background: #f0f6ff; border-top: 2px solid #1E5A99;">
-          <td style="${tdStyle('font-weight: 700;')}">Totals</td>
-          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${groups.reduce((s, g) => s + g.items.length, 0)}</td>
-          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${this.fmt(groups.reduce((s, g) => s + g.partsTotal, 0))}</td>
-          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${groups.reduce((s, g) => s + g.laborHrs, 0).toFixed(2)}h</td>
-          <td style="${tdStyle('text-align: right; font-weight: 700;')}">${this.fmt(groups.reduce((s, g) => s + g.zoneTotal, 0))}</td>
-        </tr>`;
-
-    const summaryTable = `
-      <h3 style="color: #374151; margin: 0 0 10px 0; font-size: 15px;">Repairs Summary by Zone</h3>
-      <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #dce8f7; font-size: 13px; margin-bottom: 20px;">
-        <thead><tr>${th('Zone')}${th('Repairs', 'right')}${th('Parts', 'right')}${th('Labor hrs', 'right')}${th('Zone Total', 'right')}</tr></thead>
-        <tbody>${summaryRows}${summaryTotals}</tbody>
-      </table>`;
-
-    const zoneBlocks = groups
-      .map((g) => {
-        const workRows = g.items
-          .map((item, idx) => {
-            const issueLabel = item.issueType
-              ? item.issueType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-              : item.description || item.partName;
-            return `
-          <tr style="${idx % 2 === 1 ? 'background: #f9fafb;' : ''}">
-            <td style="${tdStyle('')}">${this.escapeHtml(issueLabel)}</td>
-            <td style="${tdStyle('text-align: right;')}">${item.quantity}</td>
-            <td style="${tdStyle('text-align: right;')}">${this.fmt(item.partPrice)}</td>
-            <td style="${tdStyle('text-align: right;')}">${this.fmt(item.partsCost)}</td>
-          </tr>`;
-          })
-          .join('');
-        const laborRow = `
-          <tr style="background: #f8fafc;">
-            <td colspan="3" style="${tdStyle('color: #6b7280; font-style: italic;')}">Zone labor &middot; ${g.laborHrs.toFixed(2)}h &times; ${this.fmt(laborRate)}/hr</td>
-            <td style="${tdStyle('text-align: right; font-style: italic; color: #6b7280;')}">${this.fmt(g.laborAmt)}</td>
-          </tr>`;
-        const subtotalRow = `
-          <tr style="background: #f0f6ff; border-top: 2px solid #1E5A99;">
-            <td colspan="3" style="${tdStyle('font-weight: 700;')}">${this.escapeHtml(g.zoneLabel)} Subtotal</td>
-            <td style="${tdStyle('text-align: right; font-weight: 700; color: #143F6B;')}">${this.fmt(g.zoneTotal)}</td>
-          </tr>`;
-        return `
-        <div style="margin-bottom: 16px; border: 1px solid #dce8f7; border-radius: 6px; overflow: hidden;">
-          <div style="background: #1E5A99; color: white; padding: 8px 12px; display: flex; justify-content: space-between;">
-            <span style="font-weight: 700; font-size: 13px;">${this.escapeHtml(g.zoneLabel)}</span>
-            <span style="font-weight: 700; font-size: 13px;">${this.fmt(g.zoneTotal)}</span>
-          </div>
-          <table role="presentation" style="width: 100%; border-collapse: collapse; font-size: 13px;">
-            <thead><tr style="background: #143F6B;">
-              ${th('Work / Finding')}${th('Qty', 'right')}${th('Unit Price', 'right')}${th('Parts Total', 'right')}
-            </tr></thead>
-            <tbody>${workRows}${laborRow}${subtotalRow}</tbody>
-          </table>
-        </div>`;
-      })
-      .join('');
-
-    return `
-      <div style="margin: 20px 0;">
-        <h3 style="color: #374151; margin-bottom: 16px;">Zone Detail</h3>
-        ${summaryTable}
-        ${zoneBlocks}
-      </div>`;
-  }
-
-  private static renderFlatEmailItemsHTML(
-    data: EstimateEmailData,
-  ): string {
-    if (!data.items?.length) return '';
-    const itemsRowsHTML = data.items
-      .map(
-        (item) => `
-        <tr>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; color: #1f2937;">${this.escapeHtml(item.description || item.partName)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${item.quantity}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${this.fmt(item.partPrice)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap;">${this.fmt(item.laborCost)} (${item.laborHours.toFixed(2)}h)</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #1f2937; white-space: nowrap; font-weight: 600;">${this.fmt(item.lineTotal)}</td>
-        </tr>`,
-      )
-      .join('');
-    return `
-      <div style="margin: 20px 0;">
-        <h3 style="color: #374151; margin-bottom: 16px;">Line Items</h3>
-        <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; font-size: 14px;">
-          <thead>
-            <tr style="background: #f3f4f6;">
-              <th style="padding: 10px 12px; text-align: left; color: #374151; font-weight: 600;">Description</th>
-              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Qty</th>
-              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Unit</th>
-              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Labor</th>
-              <th style="padding: 10px 12px; text-align: right; color: #374151; font-weight: 600;">Line Total</th>
-            </tr>
-          </thead>
-          <tbody>${itemsRowsHTML}</tbody>
-        </table>
-      </div>`;
-  }
-
-  private static generateEstimateEmailHTML(
-    data: EstimateEmailData, 
-    approveUrl: string, 
-    rejectUrl: string, 
-    viewUrl: string,
-    companyInfo: {
-      name: string;
-      logo: string | null;
-      email: string;
-      phone: string;
-      website: string;
-    },
-    isPreview = false,
-  ): string {
-    const partsSubtotal = data.partsSubtotal ?? 0;
-    const laborSubtotal = data.laborSubtotal ?? 0;
-    const totalLaborHours = data.totalLaborHours ?? 0;
-    const laborRate = data.laborRate ?? 0;
-    const hasBreakdown = partsSubtotal > 0 || laborSubtotal > 0;
-
-    const lineItemsSection = data.isInspectionOrigin
-      ? this.renderZoneGroupedEmailHTML(data)
-      : this.renderFlatEmailItemsHTML(data);
-
-    const totalsBlock = hasBreakdown
-      ? this.renderEmailTotalsBlock(partsSubtotal, laborSubtotal, totalLaborHours, laborRate, data.totalAmount)
-      : `
-      <div style="background: #1f2937; color: white; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
-        <h3 style="margin: 0; font-size: 24px;">Total Estimate</h3>
-        <p style="margin: 8px 0 0 0; font-size: 32px; font-weight: bold;">${this.escapeHtml(data.totalAmount)}</p>
-      </div>`;
-
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Estimate Approval Required</title>
-</head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #1E5A99, #0E3B6B); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-    ${companyInfo.logo ? `
-    <div style="margin-bottom: 20px;">
-      <img src="${companyInfo.logo}" alt="${this.escapeHtml(companyInfo.name)} Logo" style="max-height: 60px; max-width: 200px; object-fit: contain;">
-    </div>
-    ` : ''}
-    <h1 style="margin: 0; font-size: 28px;">Irrigation Estimate</h1>
-    <p style="margin: 8px 0 0 0; font-size: 18px; opacity: 0.9;">Your Approval Required</p>
-  </div>
-  
-  <div style="background: white; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px; padding: 30px;">
-    <h2 style="color: #1f2937; margin-top: 0;">Hello ${this.escapeHtml(data.customerName)},</h2>
-    
-    <p style="font-size: 16px; color: #4b5563;">
-      We've prepared an estimate for your irrigation project. Please review the details below and let us know if you'd like to proceed.
-    </p>
-
-    ${data.note && data.note.trim() ? `
-    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px 20px; margin: 20px 0; color: #92400e; font-size: 14px; line-height: 1.5; white-space: pre-wrap;">${this.escapeHtml(data.note)}</div>
-    ` : ''}
-
-    <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 16px 0; color: #374151;">Estimate Details</h3>
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Estimate #:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${formatEstimateNumber(data.estimateNumber)}</td>
-        </tr>
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Project:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.projectName)}</td>
-        </tr>
-        ${data.projectAddress ? `
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Location:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.projectAddress)}</td>
-        </tr>
-        ` : ''}
-        ${data.workLocationLat && data.workLocationLng ? `
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Pinned spot:</td>
-          <td style="padding: 8px 0; color: #1f2937;">
-            ${data.workLocationAddress ? `${this.escapeHtml(data.workLocationAddress)}<br/>` : ''}
-            <a href="https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}" style="color: #1E5A99;">View on map</a>
-            <span style="color: #6b7280; font-size: 12px;">(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)})</span>
-          </td>
-        </tr>
-        ` : ''}
-        ${data.branchName ? `
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Branch:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.branchName)}</td>
-        </tr>
-        ` : ''}
-        ${data.controllerLetter || data.zoneNumber ? `
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Controller / Zone:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${data.controllerLetter ? `Controller ${this.escapeHtml(data.controllerLetter)}` : ''}${data.controllerLetter && data.zoneNumber ? ' · ' : ''}${data.zoneNumber ? `Zone ${data.zoneNumber}` : ''}</td>
-        </tr>
-        ` : ''}
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Date:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.estimateDate)}</td>
-        </tr>
-        <tr>
-          <td style="padding: 8px 0; font-weight: 600; color: #6b7280;">Prepared by:</td>
-          <td style="padding: 8px 0; color: #1f2937;">${this.escapeHtml(data.createdBy)}</td>
-        </tr>
-      </table>
-    </div>
-
-    ${data.workDescription ? `
-    <div style="margin: 20px 0;">
-      <h3 style="color: #374151; margin-bottom: 16px;">Work Description</h3>
-      <div style="background: #f9fafb; border-radius: 8px; padding: 16px 20px; color: #1f2937; white-space: pre-wrap; font-size: 14px; line-height: 1.5;">${this.escapeHtml(data.workDescription)}</div>
-    </div>
-    ` : ''}
-
-    ${lineItemsSection}
-
-    <div style="margin: 20px 0; border-top: 1px solid #e5e7eb; padding-top: 16px;">
-      ${totalsBlock}
-    </div>
-
-    <div style="text-align: center; margin: 30px 0;">
-      <p style="font-size: 18px; color: #374151; margin-bottom: 20px;">Ready to proceed?</p>
-      ${isPreview ? '<p style="font-size: 14px; color: #6b7280;">(link created when sent)</p>' : ''}
-      
-      <a href="${approveUrl}" style="display: inline-block; background: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 10px;">
-        ✓ Approve Estimate
-      </a>
-      
-      <a href="${rejectUrl}" style="display: inline-block; background: #ef4444; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 0 10px 10px 10px;">
-        ✗ Decline Estimate
-      </a>
-    </div>
-
-    <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px; text-align: center;">
-      <p style="color: #6b7280; font-size: 14px; margin: 0;">
-        Need to review the full details? <a href="${viewUrl}" style="color: #1E5A99;">View Complete Estimate</a>
-      </p>
-      <div style="margin: 20px 0; color: #6b7280; font-size: 14px;">
-        <p style="margin: 4px 0; font-weight: 600; color: #374151;">${this.escapeHtml(companyInfo.name)}</p>
-        ${companyInfo.phone ? `<p style="margin: 4px 0;">📞 ${this.escapeHtml(companyInfo.phone)}</p>` : ''}
-        ${companyInfo.email ? `<p style="margin: 4px 0;">✉️ ${this.escapeHtml(companyInfo.email)}</p>` : ''}
-        ${companyInfo.website ? `<p style="margin: 4px 0;">🌐 <a href="${companyInfo.website}" style="color: #1E5A99;">${this.escapeHtml(companyInfo.website)}</a></p>` : ''}
-      </div>
-      <p style="color: #6b7280; font-size: 12px; margin: 8px 0 0 0;">
-        Questions? Reply to this email or call us directly.
-      </p>
-    </div>
-  </div>
-</body>
-</html>
-    `;
-  }
-
-  private static generateEstimateEmailText(
-    data: EstimateEmailData, 
-    approveUrl: string, 
-    rejectUrl: string,
-    companyInfo: {
-      name: string;
-      logo: string | null;
-      email: string;
-      phone: string;
-      website: string;
-    }
-  ): string {
-    const partsSubtotal = data.partsSubtotal ?? 0;
-    const laborSubtotal = data.laborSubtotal ?? 0;
-    const totalLaborHours = data.totalLaborHours ?? 0;
-    const laborRate = data.laborRate ?? 0;
-    const hasBreakdown = partsSubtotal > 0 || laborSubtotal > 0;
-
-    const itemsText = data.isInspectionOrigin
-      ? (() => {
-          const groups = this.buildEmailZoneGroups(data.items ?? [], laborRate);
-          return groups
-            .map((g) => {
-              const zoneItems = g.items
-                .map((item) => `  ${item.description || item.partName}: ${item.quantity} × ${this.fmt(item.partPrice)} = ${this.fmt(item.partsCost)}`)
-                .join('\n');
-              return `${g.zoneLabel}\n${zoneItems}\n  Zone labor: ${g.laborHrs.toFixed(2)}h × ${this.fmt(laborRate)}/hr = ${this.fmt(g.laborAmt)}\n  Zone Subtotal: ${this.fmt(g.zoneTotal)}`;
-            })
-            .join('\n\n');
-        })()
-      : data.items
-          ?.map(
-            (item) =>
-              `${item.description || item.partName}: ${item.quantity} × ${this.fmt(item.partPrice)} + Labor ${item.laborHours.toFixed(2)}h (${this.fmt(item.laborCost)}) = ${this.fmt(item.lineTotal)}`,
-          )
-          .join('\n') ?? '';
-
-    const breakdownText = hasBreakdown
-      ? `
-PRICE BREAKDOWN:
-  Parts Subtotal: ${this.fmt(partsSubtotal)}
-  Labor (${totalLaborHours.toFixed(2)}h × ${this.fmt(laborRate)}/hr): ${this.fmt(laborSubtotal)}
-  ─────────────────────────
-  Total: ${data.totalAmount}`
-      : `
-TOTAL ESTIMATE: ${data.totalAmount}`;
-
-    return `
-IRRIGATION ESTIMATE - APPROVAL REQUIRED
-
-Hello ${data.customerName},
-
-We've prepared an estimate for your irrigation project. Please review the details below:
-${data.note && data.note.trim() ? `
-NOTE FROM ${companyInfo.name.toUpperCase()}:
-${data.note}
-` : ''}
-ESTIMATE DETAILS:
-- Estimate: ${formatEstimateNumber(data.estimateNumber)}
-- Project: ${data.projectName}
-${data.projectAddress ? `- Location: ${data.projectAddress}` : ''}
-${data.workLocationLat && data.workLocationLng ? `- Pinned spot: ${data.workLocationAddress ? `${data.workLocationAddress} ` : ''}(${parseFloat(String(data.workLocationLat)).toFixed(6)}, ${parseFloat(String(data.workLocationLng)).toFixed(6)}) — https://www.google.com/maps/search/?api=1&query=${data.workLocationLat},${data.workLocationLng}` : ''}
-${data.branchName ? `- Branch: ${data.branchName}` : ''}
-${data.controllerLetter || data.zoneNumber ? `- Controller/Zone: ${data.controllerLetter ? `Controller ${data.controllerLetter}` : ''}${data.controllerLetter && data.zoneNumber ? ' · ' : ''}${data.zoneNumber ? `Zone ${data.zoneNumber}` : ''}` : ''}
-- Date: ${data.estimateDate}
-- Prepared by: ${data.createdBy}
-
-${data.workDescription ? `
-WORK DESCRIPTION:
-${data.workDescription}
-` : ''}
-${itemsText ? `
-${data.isInspectionOrigin ? 'ZONE DETAIL:' : 'LINE ITEMS:'}
-${itemsText}
-` : ''}
-${breakdownText}
-
-ACTIONS:
-- To approve this estimate, visit: ${approveUrl}
-- To decline this estimate, visit: ${rejectUrl}
-- To view the full estimate, visit: ${approveUrl}
-
----
-${companyInfo.name}
-${companyInfo.phone ? `Phone: ${companyInfo.phone}` : ''}
-${companyInfo.email ? `Email: ${companyInfo.email}` : ''}
-${companyInfo.website ? `Website: ${companyInfo.website}` : ''}
-
-Questions? Reply to this email or call us directly.
-    `;
-  }
 
   static async sendMarketingLeadNotification(data: {
     companyName: string;
@@ -759,53 +265,30 @@ Questions? Reply to this email or call us directly.
     }
   }
 
-  static async sendApprovalConfirmation(customerEmail: string, estimateNumber: string, approved: boolean, sender: CompanySender): Promise<void> {
+  static async sendApprovalConfirmation(args: { to: string; estimate: Estimate; approved: boolean; decidedAt: Date }): Promise<void> {
     if (!isEmailConfigured()) {
       console.error('SENDGRID_API_KEY not configured');
       return;
     }
 
-    const action = approved ? 'approved' : 'declined';
-    const nextSteps = approved 
-      ? 'We will begin scheduling your irrigation work and will contact you soon with next steps.'
-      : 'Thank you for your time. Please feel free to contact us if you have any questions or would like to discuss alternatives.';
-
+    const { to, estimate } = args;
     try {
+      const company = await storage.getCompanyProfile(estimate.companyId);
+      const customer = estimate.customerId == null ? undefined : await storage.getCustomer(estimate.customerId);
+      const customerName = customer?.companyId === estimate.companyId
+        ? customer.irrigoName ?? customer.name
+        : estimate.customerName;
+      const sender = senderFromCompany(company);
+      const content = await buildEstimateConfirmationEmail(args, company, customerName);
       await sgMail.send({
         from: sender.from,
         ...(sender.replyTo ? { replyTo: sender.replyTo } : {}),
-        to: customerEmail,
-        subject: `Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: ${approved ? '#10b981' : '#6b7280'};">
-              Estimate ${approved ? 'Approved' : 'Declined'}
-            </h2>
-            <p>Thank you for your response regarding estimate ${formatEstimateNumber(estimateNumber)}.</p>
-            <p>We have recorded that you have <strong>${action}</strong> this estimate.</p>
-            <p>${nextSteps}</p>
-            <p>If you have any questions, please don't hesitate to contact us.</p>
-            <p>Best regards,<br>Your Irrigation Team</p>
-          </div>
-        `,
-        text: `
-Estimate ${approved ? 'Approved' : 'Declined'} - ${formatEstimateNumber(estimateNumber)}
-
-Thank you for your response regarding estimate ${formatEstimateNumber(estimateNumber)}.
-
-We have recorded that you have ${action} this estimate.
-
-${nextSteps}
-
-If you have any questions, please don't hesitate to contact us.
-
-Best regards,
-Your Irrigation Team
-        `,
+        to,
+        ...content,
         categories: ['estimate-confirmation'],
       });
 
-      console.log(`Approval confirmation sent to ${customerEmail}`);
+      console.log(`Approval confirmation sent to ${to}`);
     } catch (error) {
       console.error('Failed to send approval confirmation:', error);
       throw error;

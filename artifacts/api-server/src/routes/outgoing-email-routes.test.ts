@@ -315,15 +315,18 @@ it("reviews current customer email and placeholder links, then sends the real fi
     assert.deepEqual(defaultDraft.body.from, sender.from);
     assert.equal(defaultDraft.body.replyTo, sender.replyTo);
     assert.deepEqual(defaultDraft.body.attachments, [{ filename: "Estimate-EST-50123.pdf", viewUrl: `/api${path}/attachment` }]);
+    assert.match(defaultDraft.body.html, /Estimate-EST-50123\.pdf/);
     assert.deepEqual(defaultDraft.body.optionDefs, [{ key: "attachPdf", label: "Attach the estimate as a PDF", default: true }]);
 
     const fields = { to: "reviewed@example.invalid", subject: "Reviewed estimate", note: "Check <yard>" };
     const preview = await request(`${path}/preview`, "POST", fields);
     assert.equal(preview.status, 200);
     assert.match(preview.body.html, /about:blank#link-created-when-sent/);
-    assert.match(preview.body.html, /\(link created when sent\)/);
-    assert.match(preview.body.html, /Approve Estimate/);
-    assert.match(preview.body.html, /Decline Estimate/);
+    assert.match(preview.body.html, /\(links are created when sent\)/);
+    assert.match(preview.body.html, /Approve estimate/);
+    assert.match(preview.body.html, />Decline</);
+    assert.match(preview.body.html, /<title>Reviewed estimate<\/title>/);
+    assert.doesNotMatch(preview.body.html, /\/estimate-approval\//);
     assert.match(preview.body.html, /Check &lt;yard&gt;/);
     assert.equal(estimateMessages.length, priorMessageCount);
     assert.equal(estimateRenders.length, priorRenderCount);
@@ -338,7 +341,8 @@ it("reviews current customer email and placeholder links, then sends the real fi
     const message = estimateMessages.at(-1)!;
     assert.match(message.html, new RegExp(`/estimate-approval/${row.approvalToken}\\?intent=reject`));
     assert.match(message.text, new RegExp(`/estimate-approval/${row.approvalToken}`));
-    assert.doesNotMatch(message.html, /link.created.when.sent/);
+    assert.doesNotMatch(message.html, /link-created-when-sent|\(links are created when sent\)/);
+    assert.match(message.html, /Estimate-EST-50123\.pdf/);
     assert.equal(message.subject, fields.subject);
     assert.equal(message.to, fields.to);
     assert.equal(message.attachments?.[0]?.filename, preview.body.attachments[0].filename);
@@ -359,29 +363,36 @@ it("requires a new review when the PDF checkbox changes, and sends no PDF when u
     assert.equal(mismatched.status, 409);
     const { body: unchecked } = await request(`${path}/preview`, "POST", fields);
     assert.deepEqual(unchecked.attachments, []);
+    assert.doesNotMatch(unchecked.html, /Estimate-EST-50123\.pdf/);
     assert.equal((await request(`${path}/attachment`, "POST", { confirmationToken: unchecked.confirmationToken })).status, 409);
     assert.notEqual(checked.confirmationToken.split(".")[1], unchecked.confirmationToken.split(".")[1]);
     assert.equal((await request(`${path}/send`, "POST", { ...fields, confirmationToken: unchecked.confirmationToken })).status, 200);
     assert.equal(estimateRenders.length, priorRenderCount);
     assert.equal(estimateMessages.at(-1)?.attachments, undefined);
+    assert.doesNotMatch(estimateMessages.at(-1)!.html, /Estimate-EST-50123\.pdf/);
   });
 });
 
-it("requires re-review for PDF-only estimate and company edits without an updatedAt change", async () => {
+it("requires re-review for PDF-only estimate edits and company footer edits without an updatedAt change", async () => {
   const h = estimateHarness();
   await withServer(h, async request => {
     const path = "/outgoing-email/estimate/50123";
     const count = estimateMessages.length;
     const changes = [
-      () => { h.rows.get(50123)!.accessInstructions = "Use the rear gate."; },
-      () => { h.rows.get(50123)!.photos = ["/objects/new-test-photo"]; },
-      () => { h.company.address = "New office address"; },
+      { change: () => { h.rows.get(50123)!.accessInstructions = "Use the rear gate."; }, bodyChanges: false },
+      { change: () => { h.rows.get(50123)!.photos = ["/objects/new-test-photo"]; }, bodyChanges: false },
+      { change: () => { h.company.address = "New office address"; }, bodyChanges: true },
     ];
-    for (const change of changes) {
+    for (const { change, bodyChanges } of changes) {
       const { body: review } = await request(`${path}/preview`);
       change();
       const { body: fresh } = await request(`${path}/preview`);
-      assert.equal(fresh.html, review.html);
+      if (bodyChanges) {
+        assert.doesNotMatch(review.html, /New office address/);
+        assert.match(fresh.html, /New office address/);
+      } else {
+        assert.equal(fresh.html, review.html);
+      }
       const payload = { confirmationToken: review.confirmationToken };
       assert.equal((await request(`${path}/attachment`, "POST", payload)).status, 409);
       assert.equal((await request(`${path}/send`, "POST", payload)).status, 409);
@@ -489,6 +500,7 @@ it("allows only the correct estimate lifecycle per kind and keeps the sent link 
       const { status, body } = await request(`${path}/preview`, "POST", fields);
       assert.equal(status, 200);
       assert.doesNotMatch(body.html, /existing-secret-token|expired-secret-token/);
+      assert.match(body.html, /\(links are created when sent\)/);
       assert.deepEqual(body.warnings, [expired
         ? "The estimate date will be reset and the 30-day window restarted from today's send."
         : "The estimate date and approval link remain unchanged, and the 30-day window restarts from today's send."]);
@@ -501,6 +513,10 @@ it("allows only the correct estimate lifecycle per kind and keeps the sent link 
       assert.equal(estimateRenders.at(-1)?.estimate.estimateDate.toISOString(), saved.estimateDate.toISOString());
       assert.equal(saved.approvalToken === original.approvalToken, !expired);
       assert.match(estimateMessages.at(-1)!.html, new RegExp(`/estimate-approval/${saved.approvalToken}`));
+      assert.match(estimateMessages.at(-1)!.html, /Approval needed/);
+      const message = estimateMessages.at(-1)!;
+      assert.equal(message.attachments?.[0]?.filename, body.attachments[0].filename);
+      assert.ok(message.html.includes(body.attachments[0].filename));
     }
     assert.deepEqual(h.audit, ["estimate.email.sent", "estimate.resent", "estimate.email.sent", "estimate.resent"]);
   });

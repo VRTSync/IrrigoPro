@@ -1,6 +1,5 @@
 import type { Company, Customer, EstimateWithItems } from "@workspace/db";
 import { ESTIMATE_EXPIRATION_DAYS, formatEstimateNumber } from "@workspace/shared";
-import { buildEstimateApprovalEmail, ESTIMATE_PREVIEW_LINK } from "../email-service";
 import { addDays, fmtDate } from "../estimate-pdf-html";
 import { estimatePdfAttachmentFilename, estimatePdfForPendingSend, generateEstimatePdfForEmail } from "../estimate-pdf-service";
 import { senderFromCompany } from "../lib/company-sender";
@@ -11,6 +10,8 @@ import type { EstimateRouteDeps } from "../routes/estimate-routes";
 import { storage } from "../storage";
 import { estimateEmailData, nextEstimateSendTime, sendEstimateApprovalEmailFlow, type EstimateSendStorage } from "./estimate-send-flow";
 import { OutgoingEmailError, type OutgoingEmailHandler } from "./types";
+
+import { buildEstimateApprovalEmail, ESTIMATE_PREVIEW_LINK } from "./estimate-email";
 
 const PLACEHOLDER_LINKS = {
   approveUrl: ESTIMATE_PREVIEW_LINK,
@@ -90,8 +91,9 @@ export function createEstimateEmailHandler(
     async draft(entity, input) {
       const { estimate, customer, company } = entity;
       const attachPdf = input.options?.attachPdf ?? true;
+      const attachmentFilename = attachPdf ? estimatePdfAttachmentFilename(estimate.estimateNumber) : undefined;
       const note = input.note ?? "";
-      const data = templateData(entity, note);
+      const data = { ...templateData(entity, note), subject: input.subject, attachmentFilename };
       const built = await buildEstimateApprovalEmail(data, PLACEHOLDER_LINKS);
       const to = input.to || customer?.email?.trim() || estimate.customerEmail?.trim() || "";
       const warnings: string[] = [];
@@ -106,9 +108,8 @@ export function createEstimateEmailHandler(
       if (!to) warnings.push(noRecipient);
       return {
         ...built, sender: data.sender, to, cc: input.cc ?? [], bcc: input.bcc ?? [], note,
-        subject: input.subject || built.subject,
-        attachments: attachPdf
-          ? [{ filename: estimatePdfAttachmentFilename(estimate.estimateNumber), viewUrl: `/api/outgoing-email/${kind}/${estimate.id}/attachment` }]
+        attachments: attachmentFilename
+          ? [{ filename: attachmentFilename, viewUrl: `/api/outgoing-email/${kind}/${estimate.id}/attachment` }]
           : [],
         warnings, options: { attachPdf }, variant: null,
         versionStamp: [
