@@ -220,7 +220,10 @@ function ReviewSession({ onOpenChange, kind, entityId, title, onSent, onSendErro
                   <ul className="space-y-1">
                     {draft.attachments.map((file, index) => (
                       <li key={index} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-sm">
-                        <span className="min-w-0 [overflow-wrap:anywhere]" data-testid={`text-email-attachment-${index}`}>{file.filename}</span>
+                        <span className="min-w-0 [overflow-wrap:anywhere]" data-testid={`text-email-attachment-${index}`}>
+                          {file.title && <span className="block font-medium">{file.title}</span>}
+                          {file.filename}
+                        </span>
                         <Button type="button" size="sm" variant="outline" className="shrink-0" disabled={viewing || !upToDate} onClick={() => viewAttachment(file.viewUrl)} data-testid={`button-view-email-attachment-${index}`}>View</Button>
                       </li>
                     ))}

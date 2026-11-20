@@ -9,4 +9,5 @@
 export type OutgoingEmailPreviewAttachmentsItem = {
   filename: string;
   viewUrl: string;
+  title?: string;
 };

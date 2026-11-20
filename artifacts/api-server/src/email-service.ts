@@ -1238,6 +1238,7 @@ ${companyName}
       bcc?: string[];
       /** Attachment filename. Defaults to `Invoice_<number>_Detail.pdf`. */
       filename?: string;
+      extraAttachments?: { filename: string; content: Buffer }[];
       /** SendGrid categories, for per-send reporting. */
       categories?: string[];
     },
@@ -1267,6 +1268,9 @@ ${companyName}
             type: 'application/pdf',
             disposition: 'attachment',
           },
+          ...(options.extraAttachments ?? []).map(({ filename, content }) => ({
+            filename, content: content.toString('base64'), type: 'application/pdf', disposition: 'attachment',
+          })),
         ],
         categories: options.categories ?? ['invoice-detail-pdf'],
       });

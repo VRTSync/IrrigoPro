@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { after, it, type TestContext } from "node:test";
 import express, { type RequestHandler } from "express";
 import { eq, inArray } from "drizzle-orm";
-import { companies, customers, db, emailBatchItems, emailBatches, invoicePdfs, invoices, pool, users } from "@workspace/db";
+import { companies, customers, db, emailBatchItems, emailBatches, invoicePdfs, invoices, platformDocuments, pool, users, type PlatformDocument } from "@workspace/db";
 import { InvoicePdfService } from "../invoice-pdf-service";
 import { classifyForBatch, emailReviewDigest } from "../outgoing-email/invoice-batch";
 import { INTERRUPTED_SEND } from "../outgoing-email/invoice-batch-store";
@@ -16,6 +16,7 @@ import { requireInvoiceSend } from "./role-guards";
 
 const prefix = "/api/outgoing-email";
 const pdfBuffer = Buffer.from("%PDF-1.7\nsynthetic invoice");
+const guideBytes = Buffer.from("%PDF-1.7\nsynthetic guide");
 const date = new Date("2026-10-31T12:00:00Z");
 const httpPreview = `${prefix}/invoice/batch/preview`;
 const httpStart = `${prefix}/invoice/batch`;
@@ -49,6 +50,8 @@ it("classifies the exact skip messages in priority order and only returns a reci
 async function harness(t: TestContext) {
   const salt = randomUUID();
   const tenantIds: number[] = [];
+  const guideIds: number[] = [];
+  let currentGuide: PlatformDocument | undefined;
   const scheduled: (() => Promise<void>)[] = [];
   const uploads = new Map<string, Buffer>();
   const mail: Parameters<typeof import("../email-service").EmailService.sendInvoiceDetailPdf>[] = [];
@@ -61,6 +64,7 @@ async function harness(t: TestContext) {
     await db.delete(emailBatchItems).where(inArray(emailBatchItems.companyId, tenantIds));
     await db.delete(emailBatches).where(inArray(emailBatches.companyId, tenantIds));
     await db.delete(invoicePdfs).where(inArray(invoicePdfs.companyId, tenantIds));
+    if (guideIds.length) await db.delete(platformDocuments).where(inArray(platformDocuments.id, guideIds));
     await db.delete(invoices).where(inArray(invoices.companyId, tenantIds));
     await db.delete(customers).where(inArray(customers.companyId, tenantIds));
     await db.delete(users).where(inArray(users.companyId, tenantIds));
@@ -81,6 +85,16 @@ async function harness(t: TestContext) {
   const [actor] = await db.insert(users).values({
     username: `batch-${salt}`, password: "not-used", name: "Batch fixture", companyId: a.id, role: "bookkeeper",
   }).returning();
+  async function replaceGuide() {
+    // Leave the actual development current version alone. The dependency seam
+    // represents currentness; the real FK proves each send stores a version.
+    const [row] = await db.insert(platformDocuments).values({
+      kind: "invoice_guide", isCurrent: false, storageKey: `test/${randomUUID()}.pdf`, sha256: "fixture",
+      filename: "Understanding Your Invoice.pdf", byteSize: guideBytes.length, pageCount: 1, uploadedByUserId: actor.id,
+    }).returning();
+    guideIds.push(row.id);
+    return currentGuide = { ...row, isCurrent: true };
+  }
   async function invoice(n: number, companyId = a.id, email = `customer${n}@example.invalid`) {
     const [customer] = await db.insert(customers).values({
       companyId, name: `Customer ${n}`, irrigoName: n === 1 ? "The Ranch" : null, email,
@@ -94,8 +108,14 @@ async function harness(t: TestContext) {
     return row;
   }
   const doc = new InvoicePdfService(storage);
+  const getCurrentInvoiceGuide = async () => currentGuide;
   const transport: NonNullable<Parameters<typeof createInvoiceEmailHandler>[0]> = {
     storage,
+    guides: {
+      getCurrentInvoiceGuide,
+      async getInvoiceGuide(id) { return currentGuide?.id === id ? currentGuide : undefined; },
+      async readPlatformDocument() { return guideBytes; },
+    },
     pdf: {
       getDocumentVersion: doc.getDocumentVersion.bind(doc),
       async generatePdfBuffer(id, companyId) {
@@ -126,6 +146,7 @@ async function harness(t: TestContext) {
     requireAuthentication, requireInvoiceSend,
     delivery: {
       draft: handler.draft,
+      getCurrentInvoiceGuide,
       send: (invoice, customer, draft, userId) => sendInvoiceEmail(invoice, customer, draft, userId, transport),
     },
     schedule: (run) => { scheduled.push(run); },
@@ -157,11 +178,13 @@ async function harness(t: TestContext) {
     assert.equal(result.status, 202, JSON.stringify(result.data));
     return result.data.batchId as number;
   }
-  return { a, b, actor, invoice, request, review, run, start, mail, refused, uploads };
+  return { a, b, actor, invoice, request, review, run, start, mail, refused, uploads, replaceGuide };
 }
 
 it("previews, confirms and sends separate emails in order with exact saved PDFs and Sent stamps", async (t) => {
   const h = await harness(t);
+  assert.equal(h.a.attachInvoiceGuide, true);
+  const guide = await h.replaceGuide();
   const one = await h.invoice(1);
   const missing = await h.invoice(2, h.a.id, "");
   const three = await h.invoice(3);
@@ -169,6 +192,7 @@ it("previews, confirms and sends separate emails in order with exact saved PDFs 
   assert.equal(preview.from.name, "A Irrigation");
   assert.equal(preview.from.email, h.a.emailFromAddress);
   assert.equal(preview.replyTo, "office@example.invalid");
+  assert.deepEqual(preview.guide, { filename: guide.filename });
   assert.equal(preview.willSend[0].amountDue, 40);
   assert.equal(preview.willSkip[0].reason, "no_email");
   assert.equal(preview.willSend[0].subject, "Irrigation Invoice IR-1001 – The Ranch – October 2026");
@@ -192,14 +216,47 @@ it("previews, confirms and sends separate emails in order with exact saved PDFs 
   assert.equal(h.mail[0][4].html, row.data.html);
   assert.equal(h.mail[0][4].text, row.data.text);
   assert.equal(h.mail[0][4].filename, row.data.attachments[0].filename);
+  for (const [, , , , options] of h.mail) {
+    assert.deepEqual(options.extraAttachments, [{ filename: guide.filename, content: guideBytes }]);
+  }
   for (const invoice of [one, three]) {
     const copy = await storage.getLatestInvoiceSentCopy(invoice.id, h.a.id);
     assert.ok(copy);
     assert.ok(copy.pdfUrl.startsWith(`invoice-sent-copies/${h.a.id}/${invoice.id}/`));
     assert.deepEqual(h.uploads.get(copy.pdfUrl), pdfBuffer);
+    assert.equal(copy.guideDocumentId, guide.id);
     assert.ok((await storage.getInvoiceById(invoice.id, h.a.id))?.sentAt);
   }
   assert.equal((await h.request(httpActive)).data, null);
+});
+
+it("does not send a batch if the guide changes before confirmation or while queued", async (t) => {
+  const h = await harness(t);
+  await h.replaceGuide();
+  const one = await h.invoice(1);
+  const { body } = await h.review([one.id]);
+  await h.replaceGuide();
+  assert.equal((await h.request(httpStart, body)).status, 409);
+  const batchId = await h.start([one.id]);
+  await h.replaceGuide();
+  await h.run();
+  assert.equal((await h.request(detail(batchId))).data.items[0].status, "failed");
+  assert.equal(h.mail.length, 0);
+  assert.equal(h.uploads.size, 0);
+});
+
+it("omits the guide in batch review and delivery when the company opts out", async (t) => {
+  const h = await harness(t);
+  await h.replaceGuide();
+  await db.update(companies).set({ attachInvoiceGuide: false }).where(eq(companies.id, h.a.id));
+  const one = await h.invoice(1);
+  const { preview, body } = await h.review([one.id]);
+  assert.equal(preview.guide, null);
+  assert.equal((await h.request(httpStart, body)).status, 202);
+  await h.run();
+  assert.equal(h.mail.length, 1);
+  assert.equal(h.mail[0][4].extraAttachments, undefined);
+  assert.equal((await storage.getLatestInvoiceSentCopy(one.id, h.a.id))?.guideDocumentId, null);
 });
 
 it("keeps sending after a provider error", async (t) => {

@@ -25,6 +25,9 @@ export const SYSTEM_DOCUMENTER_API: readonly ApiRule[] = [
   { method: "POST", pattern: /^\/api\/upload\/photo\/finalize$/ },
   { method: "POST", pattern: /^\/api\/photos\/signed-urls$/ },
   { method: "GET", pattern: /^\/api\/photos\/.+$/ },
+  // The guide is platform-wide, not billing data belonging to any company.
+  // The file endpoint still restricts earlier versions to super admins.
+  { method: "GET", pattern: /^\/api\/platform-documents\/\d+\/file$/ },
 ];
 
 export const ROLE_API_ALLOWLISTS: Partial<Record<Role, readonly ApiRule[]>> = {

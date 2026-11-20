@@ -3,6 +3,7 @@ import { GetActiveInvoiceBatchResponse, GetInvoiceBatchResponse, PreviewInvoiceB
 import { resolveBalanceDue } from "@workspace/shared";
 import { senderFromCompany } from "../lib/company-sender";
 import { logger } from "../lib/logger";
+import { getCurrentInvoiceGuide } from "../lib/platform-documents";
 import { createSingleUseConfirmation } from "../lib/single-use-confirmation";
 import { classifyForBatch, emailReviewDigest, reviewedInvoiceDraft } from "../outgoing-email/invoice-batch";
 import { invoiceBatchStore, summarizeBatch, type BatchLease } from "../outgoing-email/invoice-batch-store";
@@ -25,7 +26,7 @@ const confirmation = createSingleUseConfirmation({
 });
 
 const defaultDelivery = { draft: createInvoiceEmailHandler().draft, send: sendInvoiceEmail };
-type Delivery = typeof defaultDelivery;
+type Delivery = typeof defaultDelivery & { getCurrentInvoiceGuide?: typeof getCurrentInvoiceGuide };
 
 function positiveId(raw: unknown): number | null {
   if (typeof raw !== "number" && (typeof raw !== "string" || !/^[1-9]\d*$/.test(raw))) return null;
@@ -62,11 +63,14 @@ function selection(req: Request) {
   return { invoiceIds, note };
 }
 
-async function previewBatch(companyId: number, invoiceIds: number[], note: string, draftInvoice: Delivery["draft"]) {
+async function previewBatch(companyId: number, invoiceIds: number[], note: string, delivery: Delivery) {
   const [company, selected] = await Promise.all([
     invoiceBatchStore.company(companyId), invoiceBatchStore.selected(companyId, invoiceIds),
   ]);
   if (!company) throw new OutgoingEmailError(404, "Company not found.");
+  const guide = company.attachInvoiceGuide
+    ? await (delivery.getCurrentInvoiceGuide ?? getCurrentInvoiceGuide)()
+    : undefined;
   const byId = new Map(selected.map((row) => [row.invoice.id, row]));
   const notFound: number[] = [];
   const willSend = [];
@@ -82,7 +86,7 @@ async function previewBatch(companyId: number, invoiceIds: number[], note: strin
       if (!verdict.send) {
         return { found: true, send: false, value: { ...label, reason: verdict.reason, message: verdict.message } } as const;
       }
-      const draft = await draftInvoice({ invoice, customer, company }, { note });
+      const draft = await delivery.draft({ invoice, customer, company, guideSnapshot: guide ?? null }, { note });
       return {
         found: true, send: true, value: {
           ...label, to: verdict.to, subject: draft.subject, amountDue: resolveBalanceDue(invoice),
@@ -97,7 +101,7 @@ async function previewBatch(companyId: number, invoiceIds: number[], note: strin
     }
   }
   const { from, replyTo } = senderFromCompany(company);
-  return { from, replyTo: replyTo ?? null, willSend, willSkip, notFound };
+  return { from, replyTo: replyTo ?? null, guide: guide ? { filename: guide.filename } : null, willSend, willSkip, notFound };
 }
 
 function fingerprint(userId: number, companyId: number, note: string, preview: Awaited<ReturnType<typeof previewBatch>>) {
@@ -205,7 +209,7 @@ export function registerInvoiceBatchSendRoutes(app: Express, {
   app.post(`${ROOT}/invoice/batch/preview`, ...guards, route(async (req, res) => {
     const { invoiceIds, note } = selection(req);
     const companyId = companyScope(req);
-    const preview = await previewBatch(companyId, invoiceIds, note, delivery.draft);
+    const preview = await previewBatch(companyId, invoiceIds, note, delivery);
     const { token, expiresAt } = confirmation.issue(fingerprint(actor(req), companyId, note, preview), new Date());
     res.json(PreviewInvoiceBatchResponse.parse({ ...preview, confirmationToken: token, expiresAt }));
   }));
@@ -214,7 +218,7 @@ export function registerInvoiceBatchSendRoutes(app: Express, {
     const { invoiceIds, note } = selection(req);
     const companyId = companyScope(req);
     const userId = actor(req);
-    const preview = await previewBatch(companyId, invoiceIds, note, delivery.draft);
+    const preview = await previewBatch(companyId, invoiceIds, note, delivery);
     const claims = fingerprint(userId, companyId, note, preview);
     const token: unknown = req.body?.confirmationToken;
     const check = confirmation.verify(token, claims, new Date(), { consume: false });

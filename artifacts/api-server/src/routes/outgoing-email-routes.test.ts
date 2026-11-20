@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Company, Customer, EstimateWithItems } from "@workspace/db";
+import type { Company, Customer, EstimateWithItems, PlatformDocument } from "@workspace/db";
 import { buildEstimateHtml, fmtDate } from "../estimate-pdf-html";
 import { requireInvoiceRead } from "./role-guards";
 
@@ -42,6 +42,12 @@ const { ObjectStorageService } = await import("../objectStorage");
 
 const bytes = Buffer.from("%PDF-1.7\nexact generated invoice bytes");
 const filename = "The Ranch - Irrigation Billing Detail - (10-1-26_10-31-26).pdf";
+const guideBytes = Buffer.from("%PDF-1.7\ninvoice guide fixture");
+const guide: PlatformDocument = {
+  id: 21, isCurrent: true, kind: "invoice_guide", storageKey: "guide-fixture", sha256: "unused",
+  filename: "Understanding Your Invoice.pdf", pageCount: 5, byteSize: guideBytes.length,
+  uploadedAt: new Date(), uploadedByUserId: 7,
+};
 const sender = {
   from: { name: "High Plains Property Maintenance", email: "billing@example.invalid" },
   replyTo: "office@example.invalid",
@@ -54,7 +60,7 @@ function estimateHarness(opts: { companyId?: number | null; role?: string; missi
   const company = {
     id: 1, name: "High Plains", email: "office@example.invalid",
     emailFromName: sender.from.name, emailFromAddress: sender.from.email, emailReplyTo: sender.replyTo,
-    emailSendingDomain: "example.invalid", emailDomainVerifiedAt: new Date(),
+    emailSendingDomain: "example.invalid", emailDomainVerifiedAt: new Date(), attachInvoiceGuide: true,
   } as Company;
   const customer = {
     id: 42, companyId: 1, irrigoName: "The Ranch", name: "QuickBooks Ranch",
@@ -124,6 +130,7 @@ function harness(opts: {
   companyId?: number | null; role?: string; email?: string | null; oldEmail?: string | null;
   mailFailure?: boolean; uploadFailure?: boolean; alreadySent?: boolean; customerCompany?: number;
   validationFailure?: boolean; unauthenticated?: boolean; mutateDuringRender?: boolean;
+  attachInvoiceGuide?: boolean; currentGuide?: PlatformDocument; replaceGuideDuringRender?: boolean; guideReadFailure?: boolean;
 } = {}) {
   const events: string[] = [];
   const uploaded: { key: string; buf: Buffer; contentType: string; cacheControl?: string }[] = [];
@@ -135,6 +142,7 @@ function harness(opts: {
   const reportRenders: string[] = [];
   const savedReads: string[] = [];
   let generated = 0;
+  const guides = { current: opts.currentGuide };
   const invoice = {
     id: 1008, customerId: 42, companyId: 1, invoiceNumber: "IR-1008",
     customerName: "The Ranch", customerEmail: opts.oldEmail === undefined ? "old@example.invalid" : opts.oldEmail,
@@ -148,6 +156,7 @@ function harness(opts: {
     logo: "company-logos/high-plains-test-logo", address: "100 Main St", website: "https://www.highplainsprop.com/",
     emailFromName: sender.from.name, emailFromAddress: sender.from.email,
     emailReplyTo: sender.replyTo, emailSendingDomain: "example.invalid", emailDomainVerifiedAt: new Date(),
+    attachInvoiceGuide: opts.attachInvoiceGuide ?? false,
   };
   const wc = {
     id: 66, companyId: 1, customerId: 42, customerName: "The Ranch",
@@ -205,6 +214,7 @@ function harness(opts: {
     generated++;
     const documentVersion = await pdf.getDocumentVersion(invoice.id, invoice.companyId);
     if (opts.mutateDuringRender) invoice.updatedAt = new Date("2026-11-19");
+    if (opts.replaceGuideDuringRender) guides.current = { ...guide, id: guide.id + 1 };
     return opts.validationFailure
       ? { success: false, error: "totals drift", validationFailure: { validationFailed: true as const, rowErrors: [] }, documentVersion }
       : { success: true, pdfBuffer: bytes, documentVersion };
@@ -222,6 +232,14 @@ function harness(opts: {
   const handler = createInvoiceEmailHandler({
     storage,
     pdf: { getDocumentVersion: pdf.getDocumentVersion.bind(pdf), generatePdfBuffer: generate },
+    guides: {
+      async getCurrentInvoiceGuide() { return guides.current; },
+      async getInvoiceGuide(id) { return guides.current?.id === id ? guides.current : { ...guide, id, isCurrent: false }; },
+      async readPlatformDocument() {
+        if (opts.guideReadFailure) throw new Error("fixture guide missing");
+        return guideBytes;
+      },
+    },
     objects: {
       async writeBufferToFirstSearchPath(key, buf, contentType, cacheControl) {
         if (opts.uploadFailure) throw new Error("upload failed");
@@ -251,7 +269,7 @@ function harness(opts: {
     async sendProfile(args) { reportSends.push({ kind: "irrigation_profile_report", args }); },
   });
   registerOutgoingEmailRoutes(app, { requireAuthentication, handlers: [handler, ...reportHandlers] });
-  return { app, invoice, company, wc, controller, reportRenders, reportSends, uploaded, deleted, sent, copies, stamps, events, savedReads, generated: () => generated };
+  return { app, invoice, company, wc, controller, reportRenders, reportSends, uploaded, deleted, sent, copies, stamps, events, savedReads, guides, generated: () => generated };
 }
 
 async function withServer(h: Pick<ReturnType<typeof harness>, "app">, run: (request: (path?: string, method?: string, fields?: Record<string, unknown>) => Promise<{ status: number; body: any; headers?: Headers }>) => Promise<void>) {
@@ -645,6 +663,82 @@ it("previews current email, company sender, period, amount, due date and filenam
     assert.doesNotMatch(body.html, /A note from|Pay now|Understanding Your Invoice/);
     assert.equal(h.generated(), 0);
     assert.deepEqual(h.events, []);
+  });
+});
+
+it("previews and sends the guide after the invoice PDF and records the exact version", async () => {
+  const h = harness({ attachInvoiceGuide: true, currentGuide: guide });
+  await withServer(h, async request => {
+    const { status, body } = await request("/preview");
+    assert.equal(status, 200);
+    assert.deepEqual(body.attachments, [
+      { filename, viewUrl: "/api/invoices/1008/pdf/download" },
+      { title: "Guide: how to read your invoice", filename: guide.filename, viewUrl: `/api/platform-documents/${guide.id}/file` },
+    ]);
+    assert.match(body.html, /Billing detail report[\s\S]*Guide: how to read your invoice[\s\S]*Understanding Your Invoice\.pdf/);
+    assert.match(body.text, /Attached:[\s\S]*Understanding Your Invoice\.pdf/);
+    const sent = await request("/send", "POST", { confirmationToken: body.confirmationToken });
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    assert.equal(h.sent[0][4].filename, filename);
+    assert.deepEqual(h.sent[0][4].extraAttachments, [{ filename: guide.filename, content: guideBytes }]);
+    assert.equal(h.copies[0].guideDocumentId, guide.id);
+  });
+});
+
+it("sends without a guide when disabled, and warns only when enabled with no current guide", async () => {
+  for (const attachInvoiceGuide of [false, true]) {
+    const h = harness({ attachInvoiceGuide, currentGuide: attachInvoiceGuide ? undefined : guide });
+    await withServer(h, async request => {
+      const { status, body } = await request("/preview");
+      assert.equal(status, 200);
+      assert.equal(body.attachments.length, 1);
+      assert.deepEqual(body.warnings, attachInvoiceGuide ? ["No invoice guide is uploaded yet, so this email goes without it."] : []);
+      assert.equal((await request("/send", "POST", { confirmationToken: body.confirmationToken })).status, 200);
+      assert.equal(h.copies[0].guideDocumentId, null);
+      assert.equal(h.sent[0][4].extraAttachments, undefined);
+    });
+  }
+});
+
+for (const replaceGuideDuringRender of [false, true]) {
+  it(`blocks a same-filename guide replacement ${replaceGuideDuringRender ? "during PDF rendering" : "after preview"}`, async () => {
+    const h = harness({ attachInvoiceGuide: true, currentGuide: guide, replaceGuideDuringRender });
+    await withServer(h, async request => {
+      const { body } = await request("/preview");
+      if (!replaceGuideDuringRender) h.guides.current = { ...guide, id: guide.id + 1 };
+      const refused = await request("/send", "POST", { confirmationToken: body.confirmationToken });
+      assert.equal(refused.status, 409);
+      assert.equal(refused.body.message, "The invoice guide was replaced after you reviewed this email. Review it again before sending.");
+      assert.deepEqual(h.events, []);
+      assert.equal(h.generated(), replaceGuideDuringRender ? 1 : 0);
+    });
+  });
+}
+
+it("does not send or save an invoice copy if the reviewed guide cannot be loaded", async () => {
+  const h = harness({ attachInvoiceGuide: true, currentGuide: guide, guideReadFailure: true });
+  await withServer(h, async request => {
+    const response = await request("/send");
+    assert.equal(response.status, 500);
+    assert.equal(response.body.message, "Could not load the invoice guide. Nothing was sent.");
+    assert.deepEqual(h.events, []);
+  });
+});
+
+it("never shows the guide on estimate or report reviews", async () => {
+  await withServer(estimateHarness(), async request => {
+    for (const path of ["estimate/50123", "estimate_resend/50124"]) {
+      const result = await request(`/outgoing-email/${path}/preview`);
+      assert.equal(result.status, 200);
+      assert.doesNotMatch(JSON.stringify(result.body.attachments), /platform-documents|Understanding Your Invoice/);
+    }
+  });
+  await withServer(harness({ attachInvoiceGuide: true, currentGuide: guide, role: "company_admin" }), async request => {
+    for (const path of ["wet_check_report/66", "irrigation_profile_report/42"]) {
+      const result = await request(`/outgoing-email/${path}/preview`);
+      assert.equal(result.status, 200);
+      assert.doesNotMatch(JSON.stringify(result.body.attachments), /platform-documents|Understanding Your Invoice/);
+    }
   });
 });
 

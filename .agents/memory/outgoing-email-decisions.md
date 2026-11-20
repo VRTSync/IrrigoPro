@@ -56,3 +56,9 @@ The Email Template family uses one shared, email-safe layout with company brandi
 **Why:** The user locked these design decisions on 2026-11-20 so customer emails have a consistent company identity and the office can audit which guide was sent.
 
 **How to apply:** Use the assigned slice and its embedded Design Context as the source of truth. Keep the invoice guide, wording overrides and other email migrations in their ordered slices. Send live tests only from development to an approved test inbox. Before any Publish, list the database changes and wait for approval.
+
+An invoice guide replacement is a version change even if its filename and copy are unchanged.
+
+**Why:** A content fingerprint can reject a stale review but cannot explain which component changed. A filename is editable metadata, not the identity of the reviewed file.
+
+**How to apply:** When a stale-review message must name the changed component, carry its identity in the authenticated review claims. Bind each batch review to one guide snapshot and check the current version again before delivering; never substitute the latest guide for the one that was reviewed.

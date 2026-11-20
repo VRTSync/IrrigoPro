@@ -62,10 +62,19 @@ export type InvoiceBatchPreviewFrom = {
   email: string;
 };
 
+/**
+ * @nullable
+ */
+export type InvoiceBatchPreviewGuide = {
+  filename: string;
+} | null;
+
 export interface InvoiceBatchPreview {
   from: InvoiceBatchPreviewFrom;
   /** @nullable */
   replyTo: string | null;
+  /** @nullable */
+  guide: InvoiceBatchPreviewGuide;
   willSend: InvoiceBatchSendRow[];
   willSkip: InvoiceBatchSkipRow[];
   notFound: number[];
@@ -75,6 +84,26 @@ export interface InvoiceBatchPreview {
 
 export interface InvoiceBatchStarted {
   batchId: number;
+}
+
+export interface InvoiceGuideUpload {
+  /** @minLength 1 */
+  filename: string;
+  contentBase64: string;
+}
+
+export interface InvoiceGuideVersion {
+  id: number;
+  filename: string;
+  byteSize: number;
+  pageCount: number;
+  uploadedAt: string;
+  uploaderName: string;
+}
+
+export interface InvoiceGuideVersions {
+  current: InvoiceGuideVersion | null;
+  history: InvoiceGuideVersion[];
 }
 
 export type InvoiceBatchSummaryStatus =
@@ -200,6 +229,7 @@ export type OutgoingEmailPreviewOptionDefsItem = {
 export type OutgoingEmailPreviewAttachmentsItem = {
   filename: string;
   viewUrl: string;
+  title?: string;
 };
 
 export interface OutgoingEmailPreview {

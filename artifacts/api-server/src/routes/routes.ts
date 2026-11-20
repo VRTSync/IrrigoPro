@@ -372,6 +372,7 @@ import {
 } from "./invoice-reminder-routes";
 import { registerInvoiceReminderBatchRoutes } from "./invoice-reminder-batch-routes";
 import { registerOutgoingEmailRoutes } from "./outgoing-email-routes";
+import { registerPlatformDocumentRoutes } from "./platform-document-routes";
 import { createOutgoingEmailHandlers } from "../outgoing-email/registry";
 import { registerInvoiceBatchSendRoutes } from "./invoice-batch-send-routes";
 import { isWetCheckManagerRole, requireWetCheckReportSend } from "./report-email-guards";
@@ -7448,6 +7449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     _core: reminderCore,
   });
   registerInvoiceBatchSendRoutes(app, { requireAuthentication, requireInvoiceSend });
+  registerPlatformDocumentRoutes(app, { requireAuthentication });
   registerOutgoingEmailRoutes(app, {
     requireAuthentication,
     handlers: createOutgoingEmailHandlers(reminderCore, recordLifecycleAudit),

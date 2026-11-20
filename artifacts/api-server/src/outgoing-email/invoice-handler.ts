@@ -1,23 +1,32 @@
 import { randomUUID } from "node:crypto";
-import type { Company, Customer, Invoice } from "@workspace/db";
+import type { Company, Customer, Invoice, PlatformDocument } from "@workspace/db";
 import { computeEffectiveDueDate, resolveBalanceDue } from "@workspace/shared";
 import { EmailService } from "../email-service";
 import { buildInvoicePdfFilename, invoiceBillingPeriod, InvoicePdfService } from "../invoice-pdf-service";
 import { senderFromCompany } from "../lib/company-sender";
 import { logger } from "../lib/logger";
+import { getCurrentInvoiceGuide, getInvoiceGuide, readPlatformDocument } from "../lib/platform-documents";
 import { ObjectStorageService } from "../objectStorage";
 import { requireInvoiceSend } from "../routes/role-guards";
 import { storage } from "../storage";
 import { formatPhone, renderEmailLayout } from "./layout";
-import { INVOICE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "./types";
+import { INVOICE_CHANGED, INVOICE_GUIDE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "./types";
 import { fillWording, getEmailWording } from "./wording";
 
-export interface InvoiceEmailEntity { invoice: Invoice; customer: Customer; company: Company }
+export interface InvoiceEmailEntity {
+  invoice: Invoice;
+  customer: Customer;
+  company: Company;
+  // Batch review reads the current version once so every preview shares it.
+  guideSnapshot?: PlatformDocument | null;
+}
+const defaultGuides = { getCurrentInvoiceGuide, getInvoiceGuide, readPlatformDocument };
 interface InvoiceEmailDeps {
   storage: Pick<typeof storage, "getInvoiceById" | "getCustomerById" | "getCompanyProfile" | "getLatestInvoiceSentCopy" | "createInvoicePdf" | "stampInvoiceSent">;
   pdf: Pick<InvoicePdfService, "getDocumentVersion" | "generatePdfBuffer">;
   objects: Pick<ObjectStorageService, "writeBufferToFirstSearchPath" | "deleteFromFirstSearchPath">;
   mailer: typeof EmailService.sendInvoiceDetailPdf;
+  guides?: typeof defaultGuides;
 }
 
 const defaultDeps: InvoiceEmailDeps = {
@@ -40,6 +49,7 @@ function billingDateRange(invoice: Invoice): string {
 }
 
 export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) {
+  const guides = deps.guides ?? defaultGuides;
   return {
     kind: "invoice",
     capabilities: [requireInvoiceSend],
@@ -54,7 +64,7 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
       if (!company) return null;
       return { invoice, customer, company };
     },
-    async draft({ invoice, customer, company }, input) {
+    async draft({ invoice, customer, company, guideSnapshot }, input) {
       const sender = senderFromCompany(company);
       const to = input.to || customer.email?.trim() || invoice.customerEmail?.trim() || "";
       const note = input.note ?? "";
@@ -70,11 +80,15 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
         dueDate: Number.isFinite(dueDate.getTime()) ? shortDate.format(dueDate) : "",
       };
       const filename = buildInvoicePdfFilename(invoice, customer, invoice.id);
-      const [latest, versionStamp, wording] = await Promise.all([
+      const [latest, versionStamp, wording, guide] = await Promise.all([
         deps.storage.getLatestInvoiceSentCopy(invoice.id, invoice.companyId),
         deps.pdf.getDocumentVersion(invoice.id, invoice.companyId),
         getEmailWording(invoice.companyId, "invoice"),
+        company.attachInvoiceGuide
+          ? guideSnapshot === undefined ? guides.getCurrentInvoiceGuide() : guideSnapshot
+          : undefined,
       ]);
+      const guideTitle = "Guide: how to read your invoice";
       const subject = input.subject || fillWording(wording.subject, values);
       const warnings: string[] = [];
       if (invoice.qbVoidDetectedAt) warnings.push("QuickBooks shows this invoice as voided.");
@@ -85,6 +99,7 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
         warnings.push(`Your sending address isn't authenticated yet, so this goes from ${sender.from.email} on your behalf.`);
       }
       if (!to) warnings.push(noRecipient);
+      if (company.attachInvoiceGuide && !guide) warnings.push("No invoice guide is uploaded yet, so this email goes without it.");
       return {
         sender, to, cc: input.cc ?? [], bcc: input.bcc ?? [], subject, note,
         ...renderEmailLayout({
@@ -102,9 +117,16 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
             ...(values.dueDate ? [{ label: "Due", value: values.dueDate }] : []),
           ],
           total: { label: "Amount due", value: values.balanceDue },
-          attachments: [{ title: "Billing detail report", filename }],
+          attachments: [
+            { title: "Billing detail report", filename },
+            ...(guide ? [{ title: guideTitle, filename: guide.filename }] : []),
+          ],
         }),
-        attachments: [{ filename, viewUrl: `/api/invoices/${invoice.id}/pdf/download` }],
+        attachments: [
+          { filename, viewUrl: `/api/invoices/${invoice.id}/pdf/download` },
+          ...(guide ? [{ title: guideTitle, filename: guide.filename, viewUrl: `/api/platform-documents/${guide.id}/file` }] : []),
+        ],
+        guideDocumentId: guide?.id,
         warnings, versionStamp, options: {}, variant: null,
       };
     },
@@ -145,6 +167,24 @@ export async function sendInvoiceEmail(
     throw new OutgoingEmailError(409, INVOICE_CHANGED);
   }
 
+  let extraAttachments: { filename: string; content: Buffer }[] | undefined;
+  if (draft.guideDocumentId != null) {
+    const guides = deps.guides ?? defaultGuides;
+    const guide = await guides.getInvoiceGuide(draft.guideDocumentId);
+    if (!guide?.isCurrent) throw new OutgoingEmailError(409, INVOICE_GUIDE_CHANGED);
+    let content: Buffer;
+    try {
+      content = await guides.readPlatformDocument(guide);
+    } catch (err) {
+      logger.error({ err, guideDocumentId: guide.id }, "Could not read invoice guide before sending");
+      throw new OutgoingEmailError(500, "Could not load the invoice guide. Nothing was sent.");
+    }
+    if ((await guides.getCurrentInvoiceGuide())?.id !== guide.id) {
+      throw new OutgoingEmailError(409, INVOICE_GUIDE_CHANGED);
+    }
+    extraAttachments = [{ filename: guide.filename, content }];
+  }
+
   const buf = result.pdfBuffer;
   const key = `invoice-sent-copies/${invoice.companyId}/${invoice.id}/${randomUUID()}.pdf`;
   const filename = draft.attachments[0].filename;
@@ -158,7 +198,7 @@ export async function sendInvoiceEmail(
   const { to, cc, bcc, subject, html, text, sender } = draft;
   try {
     const mail = await deps.mailer(to, customer.irrigoName ?? customer.name, invoice.invoiceNumber, buf, {
-      sender, filename, cc, bcc, subject, html, text,
+      sender, filename, cc, bcc, subject, html, text, ...(extraAttachments ? { extraAttachments } : {}),
     });
     if (!mail.success) throw new Error(mail.error || "Email provider rejected the message");
   } catch (err) {
@@ -175,6 +215,7 @@ export async function sendInvoiceEmail(
     invoiceId: invoice.id, customerId: customer.id, companyId: invoice.companyId,
     pdfUrl: key, filename, status: "sent", sentAt, sentToEmail: to,
     ccEmails: cc, bccEmails: bcc, subject, sentByUserId: userId, byteSize: buf.length,
+    guideDocumentId: draft.guideDocumentId ?? null,
   });
   if (!current.sentAt) await deps.storage.stampInvoiceSent(invoice.id, invoice.companyId, sentAt);
   return { sentTo: to, sentAt };

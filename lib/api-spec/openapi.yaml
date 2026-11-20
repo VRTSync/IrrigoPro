@@ -11,6 +11,50 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /admin/platform-documents/invoice-guide:
+    get:
+      operationId: listInvoiceGuideVersions
+      responses:
+        "200":
+          description: Current and earlier guide versions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvoiceGuideVersions" }
+        "403":
+          description: Super admin access required
+    post:
+      operationId: uploadInvoiceGuideVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceGuideUpload" }
+      responses:
+        "200":
+          description: Newly uploaded current guide
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvoiceGuideVersion" }
+        "403":
+          description: Super admin access required
+        "422":
+          description: Invalid PDF
+  /platform-documents/{documentId}/file:
+    get:
+      operationId: viewPlatformDocument
+      parameters:
+        - name: documentId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 2147483647 }
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "404":
+          description: Guide not found or not accessible
   /outgoing-email/invoice/batch/preview:
     post:
       operationId: previewInvoiceBatch
@@ -648,7 +692,7 @@ components:
             message: { type: string }
     InvoiceBatchPreview:
       type: object
-      required: [from, replyTo, willSend, willSkip, notFound, confirmationToken, expiresAt]
+      required: [from, replyTo, guide, willSend, willSkip, notFound, confirmationToken, expiresAt]
       properties:
         from:
           type: object
@@ -657,6 +701,11 @@ components:
             name: { type: string }
             email: { type: string }
         replyTo: { type: [string, "null"] }
+        guide:
+          type: [object, "null"]
+          required: [filename]
+          properties:
+            filename: { type: string }
         willSend: { type: array, items: { $ref: "#/components/schemas/InvoiceBatchSendRow" } }
         willSkip: { type: array, items: { $ref: "#/components/schemas/InvoiceBatchSkipRow" } }
         notFound: { type: array, items: { type: integer } }
@@ -667,6 +716,33 @@ components:
       required: [batchId]
       properties:
         batchId: { type: integer }
+    InvoiceGuideUpload:
+      type: object
+      required: [filename, contentBase64]
+      properties:
+        filename: { type: string, minLength: 1 }
+        contentBase64: { type: string }
+    InvoiceGuideVersion:
+      type: object
+      required: [id, filename, byteSize, pageCount, uploadedAt, uploaderName]
+      properties:
+        id: { type: integer }
+        filename: { type: string }
+        byteSize: { type: integer }
+        pageCount: { type: integer }
+        uploadedAt: { type: string, format: date-time }
+        uploaderName: { type: string }
+    InvoiceGuideVersions:
+      type: object
+      required: [current, history]
+      properties:
+        current:
+          anyOf:
+            - $ref: "#/components/schemas/InvoiceGuideVersion"
+            - type: "null"
+        history:
+          type: array
+          items: { $ref: "#/components/schemas/InvoiceGuideVersion" }
     InvoiceBatchSummary:
       type: object
       required: [id, companyId, status, total, queued, sending, sent, skipped, failed]
@@ -772,6 +848,7 @@ components:
             properties:
               filename: { type: string }
               viewUrl: { type: string }
+              title: { type: string }
         warnings: { type: array, items: { type: string } }
         confirmationToken: { type: string }
         expiresAt: { type: string, format: date-time }

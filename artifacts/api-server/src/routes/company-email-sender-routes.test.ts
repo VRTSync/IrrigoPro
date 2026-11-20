@@ -49,14 +49,27 @@ beforeEach(() => {
     emailSendingDomain: id === 1 ? "company1.test" : null,
     emailFromName: null, emailFromAddress: null, emailReplyTo: null,
     emailDomainVerifiedAt: null, emailDomainCheckedAt: null, emailDomainCheckError: null,
+    attachInvoiceGuide: true,
   } as Company);
 });
 
 describe("outgoing email tenant and role boundaries", () => {
   it("does not permit company A to change or check B", async () => {
-    await request(app()).put("/api/company/2/email-sender").send({}).expect(403);
+    await request(app()).put("/api/company/2/email-sender").send({
+      fromName: "", fromLocalPart: "", replyTo: "", attachInvoiceGuide: false,
+    }).expect(403);
     await request(app()).post("/api/company/2/email-sender/check").expect(403);
     assert.equal(writes.length, 0); assert.equal(checks.length, 0);
+  });
+  it("persists the opt-out only for the company's admin and does not reset it when omitted", async () => {
+    const settings = { fromName: "", fromLocalPart: "", replyTo: "" };
+    const off = { ...settings, attachInvoiceGuide: false };
+    await request(app("super_admin", null)).put("/api/company/1/email-sender").send(off).expect(403);
+    await request(app("billing_manager")).put("/api/company/1/email-sender").send(off).expect(403);
+    await request(app()).get("/api/company/email-sender").expect(200).expect(res => assert.equal(res.body.attachInvoiceGuide, true));
+    await request(app()).put("/api/company/1/email-sender").send(off).expect(200).expect(res => assert.equal(res.body.attachInvoiceGuide, false));
+    await request(app()).put("/api/company/1/email-sender").send(settings).expect(200).expect(res => assert.equal(res.body.attachInvoiceGuide, false));
+    assert.equal(rows.get(2)?.attachInvoiceGuide, true);
   });
   it("lets super admins check and assign domains, but reserves sender edits for own company admins", async () => {
     const admin = app("super_admin", null);
@@ -125,6 +138,7 @@ describe("outgoing email tenant and role boundaries", () => {
     const protectedValues = {
       id: 5, createdAt: "yesterday", updatedAt: "today",
       customerRecordsLocked: true, customerRecordsSystemName: "evil",
+      attachInvoiceGuide: false,
       emailSendingDomain: "evil.test", emailDomainVerifiedAt: "today", emailDomainCheckedAt: "today",
       emailDomainCheckError: "", emailFromName: "evil", emailFromAddress: "evil@evil.test", emailReplyTo: "evil@evil.test",
     };

@@ -112,7 +112,7 @@
     },
     {
       "name": "invoice-email-review",
-      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/outgoing-email-routes.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts src/routes/invoice-batch-send-routes.test.ts"
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/outgoing-email-routes.test.ts src/lib/migrations/delete-on-demand-invoice-pdf-rows.test.ts src/routes/invoice-pdf-merge-history.test.ts src/routes/invoice-batch-send-routes.test.ts src/routes/platform-document-routes.test.ts"
     },
     {
       "name": "company-email-sender",

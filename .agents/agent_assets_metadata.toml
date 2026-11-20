@@ -1327,3 +1327,59 @@ mtime_ms = 1795201320383
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/10f6e175-f46c-401f-9fb5-9be96eca7de8/f3e8472c-14b9-4697-a15a-e1fab88d526e"
 storage_version_token = "1795201343299409"
 content_type = "image/png"
+
+[[outputs]]
+id = "OlRqRsLCdkFZnsMNerwo9"
+uri = "file://generated-artifacts/invoice-guide/documents-375.png"
+type = "image"
+title = "Documents tab — 375 px"
+description = "Signed-in development preview with sample guide metadata. No horizontal scrolling."
+logical_id = "94626374-7be4-41f6-8a15-f3a50040a5ed"
+content_hash = "sha256:d110e4f7e608a8217bd6c58dafb560bb45de7b729f60418be76fe46c01cdfa69"
+size = 81201
+mtime_ms = 1795206340302
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/94626374-7be4-41f6-8a15-f3a50040a5ed/ad9692c0-3bff-4777-9cc8-eb2600cc9cc2"
+storage_version_token = "1795206519520828"
+content_type = "image/png"
+
+[[outputs]]
+id = "teTemAK_KOaqYG9hn3OzO"
+uri = "file://generated-artifacts/invoice-guide/documents-1280.png"
+type = "image"
+title = "Documents tab — 1280 px"
+description = "Signed-in development preview with sample current and earlier guide versions."
+logical_id = "a8f2e315-ff12-4d9e-a1fc-ace5f839cca1"
+content_hash = "sha256:544fb264b8eb185164cb4ab1f466599a24e5e281e46bf637dcb3530e3d222769"
+size = 144308
+mtime_ms = 1795206340438
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/a8f2e315-ff12-4d9e-a1fc-ace5f839cca1/76d64a78-6a41-4a41-b6f5-11071ed56d24"
+storage_version_token = "1795206520211748"
+content_type = "image/png"
+
+[[outputs]]
+id = "FgU7c9J__Qwv9YptPNnGJ"
+uri = "file://generated-artifacts/invoice-guide/documents-live-375.png"
+type = "image"
+title = "Uploaded guide in App Health — 375 px"
+description = "Signed-in development preview showing the approved five-page PDF with no horizontal scrolling."
+logical_id = "e1dfd618-f5f6-44de-8023-53c89d78f9a2"
+content_hash = "sha256:b41a8be711b5c58390b328ef506e96837ce578627d595fda806bee7f035179fe"
+size = 87359
+mtime_ms = 1795209365406
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/e1dfd618-f5f6-44de-8023-53c89d78f9a2/950a751e-ba0f-4a5a-aa13-4e151c9cd15d"
+storage_version_token = "1795209399176078"
+content_type = "image/png"
+
+[[outputs]]
+id = "X30Vl7KuBiU1Q4_l748mM"
+uri = "file://generated-artifacts/invoice-guide/documents-live-1280.png"
+type = "image"
+title = "Uploaded guide in App Health — 1280 px"
+description = "Signed-in development preview showing the approved five-page PDF."
+logical_id = "9b867e23-def9-431b-ab4a-033ba3dc9db4"
+content_hash = "sha256:f4bc9b20210f0b01d3a36c87c125786dd5c7878e72da2f0347f46c1946ca6ac5"
+size = 135917
+mtime_ms = 1795209365578
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9b867e23-def9-431b-ab4a-033ba3dc9db4/b258c875-5268-48c0-b661-659a5ceedfe3"
+storage_version_token = "1795209399888622"
+content_type = "image/png"

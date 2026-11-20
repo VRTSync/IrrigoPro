@@ -39,7 +39,7 @@ function EmailPreview({ row, note, review }: { row: InvoiceBatchSendRow; note: s
       <div>
         <p><strong>To:</strong> {email.to}</p>
         <p><strong>Subject:</strong> {email.subject}</p>
-        {email.attachments.map(({ filename }) => <p key={filename}><strong>Attachment:</strong> {filename}</p>)}
+        {email.attachments.map(({ viewUrl, filename }) => <p key={viewUrl}><strong>Attachment:</strong> {filename}</p>)}
       </div>
       <iframe title={`Email for ${row.invoiceNumber}`} sandbox="" srcDoc={email.html} className="h-[50vh] w-full rounded border bg-white" />
     </div>
@@ -190,6 +190,11 @@ export function BatchInvoiceSendDialog({
               ? `From ${review.from.name} <${review.from.email}> · Replies go to ${review.replyTo ?? review.from.email}`
               : reviewing ? "Review the selected invoices before sending." : "You can close this window without stopping the batch."}
           </DialogDescription>
+          {reviewing && review?.guide && (
+            <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]" data-testid="text-batch-invoice-guide">
+              Each email also includes {review.guide.filename}.
+            </p>
+          )}
         </DialogHeader>
         {reviewing ? (
           <>

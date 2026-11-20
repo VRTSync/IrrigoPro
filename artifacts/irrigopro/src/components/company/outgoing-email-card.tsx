@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export interface CompanySender {
   from: { email: string; name: string };
@@ -22,6 +23,7 @@ export interface EmailSenderResponse {
   fromName: string | null;
   fromAddress: string | null;
   replyTo: string | null;
+  attachInvoiceGuide: boolean;
   effective: CompanySender;
 }
 
@@ -93,12 +95,14 @@ export function OutgoingEmailCard({ companyId, canEdit }: { companyId: number; c
   const [fromName, setFromName] = useState("");
   const [localPart, setLocalPart] = useState("");
   const [replyTo, setReplyTo] = useState("");
+  const [attachInvoiceGuide, setAttachInvoiceGuide] = useState(true);
 
   useEffect(() => {
     if (data) {
       setFromName(data.fromName ?? "");
       setLocalPart(data.fromAddress ? data.fromAddress.split("@")[0] : "");
       setReplyTo(data.replyTo ?? "");
+      setAttachInvoiceGuide(data.attachInvoiceGuide);
     }
   }, [data]);
 
@@ -107,6 +111,7 @@ export function OutgoingEmailCard({ companyId, canEdit }: { companyId: number; c
       fromName: fromName.trim(),
       fromLocalPart: localPart.trim(),
       replyTo: replyTo.trim(),
+      attachInvoiceGuide,
     }) as Promise<EmailSenderResponse>,
     onSuccess: (res) => {
       queryClient.setQueryData(emailSenderQueryKey(), res);
@@ -118,7 +123,8 @@ export function OutgoingEmailCard({ companyId, canEdit }: { companyId: number; c
   const check = useCheckEmailDomain(companyId, () => query.refetch());
 
   const localValid = localPart.trim() === "" || /^[a-z0-9._%+-]{1,64}$/i.test(localPart.trim());
-  const changed = !!data && (fromName !== (data.fromName ?? "") || localPart !== savedLocal || replyTo !== (data.replyTo ?? ""));
+  const changed = !!data && (fromName !== (data.fromName ?? "") || localPart !== savedLocal ||
+    replyTo !== (data.replyTo ?? "") || attachInvoiceGuide !== data.attachInvoiceGuide);
   const busy = save.isPending || check.isPending;
   const readOnly = !canEdit || busy;
   const fromPreview = domain && localPart.trim() ? `${localPart.trim().toLowerCase()}@${domain}` : data?.effective.from.email ?? "";
@@ -190,6 +196,18 @@ export function OutgoingEmailCard({ companyId, canEdit }: { companyId: number; c
               {!data.effective.usingCompanyAddress && data.fromAddress && (
                 <> Your address isn't authenticated yet, so mail is sent from {data.effective.from.email} on your behalf.</>
               )}
+            </div>
+
+            <div className="flex items-start gap-2">
+              <Checkbox id="attach-invoice-guide" className="mt-0.5" checked={attachInvoiceGuide} disabled={readOnly}
+                onCheckedChange={(checked) => setAttachInvoiceGuide(checked === true)}
+                aria-describedby="attach-invoice-guide-help" data-testid="checkbox-attach-invoice-guide" />
+              <div className="space-y-1">
+                <Label htmlFor="attach-invoice-guide">Attach 'Understanding Your Invoice' to invoice emails</Label>
+                <p id="attach-invoice-guide-help" className="text-sm text-muted-foreground">
+                  IrrigoPro's guide to reading your invoice. Sent only with invoice emails, never with reminders.
+                </p>
+              </div>
             </div>
 
             {canEdit && (

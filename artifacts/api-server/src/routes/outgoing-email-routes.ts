@@ -3,7 +3,7 @@ import { Router, type Express, type Request, type RequestHandler } from "express
 import { PreviewOutgoingEmailResponse, SendOutgoingEmailResponse } from "@workspace/api-zod";
 import { createSingleUseConfirmation } from "../lib/single-use-confirmation";
 import { logger } from "../lib/logger";
-import { draftInputSchema, draftRefusalSchema, INVOICE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "../outgoing-email/types";
+import { draftInputSchema, draftRefusalSchema, INVOICE_CHANGED, INVOICE_GUIDE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "../outgoing-email/types";
 
 const messages = {
   required: "Review the email before sending. Nothing was sent.",
@@ -62,14 +62,15 @@ export function registerOutgoingEmailRoutes(app: Express, {
           req.authenticatedUserId, req.authenticatedUserRole === "super_admin" ? "global" : req.authenticatedUserCompanyId,
           handler.kind, id,
         ];
-        const bound = (v: string, c: string) => JSON.stringify([...claims, v, c]);
+        const bound = (v: string, c: string, guide?: string) =>
+          JSON.stringify(guide === undefined ? [...claims, v, c] : [...claims, v, c, guide]);
         const now = new Date();
         const supplied: unknown = req.body?.confirmationToken;
-        const review = typeof supplied === "string" ? /^([\w-]{43})\.([\w-]{43})\.(\d+\.[\w-]+\.[\w-]+)$/.exec(supplied) : null;
+        const review = typeof supplied === "string" ? /^([\w-]{43})\.([\w-]{43})\.(?:(\d{1,10})\.)?(\d+\.[\w-]+\.[\w-]+)$/.exec(supplied) : null;
         // Authenticate the original review first. This also detects replay if
         // a successful send has already made this document ineligible.
         if (operation !== "preview") {
-          const check = confirmation.verify(review?.[3] ?? supplied, bound(review?.[1] ?? "", review?.[2] ?? ""), now, { consume: false });
+          const check = confirmation.verify(review?.[4] ?? supplied, bound(review?.[1] ?? "", review?.[2] ?? "", review?.[3]), now, { consume: false });
           if (!check.ok) {
             res.status(check.status).json({ reason: check.reason, message: check.message });
             return;
@@ -90,13 +91,16 @@ export function registerOutgoingEmailRoutes(app: Express, {
         const version = digest(draft.versionStamp);
         const content = fingerprint(draft);
         if (operation === "preview") {
-          const { token, expiresAt } = confirmation.issue(bound(version, content), now);
-          const { sender, versionStamp: _, attachmentStamp: _attachmentStamp, ...visibleDraft } = draft;
+          // Keep the guide ID in the signed review so a replacement can be
+          // distinguished from other changes without revealing draft content.
+          const guide = draft.guideDocumentId?.toString();
+          const { token, expiresAt } = confirmation.issue(bound(version, content, guide), now);
+          const { sender, versionStamp: _, attachmentStamp: _attachmentStamp, guideDocumentId: _guide, ...visibleDraft } = draft;
           res.json(PreviewOutgoingEmailResponse.parse({
             ...visibleDraft, kind: handler.kind, id, from: sender.from,
             replyTo: sender.replyTo ?? null, usingCompanyAddress: sender.usingCompanyAddress,
             optionDefs: handler.options ?? [], variantDefs: handler.variants ?? [],
-            confirmationToken: `${version}.${content}.${token}`, expiresAt,
+            confirmationToken: [version, content, ...(guide ? [guide] : []), token].join("."), expiresAt,
           }));
           return;
         }
@@ -106,9 +110,12 @@ export function registerOutgoingEmailRoutes(app: Express, {
           return;
         }
         if (!review || review[1] !== version || (operation === "send" && review[2] !== content)) {
+          const replacedGuide = handler.kind === "invoice" && review?.[3] && draft.guideDocumentId != null &&
+            review[3] !== String(draft.guideDocumentId);
           res.status(409).json({
             reason: "confirmation_mismatch",
-            message: review && review[1] !== version && handler.kind === "invoice" ? INVOICE_CHANGED : messages.mismatch,
+            message: replacedGuide ? INVOICE_GUIDE_CHANGED
+              : review && review[1] !== version && handler.kind === "invoice" ? INVOICE_CHANGED : messages.mismatch,
           });
           return;
         }
@@ -120,7 +127,7 @@ export function registerOutgoingEmailRoutes(app: Express, {
           return;
         }
         // The draft may await storage, so check again when consuming the review.
-        const consumed = confirmation.verify(review[3], bound(version, content), new Date());
+        const consumed = confirmation.verify(review[4], bound(version, content, review[3]), new Date());
         if (!consumed.ok) {
           res.status(consumed.status).json({ reason: consumed.reason, message: consumed.message });
           return;

@@ -7,6 +7,53 @@
  */
 import * as zod from "zod";
 
+export const ListInvoiceGuideVersionsResponse = zod.object({
+  current: zod.union([
+    zod.object({
+      id: zod.number(),
+      filename: zod.string(),
+      byteSize: zod.number(),
+      pageCount: zod.number(),
+      uploadedAt: zod.coerce.date(),
+      uploaderName: zod.string(),
+    }),
+    zod.null(),
+  ]),
+  history: zod.array(
+    zod.object({
+      id: zod.number(),
+      filename: zod.string(),
+      byteSize: zod.number(),
+      pageCount: zod.number(),
+      uploadedAt: zod.coerce.date(),
+      uploaderName: zod.string(),
+    }),
+  ),
+});
+
+export const UploadInvoiceGuideVersionBody = zod.object({
+  filename: zod.string().min(1),
+  contentBase64: zod.string(),
+});
+
+export const UploadInvoiceGuideVersionResponse = zod.object({
+  id: zod.number(),
+  filename: zod.string(),
+  byteSize: zod.number(),
+  pageCount: zod.number(),
+  uploadedAt: zod.coerce.date(),
+  uploaderName: zod.string(),
+});
+
+export const viewPlatformDocumentPathDocumentIdMax = 2147483647;
+
+export const ViewPlatformDocumentParams = zod.object({
+  documentId: zod.coerce
+    .number()
+    .min(1)
+    .max(viewPlatformDocumentPathDocumentIdMax),
+});
+
 export const previewInvoiceBatchBodyInvoiceIdsItemMax = 2147483647;
 
 export const previewInvoiceBatchBodyInvoiceIdsMax = 200;
@@ -28,6 +75,11 @@ export const PreviewInvoiceBatchResponse = zod.object({
     email: zod.string(),
   }),
   replyTo: zod.string().nullable(),
+  guide: zod
+    .object({
+      filename: zod.string(),
+    })
+    .nullable(),
   willSend: zod.array(
     zod
       .object({
@@ -261,6 +313,7 @@ export const PreviewOutgoingEmailResponse = zod.object({
     zod.object({
       filename: zod.string(),
       viewUrl: zod.string(),
+      title: zod.string().optional(),
     }),
   ),
   warnings: zod.array(zod.string()),

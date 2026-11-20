@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { InvoiceBatchPreviewFrom } from "./invoiceBatchPreviewFrom";
+import type { InvoiceBatchPreviewGuide } from "./invoiceBatchPreviewGuide";
 import type { InvoiceBatchSendRow } from "./invoiceBatchSendRow";
 import type { InvoiceBatchSkipRow } from "./invoiceBatchSkipRow";
 
@@ -13,6 +14,8 @@ export interface InvoiceBatchPreview {
   from: InvoiceBatchPreviewFrom;
   /** @nullable */
   replyTo: string | null;
+  /** @nullable */
+  guide: InvoiceBatchPreviewGuide;
   willSend: InvoiceBatchSendRow[];
   willSkip: InvoiceBatchSkipRow[];
   notFound: number[];

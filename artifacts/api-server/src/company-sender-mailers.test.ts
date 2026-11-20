@@ -36,6 +36,20 @@ const report = {
   pdfBuffer: Buffer.from("test-pdf"),
 };
 describe("customer-facing mailers use the resolved identity", () => {
+  it("passes the billing detail first and the guide second, both as PDFs", async () => {
+    sent.length = 0;
+    const detail = Buffer.from("invoice PDF");
+    const guide = Buffer.from("guide PDF");
+    const result = await EmailService.sendInvoiceDetailPdf("customer@example.com", "Customer", "IR-1008", detail, {
+      sender: companySender, subject: "Invoice", html: "<p>Invoice</p>", text: "Invoice",
+      filename: "Billing detail.pdf", extraAttachments: [{ filename: "Understanding Your Invoice.pdf", content: guide }],
+    });
+    assert.equal(result.success, true);
+    assert.deepEqual(sent[0].attachments, [
+      { filename: "Billing detail.pdf", content: detail.toString("base64"), type: "application/pdf", disposition: "attachment" },
+      { filename: "Understanding Your Invoice.pdf", content: guide.toString("base64"), type: "application/pdf", disposition: "attachment" },
+    ]);
+  });
   it("sends both reports with the exact reviewed content and copied recipients", async () => {
     sent.length = 0;
     const reviewed = { subject: "Reviewed subject", html: "<p>Reviewed report</p>", text: "Reviewed report", filename: "Reviewed.pdf" };

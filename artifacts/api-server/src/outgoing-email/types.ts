@@ -12,7 +12,7 @@ export interface DraftInput {
   options?: Record<string, boolean>;
   variant?: string;
 }
-export interface DraftAttachment { filename: string; viewUrl: string }
+export interface DraftAttachment { filename: string; viewUrl: string; title?: string }
 export interface BuiltDraft {
   sender: CompanySender;
   to: string;
@@ -26,6 +26,7 @@ export interface BuiltDraft {
   warnings: string[];
   versionStamp: string;
   attachmentStamp?: string;
+  guideDocumentId?: number;
   options: Record<string, boolean>;
   variant: string | null;
 }
@@ -59,6 +60,7 @@ export const draftRefusalSchema = z.object({
 });
 
 export const INVOICE_CHANGED = "This invoice changed after you reviewed it. Review it again before sending.";
+export const INVOICE_GUIDE_CHANGED = "The invoice guide was replaced after you reviewed this email. Review it again before sending.";
 
 export class OutgoingEmailError extends Error {
   constructor(

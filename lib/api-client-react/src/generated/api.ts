@@ -49,6 +49,9 @@ import type {
   InvoiceBatchSelection,
   InvoiceBatchStarted,
   InvoiceBatchSummary,
+  InvoiceGuideUpload,
+  InvoiceGuideVersion,
+  InvoiceGuideVersions,
   ListMarkupSchedulesParams,
   MarkupActionResult,
   MarkupOverrideInput,
@@ -84,6 +87,238 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getListInvoiceGuideVersionsUrl = () => {
+  return `/api/admin/platform-documents/invoice-guide`;
+};
+
+export const listInvoiceGuideVersions = async (
+  options?: RequestInit,
+): Promise<InvoiceGuideVersions> => {
+  return customFetch<InvoiceGuideVersions>(getListInvoiceGuideVersionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListInvoiceGuideVersionsQueryKey = () => {
+  return [`/api/admin/platform-documents/invoice-guide`] as const;
+};
+
+export const getListInvoiceGuideVersionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listInvoiceGuideVersions>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listInvoiceGuideVersions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListInvoiceGuideVersionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listInvoiceGuideVersions>>
+  > = ({ signal }) => listInvoiceGuideVersions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listInvoiceGuideVersions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListInvoiceGuideVersionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listInvoiceGuideVersions>>
+>;
+export type ListInvoiceGuideVersionsQueryError = ErrorType<void>;
+
+export function useListInvoiceGuideVersions<
+  TData = Awaited<ReturnType<typeof listInvoiceGuideVersions>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listInvoiceGuideVersions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListInvoiceGuideVersionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getUploadInvoiceGuideVersionUrl = () => {
+  return `/api/admin/platform-documents/invoice-guide`;
+};
+
+export const uploadInvoiceGuideVersion = async (
+  invoiceGuideUpload: InvoiceGuideUpload,
+  options?: RequestInit,
+): Promise<InvoiceGuideVersion> => {
+  return customFetch<InvoiceGuideVersion>(getUploadInvoiceGuideVersionUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(invoiceGuideUpload),
+  });
+};
+
+export const getUploadInvoiceGuideVersionMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadInvoiceGuideVersion>>,
+    TError,
+    { data: BodyType<InvoiceGuideUpload> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadInvoiceGuideVersion>>,
+  TError,
+  { data: BodyType<InvoiceGuideUpload> },
+  TContext
+> => {
+  const mutationKey = ["uploadInvoiceGuideVersion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadInvoiceGuideVersion>>,
+    { data: BodyType<InvoiceGuideUpload> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return uploadInvoiceGuideVersion(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadInvoiceGuideVersionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadInvoiceGuideVersion>>
+>;
+export type UploadInvoiceGuideVersionMutationBody =
+  BodyType<InvoiceGuideUpload>;
+export type UploadInvoiceGuideVersionMutationError = ErrorType<void>;
+
+export const useUploadInvoiceGuideVersion = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadInvoiceGuideVersion>>,
+    TError,
+    { data: BodyType<InvoiceGuideUpload> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof uploadInvoiceGuideVersion>>,
+  TError,
+  { data: BodyType<InvoiceGuideUpload> },
+  TContext
+> => {
+  return useMutation(getUploadInvoiceGuideVersionMutationOptions(options));
+};
+
+export const getViewPlatformDocumentUrl = (documentId: number) => {
+  return `/api/platform-documents/${documentId}/file`;
+};
+
+export const viewPlatformDocument = async (
+  documentId: number,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getViewPlatformDocumentUrl(documentId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getViewPlatformDocumentQueryKey = (documentId: number) => {
+  return [`/api/platform-documents/${documentId}/file`] as const;
+};
+
+export const getViewPlatformDocumentQueryOptions = <
+  TData = Awaited<ReturnType<typeof viewPlatformDocument>>,
+  TError = ErrorType<void>,
+>(
+  documentId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof viewPlatformDocument>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getViewPlatformDocumentQueryKey(documentId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof viewPlatformDocument>>
+  > = ({ signal }) =>
+    viewPlatformDocument(documentId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!documentId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof viewPlatformDocument>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ViewPlatformDocumentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof viewPlatformDocument>>
+>;
+export type ViewPlatformDocumentQueryError = ErrorType<void>;
+
+export function useViewPlatformDocument<
+  TData = Awaited<ReturnType<typeof viewPlatformDocument>>,
+  TError = ErrorType<void>,
+>(
+  documentId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof viewPlatformDocument>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getViewPlatformDocumentQueryOptions(documentId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 export const getPreviewInvoiceBatchUrl = () => {
   return `/api/outgoing-email/invoice/batch/preview`;

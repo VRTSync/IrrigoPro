@@ -20,10 +20,12 @@ const bootstrap = {
 };
 let progress: typeof bootstrap;
 let requests: { url: string; body: Record<string, unknown> }[];
+let guide: { filename: string } | null;
 
 beforeEach(() => {
   progress = bootstrap;
   requests = [];
+  guide = { filename: "Understanding Your Invoice.pdf" };
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const body = JSON.parse(String(init?.body ?? "{}"));
@@ -33,10 +35,11 @@ beforeEach(() => {
     });
     if (url === reviewUrl) return json({
       from: { name: "ABC Irrigation", email: "send@example.invalid" }, replyTo: "office@example.invalid",
+      guide,
       willSend: [one], willSkip: [skipped], notFound: [3], confirmationToken: `token-${body.note}`, expiresAt: new Date().toISOString(),
     });
     if (url === "/api/outgoing-email/invoice/1/preview") return json({
-      ...one, html: "<p>Invoice for The Ranch</p>", attachments: [{ filename: "IR-1008.pdf" }], confirmationToken: "single-send-token",
+      ...one, html: "<p>Invoice for The Ranch</p>", attachments: [{ filename: "IR-1008.pdf", viewUrl: "/api/invoices/1/pdf/download" }], confirmationToken: "single-send-token",
     });
     if (url === startUrl) return json({ batchId: 8 }, 202);
     if (url === detailUrl) return json(progress);
@@ -66,6 +69,7 @@ it("lists the full review without sending, and opens a sandboxed per-invoice ema
   expect(screen.getByText(one.to)).toBeTruthy();
   expect(screen.getByText(skipped.message)).toBeTruthy();
   expect(screen.getByText(/Replies go to office@example.invalid/)).toBeTruthy();
+  expect(screen.getByTestId("text-batch-invoice-guide")).toHaveTextContent("Each email also includes Understanding Your Invoice.pdf.");
   expect(screen.getByText(/Unavailable invoices: 1/)).toBeTruthy();
   expect(requests.some(({ url }) => url === startUrl)).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "View email" }));
@@ -76,8 +80,10 @@ it("lists the full review without sending, and opens a sandboxed per-invoice ema
 });
 
 it("debounces note changes and can only send using the refreshed confirmation", async () => {
+  guide = null;
   show();
   await screen.findByText(one.subject);
+  expect(screen.queryByTestId("text-batch-invoice-guide")).not.toBeInTheDocument();
   const button = screen.getByTestId("button-confirm-invoice-batch");
   fireEvent.change(screen.getByLabelText("Note added to every email (optional)"), { target: { value: "Thank you" } });
   expect(button).toHaveProperty("disabled", true);

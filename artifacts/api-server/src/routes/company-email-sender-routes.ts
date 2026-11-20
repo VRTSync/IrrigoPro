@@ -8,6 +8,7 @@ const settingsSchema = z.object({
   fromName: z.string().trim().max(100),
   fromLocalPart: z.union([z.literal(""), z.string().regex(/^[a-z0-9._%+-]{1,64}$/i)]),
   replyTo: z.union([z.literal(""), z.email()]),
+  attachInvoiceGuide: z.boolean().optional(),
 }).strict();
 const domainSchema = z.object({
   domain: z.string().trim().toLowerCase().regex(/^(?=.{3,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/).nullable(),
@@ -16,7 +17,7 @@ const domainSchema = z.object({
 export const companySenderProtectedKeys = [
   "id", "createdAt", "updatedAt", "customerRecordsLocked", "customerRecordsSystemName",
   "emailSendingDomain", "emailDomainVerifiedAt", "emailDomainCheckedAt", "emailDomainCheckError",
-  "emailFromName", "emailFromAddress", "emailReplyTo",
+  "emailFromName", "emailFromAddress", "emailReplyTo", "attachInvoiceGuide",
 ];
 
 /** Shared with the legacy company endpoint so its real handler is directly testable. */
@@ -62,6 +63,7 @@ export function registerCompanyEmailSenderRoutes(
       fromName: company.emailFromName,
       fromAddress: company.emailFromAddress,
       replyTo: company.emailReplyTo,
+      attachInvoiceGuide: company.attachInvoiceGuide,
       effective: senderFromCompany(company),
     };
   }
@@ -100,6 +102,7 @@ export function registerCompanyEmailSenderRoutes(
           emailFromName: input.fromName || null,
           emailFromAddress: input.fromLocalPart ? `${input.fromLocalPart}@${company.emailSendingDomain}`.toLowerCase() : null,
           emailReplyTo: input.replyTo || null,
+          ...(input.attachInvoiceGuide === undefined ? {} : { attachInvoiceGuide: input.attachInvoiceGuide }),
         });
       } else if (kind === "domain") {
         const { domain } = domainSchema.parse(req.body);

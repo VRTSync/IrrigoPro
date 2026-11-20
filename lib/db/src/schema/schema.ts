@@ -39,6 +39,7 @@ export const companies = pgTable("companies", {
   emailFromName: text("email_from_name"),
   emailFromAddress: text("email_from_address"),
   emailReplyTo: text("email_reply_to"),
+  attachInvoiceGuide: boolean("attach_invoice_guide").notNull().default(true),
   budgetSeasonCurve: jsonb("budget_season_curve")
     .$type<{ month: number; percent: number }[]>()
     .default(sql`'[{"month":4,"percent":0},{"month":5,"percent":10},{"month":6,"percent":20},{"month":7,"percent":20},{"month":8,"percent":20},{"month":9,"percent":20},{"month":10,"percent":10}]'::jsonb`),
@@ -1126,6 +1127,25 @@ export const invoiceItems = pgTable("invoice_items", {
 });
 
 // Invoice PDFs - exact saved copies emailed to customers
+// Platform-wide documents deliberately have no company_id: all companies can
+// send the current guide, but only super admins can upload new versions.
+export const platformDocuments = pgTable("platform_documents", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: ["invoice_guide"] }).notNull(),
+  storageKey: text("storage_key").notNull(),
+  filename: text("filename").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  sha256: text("sha256").notNull(),
+  pageCount: integer("page_count").notNull(),
+  isCurrent: boolean("is_current").notNull().default(false),
+  uploadedByUserId: integer("uploaded_by_user_id").references(() => users.id).notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+}, (t) => ({
+  oneCurrent: uniqueIndex("platform_documents_one_current").on(t.kind).where(sql`${t.isCurrent}`),
+}));
+
+export type PlatformDocument = typeof platformDocuments.$inferSelect;
+
 export const invoicePdfs = pgTable("invoice_pdfs", {
   id: serial("id").primaryKey(),
   invoiceId: integer("invoice_id").references(() => invoices.id).notNull(),
@@ -1140,6 +1160,7 @@ export const invoicePdfs = pgTable("invoice_pdfs", {
   bccEmails: jsonb("bcc_emails").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   subject: text("subject"),
   sentByUserId: integer("sent_by_user_id").references(() => users.id),
+  guideDocumentId: integer("guide_document_id").references(() => platformDocuments.id),
   byteSize: integer("byte_size"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -1347,6 +1368,7 @@ export const insertCompanySchema = createInsertSchema(companies).omit({
   emailFromName: true,
   emailFromAddress: true,
   emailReplyTo: true,
+  attachInvoiceGuide: true,
   customerRecordsLocked: true,
   customerRecordsSystemName: true,
   id: true,

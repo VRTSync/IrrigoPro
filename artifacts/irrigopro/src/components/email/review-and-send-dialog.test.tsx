@@ -141,7 +141,10 @@ describe("Review and Send", () => {
     await screen.findByTitle("Email preview");
     expect(api.mock.calls.map(([path]) => path)).toEqual(["/api/outgoing-email/invoice_reminder/1008/preview", `${base}/preview`]);
   });
-  it("prefills from the server and shows its sender, sandboxed HTML and PDF attachment", async () => {
+  it("prefills from the server and shows its sender, sandboxed HTML and both invoice PDFs", async () => {
+    const guide = { filename: "Understanding Your Invoice.pdf", title: "Guide: how to read your invoice", viewUrl: "/api/platform-documents/12/file" };
+    const draft = makePreview({ attachments: [{ filename, viewUrl: download }, guide] });
+    api.mockResolvedValueOnce(json(draft));
     openReview();
     expect(sendButton()).toBeDisabled();
     await screen.findByTitle("Email preview");
@@ -151,10 +154,14 @@ describe("Review and Send", () => {
     expect(screen.getByTestId("text-email-from")).toHaveTextContent("High Plains Property Maintenance <billing@highplainsprop.com>");
     expect(screen.getByTestId("text-email-replies")).toHaveTextContent("Replies go to office@highplainsprop.com");
     expect(screen.getByTitle("Email preview")).toHaveAttribute("sandbox", "");
-    expect(screen.getByTitle("Email preview")).toHaveAttribute("srcdoc", makePreview().html);
-    expect(screen.getByText(filename)).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(screen.getByTitle("Email preview")).toHaveAttribute("srcdoc", draft.html);
+    expect(screen.getByTestId("text-email-attachment-0")).toHaveTextContent(filename);
+    expect(screen.getByTestId("text-email-attachment-1")).toHaveTextContent(guide.title + guide.filename);
+    fireEvent.click(screen.getByTestId("button-view-email-attachment-0"));
     expect(spies.openAuthedPdf).toHaveBeenCalledWith(download);
+    await waitFor(() => expect(screen.getByTestId("button-view-email-attachment-1")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("button-view-email-attachment-1"));
+    expect(spies.openAuthedPdf).toHaveBeenCalledWith(guide.viewUrl);
     expect(sendButton()).toBeEnabled();
   });
 

@@ -27,6 +27,7 @@
     "memoizee": "^0.4.17",
     "memorystore": "^1.6.8",
     "node-vibrant": "^4.0.4",
+    "pdf-lib": "^1.17.1",
     "pino": "^9",
     "pino-http": "^10",
     "puppeteer-core": "^24.43.0",

@@ -13,6 +13,7 @@ const fixture = () => ({
   sendingDomain: "highplainsprop.com", domainVerifiedAt: "2026-11-18T12:00:00Z",
   domainCheckedAt: "2026-11-18T12:00:00Z", domainCheckError: null,
   fromName: "High Plains", fromAddress: "billing@highplainsprop.com", replyTo: "office@highplainsprop.com",
+  attachInvoiceGuide: true,
   effective: { from: { name: "High Plains", email: "billing@highplainsprop.com" }, replyTo: "office@highplainsprop.com", usingCompanyAddress: true },
 });
 function mount(canEdit = true) {
@@ -38,7 +39,7 @@ describe("Outgoing email card", () => {
     fireEvent.change(screen.getByLabelText("Reply-To"), { target: { value: "reply@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(state.apiRequest).toHaveBeenCalledWith("/api/company/1/email-sender", "PUT", {
-      fromName: "New name", fromLocalPart: "accounts", replyTo: "reply@example.com",
+      fromName: "New name", fromLocalPart: "accounts", replyTo: "reply@example.com", attachInvoiceGuide: true,
     }));
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["/api/company/email-sender"] }));
   });
@@ -46,7 +47,19 @@ describe("Outgoing email card", () => {
     mount(false);
     await screen.findByTestId("input-from-name");
     for (const input of screen.getAllByRole("textbox")) expect(input).toBeDisabled();
+    expect(screen.getByRole("checkbox")).toBeDisabled();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+  it("starts checked and saves an opt-out", async () => {
+    mount();
+    const checkbox = await screen.findByRole("checkbox", { name: /Understanding Your Invoice/ });
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(state.apiRequest).toHaveBeenCalledWith("/api/company/1/email-sender", "PUT", expect.objectContaining({
+      attachInvoiceGuide: false,
+    })));
   });
   it("explains missing domains and disables the local-part input", async () => {
     state.apiRequest.mockResolvedValue({ ...fixture(), sendingDomain: null, fromAddress: null, domainVerifiedAt: null });
