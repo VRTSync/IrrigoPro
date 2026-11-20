@@ -44,3 +44,9 @@ A refused preview and a stale confirmed send are different outcomes. A fresh rem
 **Why:** A successful reminder starts the throttle. Rechecking eligibility before authenticating the review can disguise a replay as a fresh refusal and obscure what happened.
 
 **How to apply:** Authenticate the submitted review before rebuilding the draft, then check and consume it again at the point of delivery because rebuilding it can await storage.
+
+The Email Template family uses one shared, email-safe layout with company branding, not staff names. Companies may customize wording, not the layout. The versioned invoice guide is one platform-wide document, attached only to single and batch invoice emails unless a company opts out.
+
+**Why:** The user locked these design decisions on 2026-11-20 so customer emails have a consistent company identity and the office can audit which guide was sent.
+
+**How to apply:** Use the assigned Email Template slice and its embedded Design Context as the source of truth. Live email tests must run from development and go only to a test inbox the user approves, never to a real customer. Before any Publish, list the database changes and wait for the user's approval.
