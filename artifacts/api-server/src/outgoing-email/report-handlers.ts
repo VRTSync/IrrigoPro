@@ -1,16 +1,17 @@
 import { createHash } from "node:crypto";
 import type { Company } from "@workspace/db";
-import { buildIrrigationProfileReportEmail, buildWetCheckReportEmail, EmailService } from "../email-service";
+import { EmailService } from "../email-service";
 import { senderFromCompany } from "../lib/company-sender";
 import { requireIrrigationProfileReportSend, requireWetCheckReportSend } from "../routes/report-email-guards";
 import { storage } from "../storage";
+import { buildIrrigationProfileReportEmail, buildWetCheckReportEmail } from "./report-email";
 import { OutgoingEmailError, type BuiltDraft, type DraftInput, type OutgoingEmailHandler } from "./types";
 
 type Controller = Awaited<ReturnType<typeof storage.listIrrigationControllers>>[number];
 type Customer = NonNullable<Awaited<ReturnType<typeof storage.getCustomer>>>;
 type WetCheck = NonNullable<Awaited<ReturnType<typeof storage.getWetCheck>>>;
-type WetCheckEntity = { wc: WetCheck; customer: Customer | undefined; company: Company | undefined };
-type ProfileEntity = { customer: Customer; company: Company | undefined; controllers: Controller[] };
+type WetCheckEntity = { wc: WetCheck; customer: Customer | undefined; company: Company };
+type ProfileEntity = { customer: Customer; company: Company; controllers: Controller[] };
 
 interface ReportDeps {
   storage: Pick<typeof storage, "getWetCheck" | "getCustomer" | "getCompanyProfile" | "listIrrigationControllers" | "getIrrigationController">;
@@ -29,16 +30,12 @@ const defaults: ReportDeps = {
 };
 
 const stamp = (data: unknown) => createHash("sha256").update(JSON.stringify(data)).digest("base64url");
-const companyPdfFields = (company?: Company) => [company?.name, company?.logo, company?.address, company?.phone, company?.email];
+const companyPdfFields = (company: Company) => [company.name, company.logo, company.address, company.phone, company.email];
 const controllerVersions = (controllers: Controller[]) => controllers.map(c => [c.id, c.updatedAt.toISOString()]);
 const noRecipient = "No email address on file for this customer. Enter an email in To.";
 const changed = "This report changed after you reviewed it. Review it again before sending.";
 
-function companyEmailFields(company?: Company) {
-  return { companyName: company?.name ?? "IrrigoPro", companyEmail: company?.email ?? null, companyPhone: company?.phone ?? null };
-}
-
-function draftFor(input: DraftInput, company: Company | undefined, email: string | null | undefined,
+function draftFor(input: DraftInput, company: Company, email: string | null | undefined,
   body: { subject: string; html: string; text: string; filename: string }, viewUrl: string, versionStamp: string, attachmentStamp: string): BuiltDraft {
   const to = input.to || email?.trim() || "";
   return {
@@ -48,18 +45,18 @@ function draftFor(input: DraftInput, company: Company | undefined, email: string
   };
 }
 
-function wetEmailFields({ wc, company }: WetCheckEntity, note?: string) {
+function wetEmailFields({ wc, company }: WetCheckEntity, note: string) {
   return {
-    customerName: wc.customerName ?? "", propertyAddress: wc.propertyAddress ?? null,
-    technicianName: wc.technicianName ?? null,
-    inspectionDate: wc.startedAt
-      ? new Date(wc.startedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : "—",
-    ...companyEmailFields(company), note,
+    company, customerName: wc.customerName ?? "", propertyAddress: wc.propertyAddress ?? null,
+    inspectionDate: wc.startedAt ?? null, note,
   };
 }
 
-function profileEmailFields({ customer, company }: ProfileEntity, note?: string) {
-  return { customerName: customer.name, propertyAddress: customer.address, ...companyEmailFields(company), note };
+function profileEmailFields({ customer, company, controllers }: ProfileEntity, note: string) {
+  return {
+    company, customerName: customer.irrigoName ?? customer.name, propertyAddress: customer.address,
+    controllerCount: controllers.length, note,
+  };
 }
 
 function delivery(draft: BuiltDraft, pdfBuffer: Buffer) {
@@ -81,18 +78,19 @@ export function createReportEmailHandlers(deps: ReportDeps = defaults) {
       const [customer, company] = await Promise.all([
         deps.storage.getCustomer(wc.customerId), deps.storage.getCompanyProfile(wc.companyId),
       ]);
+      if (!company) return null;
       return { wc, customer: customer?.companyId === wc.companyId ? customer : undefined, company };
     },
     async draft(entity, input) {
       const { wc, customer, company } = entity;
-      return draftFor(input, company, customer?.email, buildWetCheckReportEmail(wetEmailFields(entity, input.note)),
+      return draftFor(input, company, customer?.email, await buildWetCheckReportEmail(wetEmailFields(entity, input.note ?? "")),
         `/api/wet-checks/${wc.id}/report-pdf`, wc.updatedAt.toISOString(),
         stamp([wc, companyPdfFields(company)]));
     },
     async send(entity, draft) {
       const { wc, company } = entity;
-      const pdf = await deps.renderWetCheck(wc, { company: company ?? null });
-      await deps.sendWetCheck({ ...wetEmailFields(entity, draft.note), ...delivery(draft, pdf), wetCheckId: wc.id });
+      const pdf = await deps.renderWetCheck(wc, { company });
+      await deps.sendWetCheck({ ...delivery(draft, pdf), wetCheckId: wc.id });
       return { sentTo: draft.to, sentAt: new Date() };
     },
   };
@@ -106,6 +104,7 @@ export function createReportEmailHandlers(deps: ReportDeps = defaults) {
       const [company, controllers] = await Promise.all([
         deps.storage.getCompanyProfile(customer.companyId), deps.storage.listIrrigationControllers(customer.companyId, id),
       ]);
+      if (!company) return null;
       return { customer, company, controllers };
     },
     async draft(entity, input) {
@@ -115,7 +114,7 @@ export function createReportEmailHandlers(deps: ReportDeps = defaults) {
         const updatedAt = c.updatedAt.toISOString();
         return updatedAt > max ? updatedAt : max;
       }, "");
-      return draftFor(input, company, customer.email, buildIrrigationProfileReportEmail(profileEmailFields(entity, input.note)),
+      return draftFor(input, company, customer.email, await buildIrrigationProfileReportEmail(profileEmailFields(entity, input.note ?? "")),
         `/api/customers/${customer.id}/irrigation-profile/report-pdf`, latest || "none",
         stamp([versions, customer.name, customer.address, companyPdfFields(company)]));
     },
@@ -129,8 +128,8 @@ export function createReportEmailHandlers(deps: ReportDeps = defaults) {
       if (stamp(controllerVersions(valid)) !== expected) throw new OutgoingEmailError(409, changed);
       const current = await deps.storage.listIrrigationControllers(customer.companyId, customer.id);
       if (stamp(controllerVersions(current)) !== expected) throw new OutgoingEmailError(409, changed);
-      const pdf = await deps.renderProfile(customer.name, valid, { company: company ?? null, propertyAddress: customer.address });
-      await deps.sendProfile({ ...profileEmailFields(entity, draft.note), ...delivery(draft, pdf), customerId: customer.id });
+      const pdf = await deps.renderProfile(customer.name, valid, { company, propertyAddress: customer.address });
+      await deps.sendProfile({ ...delivery(draft, pdf), customerId: customer.id });
       return { sentTo: draft.to, sentAt: new Date() };
     },
   };

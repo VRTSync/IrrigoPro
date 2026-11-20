@@ -395,6 +395,8 @@ describe("invoice payment reminders — real routes, real guards", () => {
             customerName: "Acme",
             customerEmail: "ap@acme.test",
             status: "generated",
+            periodStart: new Date("2026-05-01"),
+            periodEnd: new Date("2026-05-31"),
             updatedAt: new Date("2026-08-01T00:00:00.000Z"),
             createdAt: new Date("2026-06-01T00:00:00.000Z"),
             dueDate: new Date("2026-06-01T00:00:00.000Z"),
@@ -408,7 +410,7 @@ describe("invoice payment reminders — real routes, real guards", () => {
         async getLatestInvoiceSentCopy() {
           return { id: 5, pdfUrl: "/pdf/x.pdf", filename: "invoice.pdf" };
         },
-        async getCustomer() { return undefined; },
+        async getCustomerById() { return undefined; },
         async getUser() {
           return { id: 7, name: "Tester" };
         },

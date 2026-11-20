@@ -31,9 +31,9 @@ const estimate: EstimateEmailData = {
   approvalToken: "test-token", estimateDate: "2026-11-18", createdBy: "Office", companyId: 1,
 };
 const report = {
-  to: "customer@example.com", customerName: "Customer", propertyAddress: null,
-  companyName: "Company signature", companyEmail: "signature@example.com", companyPhone: null,
+  to: "customer@example.com",
   pdfBuffer: Buffer.from("test-pdf"),
+  reviewed: { subject: "Report", html: "<p>Company signature</p>", text: "signature@example.com", filename: "Report.pdf" },
 };
 describe("customer-facing mailers use the resolved identity", () => {
   it("passes the billing detail first and the guide second, both as PDFs", async () => {
@@ -55,7 +55,7 @@ describe("customer-facing mailers use the resolved identity", () => {
     const reviewed = { subject: "Reviewed subject", html: "<p>Reviewed report</p>", text: "Reviewed report", filename: "Reviewed.pdf" };
     const recipients = { cc: ["cc@example.com"], bcc: ["bcc@example.com"] };
     const reviewedReport = { ...report, ...recipients, sender: companySender, reviewed };
-    await EmailService.sendWetCheckReport({ ...reviewedReport, wetCheckId: 1, technicianName: null, inspectionDate: "November 18, 2026" });
+    await EmailService.sendWetCheckReport({ ...reviewedReport, wetCheckId: 1 });
     await EmailService.sendIrrigationProfileReport({ ...reviewedReport, customerId: 1 });
     assert.equal(sent.length, 2);
     for (const message of sent) {
@@ -90,7 +90,7 @@ describe("customer-facing mailers use the resolved identity", () => {
         sender, subject: "Reviewed invoice", html: "<p>Reviewed body</p>", text: "Reviewed body",
         cc: ["cc@example.com"], bcc: ["bcc@example.com"], filename: "Reviewed invoice.pdf",
       })).success, true);
-      await EmailService.sendWetCheckReport({ ...report, sender, wetCheckId: 1, technicianName: null, inspectionDate: "November 18, 2026" });
+      await EmailService.sendWetCheckReport({ ...report, sender, wetCheckId: 1 });
       await EmailService.sendIrrigationProfileReport({ ...report, sender, customerId: 1 });
       assert.equal(sent.length, 6);
       for (const message of sent) {

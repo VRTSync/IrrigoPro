@@ -152,7 +152,7 @@ function harness(opts: {
     sentAt: opts.alreadySent ? new Date("2026-10-31") : null, items: [],
   };
   const company = {
-    name: sender.from.name, email: sender.replyTo, phone: "970-555-0100",
+    id: 1, name: sender.from.name, email: sender.replyTo, phone: "970-555-0100",
     logo: "company-logos/high-plains-test-logo", address: "100 Main St", website: "https://www.highplainsprop.com/",
     emailFromName: sender.from.name, emailFromAddress: sender.from.email,
     emailReplyTo: sender.replyTo, emailSendingDomain: "example.invalid", emailDomainVerifiedAt: new Date(),
@@ -161,7 +161,7 @@ function harness(opts: {
   const wc = {
     id: 66, companyId: 1, customerId: 42, customerName: "The Ranch",
     propertyAddress: "100 Main St", technicianName: "A Technician",
-    startedAt: new Date("2026-10-12T12:00:00Z"), updatedAt: new Date("2026-10-13T12:00:00Z"),
+    startedAt: new Date("2026-10-13T02:00:00Z") as Date | null, updatedAt: new Date("2026-10-13T12:00:00Z"),
     zoneRecords: [], photos: [],
   };
   const controller = { id: 8, updatedAt: new Date("2026-10-18T12:00:00Z") };
@@ -527,9 +527,9 @@ it("keeps both estimate kinds tenant-scoped on preview and send, with super-admi
 });
 
 const reportCases = [
-  { kind: "wet_check_report", id: 66, subject: "Your Irrigation Inspection Results — 100 Main St",
+  { kind: "wet_check_report", id: 66, subject: "Irrigation Inspection Results – 100 Main St",
     filename: "100 Main St - Inspection Report.pdf", viewUrl: "/api/wet-checks/66/report-pdf", denied: "Access restricted to manager/admin/billing roles" },
-  { kind: "irrigation_profile_report", id: 42, subject: "Your Irrigation System Profile — 100 Main St",
+  { kind: "irrigation_profile_report", id: 42, subject: "Irrigation System Profile – 100 Main St",
     filename: "100 Main St - Irrigation Profile.pdf", viewUrl: "/api/customers/42/irrigation-profile/report-pdf", denied: "Forbidden" },
 ];
 
@@ -542,6 +542,9 @@ for (const report of reportCases) {
       assert.equal(defaults.status, 200);
       assert.equal(defaults.body.to, "current@example.invalid");
       assert.equal(defaults.body.subject, report.subject);
+      assert.match(defaults.body.html, /<tr bgcolor="#82bf40"><td height="5"/);
+      assert.match(defaults.body.text, /Hello The Ranch,\s+[\s\S]*Property: 100 Main St/);
+      assert.doesNotMatch(defaults.body.html, /gradient|<svg|\p{Extended_Pictographic}/u);
       assert.deepEqual(defaults.body.from, sender.from);
       assert.equal(defaults.body.replyTo, sender.replyTo);
       assert.deepEqual(defaults.body.attachments, [{ filename: report.filename, viewUrl: report.viewUrl }]);
@@ -615,6 +618,34 @@ for (const report of reportCases) {
     });
   });
 }
+
+it("previews the Denver inspection date but never the technician, even when recorded", async () => {
+  const h = harness();
+  await withServer(h, async request => {
+    const route = "/outgoing-email/wet_check_report/66/preview";
+    const { status, body } = await request(route);
+    assert.equal(status, 200);
+    assert.match(body.text, /Inspection date: Oct 12, 2026/);
+    assert.match(body.html, />Inspection<\/div>\s*<div[^>]*>Oct 12, 2026<\/div>/);
+    assert.ok(!`${body.html}\n${body.text}`.includes(h.wc.technicianName));
+    assert.doesNotMatch(`${body.html}\n${body.text}`, /Technician:/);
+    h.wc.startedAt = null;
+    const undated = await request(route);
+    assert.equal(undated.status, 200);
+    assert.doesNotMatch(`${undated.body.html}\n${undated.body.text}`, /Inspection date|Oct 12, 2026/);
+  });
+});
+
+it("previews the number of controllers without rendering the profile PDF", async () => {
+  const h = harness();
+  await withServer(h, async request => {
+    const { status, body } = await request("/outgoing-email/irrigation_profile_report/42/preview");
+    assert.equal(status, 200);
+    assert.match(body.html, />Controllers<\/th>\s*<td[^>]*>1<\/td>/);
+    assert.match(body.text, /^Controllers: 1$/m);
+    assert.deepEqual(h.reportRenders, []);
+  });
+});
 
 it("serves the exact saved invoice bytes inline only to readers in scope, including super admin", async () => {
   for (const [opts, status] of [

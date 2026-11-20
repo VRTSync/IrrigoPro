@@ -87,6 +87,8 @@ function invoice(id: number, overrides: Record<string, any> = {}) {
     customerName: `Customer ${id}`,
     customerEmail: `ap${id}@customer.test`,
     status: "generated",
+    periodStart: new Date("2026-06-01"),
+    periodEnd: new Date("2026-06-30"),
     createdAt: new Date(NOW.getTime() - overdueDays * DAY),
     dueDate: new Date(NOW.getTime() - overdueDays * DAY),
     sentAt: new Date(NOW.getTime() - (overdueDays - 1) * DAY),
@@ -138,11 +140,12 @@ function harness(opts: HarnessOptions = {}) {
       return row;
     },
     async getLatestInvoiceSentCopy(id: number) {
-      return pdfs[id];
+      const pdf = pdfs[id];
+      return pdf && { filename: `Saved invoice ${id}.pdf`, ...pdf };
     },
-    async getCustomer(id: number) {
+    async getCustomerById(id: number) {
       const row = Object.values(rows).find(row => row.customerId === id);
-      return row?.id === 1 ? { id, companyId: row.companyId, email: " current-ap1@customer.test " } : undefined;
+      return row?.id === 1 ? { id, companyId: row.companyId, name: row.customerName, email: " current-ap1@customer.test " } : undefined;
     },
     async getUser(_id: number) {
       return { id: 7, name: "Dana Books" };
@@ -191,7 +194,6 @@ function harness(opts: HarnessOptions = {}) {
     _readSentCopy: async (key) => Buffer.from(`saved bytes:${key}`),
     _loadPaymentTerms: async () => "net_30",
     _now: () => clock.current,
-    _baseUrl: () => "https://irrigopro.test",
   });
   const routeDeps = {
     requireAuthentication: makeAuth(
@@ -462,6 +464,7 @@ describe("batch reminders — the throttle", () => {
 
     assert.equal(res.body.summary.sent, 1);
     assert.equal(h.sent.length, 1);
+    assert.equal(h.sent[0].subject, "Past due: Invoice INV-1 – Customer 1 – June 2026");
   });
 });
 

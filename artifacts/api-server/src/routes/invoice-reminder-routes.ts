@@ -20,7 +20,7 @@ import { resolveCompanySender, type CompanySender } from "../lib/company-sender"
 // Nothing here runs on a schedule. Every reminder is a person pressing send.
 
 import type { Express, RequestHandler } from "express";
-import type { Company, Invoice, InvoicePdf } from "@workspace/db";
+import type { Company, Customer, Invoice, InvoicePdf } from "@workspace/db";
 import { storage as storageModule } from "../storage";
 import {
   classifyAgingBucket,
@@ -33,16 +33,18 @@ import {
   isReminderTemplateKey,
   renderReminderEmail,
   suggestTemplateKey,
+  REMINDER_EMAIL_KEY,
   REMINDER_TEMPLATE_KEYS,
   REMINDER_TEMPLATE_LABELS,
+  type RenderedReminder,
   type ReminderTemplateKey,
 } from "../invoice-reminder-templates";
-import { EmailService, invoiceEmailNoteBlock } from "../email-service";
-import { emailBaseUrl } from "../lib/email-base-url";
+import { EmailService } from "../email-service";
+import { billingDateRange } from "../outgoing-email/invoice-email-format";
 import { OutgoingEmailError, type BuiltDraft } from "../outgoing-email/types";
-import { readInvoiceSentCopy } from "../invoice-pdf-service";
+import { getEmailWording } from "../outgoing-email/wording";
+import { invoiceBillingPeriod, readInvoiceSentCopy } from "../invoice-pdf-service";
 import { ObjectStorageService } from "../objectStorage";
-import { resolveCompanyLogoUrl } from "../logo-url";
 
 // ── The refusal matrix ──────────────────────────────────────────────────────
 
@@ -354,12 +356,12 @@ export interface ReminderCoreDeps {
   _mailer?: ReminderMailer;
   _loadPaymentTerms?: (customerId: number) => Promise<string | null>;
   _now?: () => Date;
-  _baseUrl?: () => string;
 }
 
 /** One invoice, resolved: the row, its PDF, its age, and its first refusal. */
 export interface ReminderContext {
   invoice: Invoice;
+  customer: Customer | undefined;
   pdf: InvoicePdf | undefined;
   recipientEmail: string | null;
   now: Date;
@@ -463,7 +465,7 @@ export interface ReminderCore {
   senderFor(ctx: ReminderContext): Promise<CompanySender>;
   versionStamp(req: any, ctx: ReminderContext): Promise<string>;
   hasSavedCopy(ctx: ReminderContext): Promise<boolean>;
-  renderOne(ctx: ReminderContext, templateKey: ReminderTemplateKey, company: Company | undefined, note?: string): ReturnType<typeof renderReminderEmail>;
+  renderOne(ctx: ReminderContext, templateKey: ReminderTemplateKey, company: Company | undefined, note?: string): Promise<RenderedReminder>;
   /** Dry run. Reads only — it must never reach the mailer. */
   previewOne(
     req: any,
@@ -483,7 +485,6 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
   const storage = deps._storageApi ?? storageModule;
   const mailer = deps._mailer ?? defaultMailer;
   const nowFn = deps._now ?? (() => new Date());
-  const baseUrlFn = deps._baseUrl ?? emailBaseUrl;
 
   function callerCompanyId(req: any): number | null {
     return req.authenticatedUserRole === "super_admin"
@@ -504,9 +505,9 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     if (companyId == null && req.authenticatedUserRole !== "super_admin") return null;
     const invoice: Invoice | undefined = await storage.getInvoiceById(invoiceId, companyId);
     if (!invoice) return null;
-    const [pdf, customer] = await Promise.all([
+    const [pdf, customer]: [InvoicePdf | undefined, Customer | undefined] = await Promise.all([
       storage.getLatestInvoiceSentCopy(invoiceId, invoice.companyId),
-      storage.getCustomer(invoice.customerId),
+      storage.getCustomerById(invoice.customerId),
     ]);
     const ownedCustomer = customer?.companyId === invoice.companyId ? customer : undefined;
     const recipientEmail = ownedCustomer?.email?.trim() || invoice.customerEmail?.trim() || null;
@@ -526,6 +527,7 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
     const bucket: AgingBucketKey = classifyAgingBucket(rawDays);
     return {
       invoice,
+      customer: ownedCustomer,
       pdf,
       recipientEmail,
       now,
@@ -581,26 +583,24 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
       : await new ObjectStorageService().searchPublicObject(ctx.pdf.pdfUrl));
   }
 
-  function renderOne(ctx: ReminderContext, templateKey: ReminderTemplateKey, company: Company | undefined, note?: string) {
-    const rendered = renderReminderEmail({
+  async function renderOne(ctx: ReminderContext, templateKey: ReminderTemplateKey, company: Company | undefined, note?: string): Promise<RenderedReminder> {
+    if (!company) throw new Error("Cannot render a reminder without its company.");
+    if (!ctx.pdf) throw new Error("Cannot render a reminder without its saved invoice copy.");
+    const wording = await getEmailWording(ctx.invoice.companyId, REMINDER_EMAIL_KEY[templateKey]);
+    return renderReminderEmail({
       templateKey,
-      customerName: ctx.invoice.customerName,
+      wording,
+      company,
+      customerName: ctx.customer?.irrigoName ?? ctx.customer?.name ?? ctx.invoice.customerName,
       invoiceNumber: ctx.invoice.invoiceNumber,
+      billingMonth: invoiceBillingPeriod(ctx.invoice),
+      billingPeriodRange: billingDateRange(ctx.invoice),
       effectiveDueDate: ctx.effectiveDueDate,
       daysOverdue: ctx.daysOverdue,
       balanceDue: ctx.balanceDue,
-      company: {
-        name: company?.name || "IrrigoPro",
-        logo: company?.logo ? resolveCompanyLogoUrl(company.logo, baseUrlFn()) : null,
-        email: company?.email ?? null,
-        phone: company?.phone ?? null,
-      },
+      note: note ?? "",
+      attachmentFilename: ctx.pdf.filename,
     });
-    return note ? {
-      ...rendered,
-      html: rendered.html.replace(/<body[^>]*>/, body => body + invoiceEmailNoteBlock(note)),
-      text: `${note}\n\n${rendered.text}`,
-    } : rendered;
   }
 
   async function previewOne(
@@ -689,7 +689,7 @@ export function createReminderCore(deps: ReminderCoreDeps = {}): ReminderCore {
 
     const templateKey = resolveTemplateChoice(choice, ctx.agingBucket);
     const reviewed = overrides?.reviewed;
-    const rendered = renderOne(ctx, templateKey, await companyFor(ctx), overrides?.note);
+    const rendered = await renderOne(ctx, templateKey, await companyFor(ctx), overrides?.note);
     const changed = () => new OutgoingEmailError(409, "This reminder changed after you reviewed it. Review it again before sending.");
     if (reviewed && (reviewed.html !== rendered.html || reviewed.text !== rendered.text)) throw changed();
     const buf = await (deps._readSentCopy ?? readInvoiceSentCopy)(ctx.pdf!.pdfUrl);

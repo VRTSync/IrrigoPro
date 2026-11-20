@@ -9,6 +9,7 @@ import { getCurrentInvoiceGuide, getInvoiceGuide, readPlatformDocument } from ".
 import { ObjectStorageService } from "../objectStorage";
 import { requireInvoiceSend } from "../routes/role-guards";
 import { storage } from "../storage";
+import { billingDateRange, invoiceCurrency as currency, invoiceShortDate as shortDate } from "./invoice-email-format";
 import { formatPhone, renderEmailLayout } from "./layout";
 import { INVOICE_CHANGED, INVOICE_GUIDE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "./types";
 import { fillWording, getEmailWording } from "./wording";
@@ -37,16 +38,6 @@ const defaultDeps: InvoiceEmailDeps = {
 };
 const unsendable = new Set(["cancelled", "superseded", "merged"]);
 const noRecipient = "This customer has no billing email. Enter one, or add it in QuickBooks and resync.";
-const shortDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-const monthAndDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-
-function billingDateRange(invoice: Invoice): string {
-  const start = new Date(invoice.periodStart);
-  const end = new Date(invoice.periodEnd);
-  const startFormat = start.getUTCFullYear() === end.getUTCFullYear() ? monthAndDay : shortDate;
-  return `${startFormat.format(start)} – ${shortDate.format(end)}`;
-}
 
 export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) {
   const guides = deps.guides ?? defaultGuides;

@@ -107,152 +107,15 @@ export function buildEstimateApprovalEmail(
   return EmailService.buildEstimateApprovalEmail(data, links);
 }
 
-export function invoiceEmailNoteBlock(note?: string): string {
-  return note ? `<div style="border-left:3px solid #1E5A99;background:#eff6ff;padding:12px;white-space:pre-wrap;">${escapeHtml(note)}</div>` : "";
-}
-
-interface ReportEmailArgs {
-  customerName: string;
-  propertyAddress: string | null;
-  companyName: string;
-  companyEmail: string | null;
-  companyPhone: string | null;
-  note?: string;
-}
-
 interface ReportDelivery {
   sender: CompanySender;
   to: string;
   cc?: string[];
   bcc?: string[];
   pdfBuffer: Buffer;
-  reviewed?: { subject: string; html: string; text: string; filename: string };
+  reviewed: { subject: string; html: string; text: string; filename: string };
 }
 
-export function buildWetCheckReportEmail(args: ReportEmailArgs & { technicianName: string | null; inspectionDate: string }) {
-    const property = args.propertyAddress || args.customerName;
-    const subject = `Your Irrigation Inspection Results — ${property}`;
-    const filename = `${property.replace(/[/\\:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim()} - Inspection Report.pdf`;
-
-    const noteBlock = args.note && args.note.trim()
-      ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 20px;margin:20px 0;color:#92400e;font-size:14px;line-height:1.5;white-space:pre-wrap;">${escapeHtml(args.note)}</div>`
-      : '';
-
-    const html = `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
-<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
-  <div style="background:linear-gradient(135deg,#1E5A99,#0E3B6B);color:white;padding:30px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="margin:0;font-size:26px;">System Inspection Results</h1>
-    <p style="margin:8px 0 0 0;font-size:16px;opacity:0.9;">${escapeHtml(args.companyName)}</p>
-  </div>
-  <div style="background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:30px;">
-    <h2 style="color:#1f2937;margin-top:0;">Hello ${escapeHtml(args.customerName)},</h2>
-    <p style="font-size:15px;color:#4b5563;">
-      We've completed an irrigation inspection at <strong>${escapeHtml(property)}</strong>.
-      Please find your full system condition report attached to this email.
-    </p>
-    ${noteBlock}
-    <div style="background:#f9fafb;border-radius:8px;padding:20px;margin:20px 0;">
-      <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Property:</td><td style="padding:6px 0;color:#1f2937;">${escapeHtml(property)}</td></tr>
-        <tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Inspection date:</td><td style="padding:6px 0;color:#1f2937;">${escapeHtml(args.inspectionDate)}</td></tr>
-        ${args.technicianName ? `<tr><td style="padding:6px 0;font-weight:600;color:#6b7280;">Technician:</td><td style="padding:6px 0;color:#1f2937;">${escapeHtml(args.technicianName)}</td></tr>` : ''}
-      </table>
-    </div>
-    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin:20px 0;">
-      <p style="margin:0;color:#1e40af;font-size:14px;"><strong>📎 Attachment:</strong> Your detailed condition report is attached to this email.</p>
-    </div>
-    <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:24px;">
-      <p style="color:#6b7280;font-size:13px;margin:0;">Questions? Reply to this email or call us directly.</p>
-      <div style="margin-top:12px;font-size:13px;color:#6b7280;">
-        <p style="margin:3px 0;font-weight:600;color:#374151;">${escapeHtml(args.companyName)}</p>
-        ${args.companyPhone ? `<p style="margin:3px 0;">📞 ${escapeHtml(args.companyPhone)}</p>` : ''}
-        ${args.companyEmail ? `<p style="margin:3px 0;">✉️ ${escapeHtml(args.companyEmail)}</p>` : ''}
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    const text = `Irrigation Inspection Results — ${property}
-
-Hello ${args.customerName},
-
-We've completed an irrigation inspection at ${property}.
-Your full system condition report is attached to this email.
-${args.note && args.note.trim() ? `\nNote from ${args.companyName}:\n${args.note}\n` : ''}
-Inspection date: ${args.inspectionDate}${args.technicianName ? `\nTechnician: ${args.technicianName}` : ''}
-
-Questions? Reply to this email or call us directly.
-
-—
-${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.companyEmail ? `\n${args.companyEmail}` : ''}
-`;
-
-    return { subject, html, text, filename };
-}
-
-export function buildIrrigationProfileReportEmail(args: ReportEmailArgs) {
-    const property = args.propertyAddress || args.customerName;
-    const subject = `Your Irrigation System Profile — ${property}`;
-    const filename = `${property
-      .replace(/[/\\:*?"<>|]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()} - Irrigation Profile.pdf`;
-
-    const noteBlock = invoiceEmailNoteBlock(args.note);
-    const html = `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
-<body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px;">
-  <div style="background:linear-gradient(135deg,#1E5A99,#0E3B6B);color:white;padding:30px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="margin:0;font-size:26px;">Irrigation System Profile</h1>
-    <p style="margin:8px 0 0 0;font-size:16px;opacity:0.9;">${escapeHtml(args.companyName)}</p>
-  </div>
-  <div style="background:white;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:30px;">
-    <h2 style="color:#1f2937;margin-top:0;">Hello ${escapeHtml(args.customerName)},</h2>
-    <p style="font-size:15px;color:#4b5563;">
-      Please find your irrigation system profile report attached to this email.
-      It includes details for each controller, program, and zone at
-      <strong>${escapeHtml(property)}</strong>.
-    </p>
-    ${noteBlock}
-    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin:20px 0;">
-      <p style="margin:0;color:#1e40af;font-size:14px;">
-        <strong>&#128206; Attachment:</strong> Your irrigation system profile report is attached to this email.
-      </p>
-    </div>
-    <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:24px;">
-      <p style="color:#6b7280;font-size:13px;margin:0;">Questions? Reply to this email or call us directly.</p>
-      <div style="margin-top:12px;font-size:13px;color:#6b7280;">
-        <p style="margin:3px 0;font-weight:600;color:#374151;">${escapeHtml(args.companyName)}</p>
-        ${args.companyPhone ? `<p style="margin:3px 0;">&#128222; ${escapeHtml(args.companyPhone)}</p>` : ''}
-        ${args.companyEmail ? `<p style="margin:3px 0;">&#9993; ${escapeHtml(args.companyEmail)}</p>` : ''}
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    const text = `Irrigation System Profile — ${property}
-
-Hello ${args.customerName},
-
-Please find your irrigation system profile report attached to this email.
-It includes details for each controller, program, and zone at ${property}.
-${args.note ? `
-Note from ${args.companyName}:
-${args.note}
-` : ''}
-Questions? Reply to this email or call us directly.
-
-—
-${args.companyName}${args.companyPhone ? `\n${args.companyPhone}` : ''}${args.companyEmail ? `\n${args.companyEmail}` : ''}
-`;
-
-    return { subject, html, text, filename };
-}
 export class EmailService {
   private static get baseUrl() {
     return emailBaseUrl();
@@ -1512,14 +1375,13 @@ The signed PDF is attached to this email for your records.
 
   /**
    * Emails the customer-facing wet check condition report as a PDF attachment.
-   * Subject: "Your Irrigation Inspection Results — {propertyAddress}"
    */
-  static async sendWetCheckReport(args: ReportEmailArgs & { technicianName: string | null; inspectionDate: string } & ReportDelivery & { wetCheckId: number }): Promise<void> {
+  static async sendWetCheckReport(args: ReportDelivery & { wetCheckId: number }): Promise<void> {
     if (!isEmailConfigured()) {
       throw new Error('Email is not configured: SENDGRID_API_KEY is missing. Report was not sent.');
     }
 
-    const { subject, html, text, filename } = args.reviewed ?? buildWetCheckReportEmail(args);
+    const { subject, html, text, filename } = args.reviewed;
 
     try {
       await sgMail.send({
@@ -1558,16 +1420,15 @@ The signed PDF is attached to this email for your records.
 
   /**
    * Emails the customer-facing Irrigation System Profile as a PDF attachment.
-   * Subject: "Your Irrigation System Profile — {property}"
    */
-  static async sendIrrigationProfileReport(args: ReportEmailArgs & ReportDelivery & { customerId: number }): Promise<void> {
+  static async sendIrrigationProfileReport(args: ReportDelivery & { customerId: number }): Promise<void> {
     if (!isEmailConfigured()) {
       throw new Error(
         'Email is not configured: SENDGRID_API_KEY is missing. Report was not sent.',
       );
     }
 
-    const { subject, html, text, filename } = args.reviewed ?? buildIrrigationProfileReportEmail(args);
+    const { subject, html, text, filename } = args.reviewed;
 
     try {
       await sgMail.send({

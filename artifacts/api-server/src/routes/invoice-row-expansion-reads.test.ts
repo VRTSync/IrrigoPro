@@ -220,7 +220,7 @@ function remindersHarness(opts: {
     async getLatestInvoiceSentCopy(id: number) {
       return { id: 9, pdfUrl: `/pdf/${id}.pdf` };
     },
-    async getCustomer() { return undefined; },
+    async getCustomerById() { return undefined; },
     async getUser(_id: number) {
       return { id: 7, name: "Dana Books" };
     },
@@ -249,7 +249,6 @@ function remindersHarness(opts: {
     _mailer: async () => ({ success: true }),
     _loadPaymentTerms: async () => "net_30",
     _now: () => NOW,
-    _baseUrl: () => "https://irrigopro.test",
   });
 
   registerInvoiceReminderRoutes(app, { requireAuthentication, requireInvoiceSend, requireReminderHistoryRead, _core: core });

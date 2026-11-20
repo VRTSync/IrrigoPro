@@ -31,6 +31,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Company } from "@workspace/db";
 
 import {
   ROLES,
@@ -51,7 +52,8 @@ import { requireInvoiceRead } from "./role-guards";
 // The customer-facing generators, imported for group (g).
 import { buildPdfViewModel, type InvoiceDetailData } from "../pdf-view-model";
 import { coverPage, reconciliationPage, ticketPageWO } from "../pdf-helpers";
-import { renderReminderEmail, REMINDER_TEMPLATE_KEYS } from "../invoice-reminder-templates";
+import { renderReminderEmail, REMINDER_EMAIL_KEY, REMINDER_TEMPLATE_KEYS } from "../invoice-reminder-templates";
+import { DEFAULT_WORDING } from "../outgoing-email/wording";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -771,16 +773,25 @@ describe("A/R notes never reach a customer — PDF, email, CSV", () => {
   });
 
   // ── Surface 2: customer-facing reminder emails ────────────────────────────
+  const reminderInput = {
+    customerName: "Test Customer",
+    invoiceNumber: "INV-0001",
+    billingMonth: "May 2026",
+    billingPeriodRange: "May 1 – May 31, 2026",
+    effectiveDueDate: new Date("2026-06-01"),
+    daysOverdue: 71,
+    balanceDue: 1234.5,
+    company: { name: "IrrigoPro", logo: null, email: null, phone: null } as Company,
+    note: "",
+    attachmentFilename: "Saved copy.pdf",
+  };
+
   it("every reminder template carries no note text", () => {
     for (const templateKey of REMINDER_TEMPLATE_KEYS) {
       const rendered = renderReminderEmail({
+        ...reminderInput,
         templateKey,
-        customerName: "Test Customer",
-        invoiceNumber: "INV-0001",
-        effectiveDueDate: new Date("2026-06-01"),
-        daysOverdue: 71,
-        balanceDue: 1234.5,
-        company: { name: "IrrigoPro", logo: null, email: null, phone: null },
+        wording: DEFAULT_WORDING[REMINDER_EMAIL_KEY[templateKey]],
       });
       assertNoNotes(
         `${rendered.subject}\n${rendered.html}\n${rendered.text}`,
@@ -789,19 +800,15 @@ describe("A/R notes never reach a customer — PDF, email, CSV", () => {
     }
   });
 
-  it("the reminder template input has nowhere to put a note", () => {
+  it("internal A/R fields cannot populate the customer note in the reminder", () => {
     // renderReminderEmail takes a fixed, named input. Passing note fields in
     // must be inert — there is no key iteration to pick them up.
     const rendered = renderReminderEmail({
+      ...reminderInput,
       templateKey: "firm",
-      customerName: "Test Customer",
-      invoiceNumber: "INV-0001",
-      effectiveDueDate: new Date("2026-06-01"),
-      daysOverdue: 71,
-      balanceDue: 1234.5,
-      company: { name: "IrrigoPro", logo: null, email: null, phone: null },
+      wording: DEFAULT_WORDING.reminder_past_due,
       ...NOTE_BEARING_FIELDS,
-    } as any);
+    });
     assertNoNotes(`${rendered.subject}\n${rendered.html}\n${rendered.text}`, "reminder email");
   });
 

@@ -39,7 +39,7 @@ export function createReminderEmailHandler(core: ReminderCore): OutgoingEmailHan
         core.companyFor(ctx), core.senderFor(ctx), core.versionStamp(req, ctx),
       ]);
       const note = input.note ?? "";
-      const rendered = core.renderOne(ctx, resolveTemplateChoice(variant, ctx.agingBucket), company, note);
+      const rendered = await core.renderOne(ctx, resolveTemplateChoice(variant, ctx.agingBucket), company, note);
       return {
         ...rendered,
         variant, versionStamp, sender, note, to: input.to || ctx.recipientEmail!,

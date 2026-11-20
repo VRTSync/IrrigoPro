@@ -91,6 +91,8 @@ function invoice(overrides: Record<string, any> = {}) {
     customerName: "Acme Grounds",
     customerEmail: "ap@acme.test",
     status: "generated",
+    periodStart: new Date("2026-06-01"),
+    periodEnd: new Date("2026-06-30"),
     // 45 days before NOW, so the invoice is squarely in the 30–59 bucket.
     createdAt: new Date(NOW.getTime() - 45 * DAY),
     updatedAt: new Date(NOW.getTime() - 2 * DAY),
@@ -121,6 +123,7 @@ interface HarnessOptions {
   paymentTerms?: string | null;
   missingSavedFile?: boolean;
   currentEmail?: string;
+  customer?: { companyId: number; name: string; irrigoName: string | null };
 }
 
 function harness(opts: HarnessOptions = {}) {
@@ -158,7 +161,12 @@ function harness(opts: HarnessOptions = {}) {
     async getLatestInvoiceSentCopy(id: number) {
       return pdfs[id];
     },
-    async getCustomer(id: number) { return { id, email: opts.currentEmail, companyId: 1 }; },
+    async getCustomerById(id: number) {
+      return {
+        id, email: opts.currentEmail,
+        ...(opts.customer ?? { companyId: 1, name: "Acme Grounds", irrigoName: null }),
+      };
+    },
     async getUser(_id: number) {
       return { id: 7, name: "Dana Books" };
     },
@@ -205,7 +213,6 @@ function harness(opts: HarnessOptions = {}) {
     _readSentCopy: async (key) => opts.missingSavedFile ? null : Buffer.from(`saved bytes:${key}`),
     _loadPaymentTerms: async () => opts.paymentTerms ?? "net_30",
     _now: opts.now ?? (() => NOW),
-    _baseUrl: () => "https://irrigopro.test",
   });
 
   registerInvoiceReminderRoutes(app, { requireAuthentication, requireInvoiceSend, requireReminderHistoryRead, _core: core });
@@ -405,6 +412,23 @@ describe("Reviewed reminders — refusals", () => {
 // ── (f) Company isolation ───────────────────────────────────────────────────
 
 describe("Reviewed reminders — company isolation", () => {
+  it("uses only an in-tenant customer's label and email", async () => {
+    for (const [companyId, irrigoName, expected] of [
+      [1, "Current Irrigo Name", "Current Irrigo Name"],
+      [1, null, "Customer Account Name"],
+      [2, "Foreign Irrigo Name", "Acme Grounds"],
+    ] as const) {
+      const h = harness({ customer: { companyId, irrigoName, name: "Customer Account Name" }, currentEmail: "customer@acme.test" });
+      const { status, body } = await preview(h.app, { variant: "friendly" });
+      assert.equal(status, 200);
+      assert.equal(body.to, companyId === 1 ? "customer@acme.test" : "ap@acme.test");
+      assert.equal(body.subject, `Reminder: Invoice INV-1 – ${expected} – June 2026`);
+      assert.ok(body.text.includes(`Hello ${expected},`));
+      assert.doesNotMatch(`${body.html}\n${body.text}`, /Foreign Irrigo Name/);
+      assert.equal(h.sent.length, 0);
+    }
+  });
+
   it("404s for a company B invoice and attempts no email", async () => {
     const h = harness({ invoices: { 1: invoice({ companyId: 999 }) }, companyId: 1 });
     const { status, body } = await send(h.app);
@@ -470,7 +494,7 @@ describe("Reviewed reminders — sending", () => {
     const fields = { variant: "firm", to: "someone@acme.test", cc: ["cc@acme.test"], bcc: ["bcc@acme.test"], subject: "A reviewed subject", note: "Please <confirm>." };
     const review = await preview(h.app, fields);
     assert.equal(review.status, 200);
-    assert.match(review.body.html, /Please &lt;confirm&gt;\./);
+    assert.match(review.body.html, /bgcolor="#f1f7e8"[\s\S]*?A note from Green Valley Irrigation[\s\S]*?Please &lt;confirm&gt;\.[\s\S]*?<\/table>/);
     assert.match(review.body.text, /Please <confirm>\./);
     const confirmationToken = review.body.confirmationToken;
     assert.equal((await confirm(h.app, { ...fields, variant: "suggested", confirmationToken })).status, 409);
@@ -520,10 +544,9 @@ describe("Reviewed reminders — sending", () => {
     assert.equal(mail.to, "ap@acme.test");
     assert.deepEqual(mail.pdfBuffer, Buffer.from("saved bytes:/pdf/1.pdf"), "the saved invoice bytes are attached");
     assert.equal(mail.filename, "Saved invoice.pdf");
-    assert.match(mail.subject, /final notice/i);
-    assert.match(mail.subject, /INV-1/);
+    assert.equal(mail.subject, "Final notice: Invoice INV-1 – Acme Grounds – June 2026");
     // Branding and reply-to come from the company profile.
-    assert.match(mail.subject, /Green Valley Irrigation/);
+    assert.match(mail.html, /Green Valley Irrigation/);
     assert.equal(mail.replyTo, "billing@greenvalley.test");
     assert.deepEqual(mail.categories, ["invoice-payment-reminder"]);
     // Recorded exactly once, as reminder number one.
@@ -539,7 +562,7 @@ describe("Reviewed reminders — sending", () => {
     const h = harness();
     const { status } = await send(h.app, { variant: "friendly" });
     assert.equal(status, 200);
-    assert.match(h.sent[0].subject, /friendly reminder/i);
+    assert.equal(h.sent[0].subject, "Reminder: Invoice INV-1 – Acme Grounds – June 2026");
     assert.equal(h.created[0].templateKey, "friendly");
   });
 
@@ -579,7 +602,7 @@ describe("reminder email figures", () => {
     // numbers would drift and this assertion is where it would show up.
     const annotated = annotateInvoiceForAr(inv as any, "net_30", NOW);
     assert.equal(h.created[0].daysOverdueAtSend, annotated.daysOverdue);
-    assert.match(h.sent[0].text, new RegExp(`${annotated.daysOverdue} days overdue`));
+    assert.match(h.sent[0].text, new RegExp(`${annotated.daysOverdue} days past due`));
   });
 
   it("states the same balance due the A/R list shows", async () => {

@@ -108,7 +108,7 @@
   "api-field": [
     {
       "name": "customer-email-layout",
-      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/outgoing-email/layout.test.ts"
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/outgoing-email/layout.test.ts src/invoice-reminder-templates.test.ts"
     },
     {
       "name": "invoice-email-review",
