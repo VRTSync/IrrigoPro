@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { EstimateEmailData } from './email-service';
 import { buildEstimateApprovalEmail } from './outgoing-email/estimate-email';
+import { defaultEmailWording } from './outgoing-email/wording';
 
 async function render(data: EstimateEmailData) {
   const approvalUrl = `https://irrigopro.com/estimate-approval/${data.approvalToken}`;
@@ -9,7 +10,7 @@ async function render(data: EstimateEmailData) {
     approveUrl: approvalUrl,
     rejectUrl: `${approvalUrl}?intent=reject`,
     viewUrl: approvalUrl,
-  });
+  }, defaultEmailWording("estimate"));
 }
 const renderHTML = async (data: EstimateEmailData) => (await render(data)).html;
 const renderText = async (data: EstimateEmailData) => (await render(data)).text;

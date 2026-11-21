@@ -1397,3 +1397,73 @@ mtime_ms = 1795206160462
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ff6ba103-9094-4aef-98fd-e2220052454c/01080320-2e75-4707-88ba-33b1055cb88b"
 storage_version_token = "1795206185638669"
 content_type = "image/png"
+
+[[outputs]]
+id = "bdhw4k7IekmC2RUt-o3RQ"
+uri = "file://generated-artifacts/email-wording/card-1280.png"
+type = "image"
+title = "Email wording card at 1280 px"
+description = "Signed-in Company Profile with saved final-notice wording and the live preview."
+logical_id = "6e5203ff-2b13-4505-b0b4-5d3e98df0fad"
+content_hash = "sha256:b0615af94baa7ec72ca56a0558bcc80a5b2853ef10d9d5a05b6bca734ae5e425"
+size = 165739
+mtime_ms = 1795283749538
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/6e5203ff-2b13-4505-b0b4-5d3e98df0fad/4a217ab8-7bde-4217-b05e-f776e26465b6"
+storage_version_token = "1795283874583076"
+content_type = "image/png"
+
+[[outputs]]
+id = "wqFDjl-cAgEkkmA2rhMAI"
+uri = "file://generated-artifacts/email-wording/card-375-editor.png"
+type = "image"
+title = "Email wording card at 375 px"
+description = "Signed-in phone-width editor stacked above the preview."
+logical_id = "ad154b59-d388-4b00-b3a7-a5b69f4520fe"
+content_hash = "sha256:4598669d1571c8738131bd440faaaa63102a5218e276658a2f332038c0f5a505"
+size = 88234
+mtime_ms = 1795283822342
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ad154b59-d388-4b00-b3a7-a5b69f4520fe/b15400a7-72bc-44a1-82d7-06b666a36e59"
+storage_version_token = "1795283875231526"
+content_type = "image/png"
+
+[[outputs]]
+id = "IgIiKCVRL-3FP0k9GLuBl"
+uri = "file://generated-artifacts/email-wording/card-375-preview.png"
+type = "image"
+title = "Live preview at 375 px"
+description = "The sample email as shown in the phone-width editor."
+logical_id = "3f53fff4-ed4d-4456-9c3a-a0e6ab0d3bce"
+content_hash = "sha256:8dd0870956bc8669831730ee5721019f6206050c8a7922d1d506f9fd900e8649"
+size = 78593
+mtime_ms = 1795283822786
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3f53fff4-ed4d-4456-9c3a-a0e6ab0d3bce/f3ff17be-5dc1-4007-bcc7-cc8ee87195ab"
+storage_version_token = "1795283875733487"
+content_type = "image/png"
+
+[[outputs]]
+id = "PZSVpKCBYXVKRMbSIjmyu"
+uri = "file://generated-artifacts/email-wording/card-reset-default.png"
+type = "image"
+title = "Final notice after reset"
+description = "The editor restored the catalog wording."
+logical_id = "f68b685f-493e-4cd6-9817-0adc057dc2a9"
+content_hash = "sha256:055668eb32308eb6093cbf0998601730b8dd05f52f1b70b970919bf2561140d0"
+size = 146082
+mtime_ms = 1795283764130
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/f68b685f-493e-4cd6-9817-0adc057dc2a9/596d634d-d89c-4b02-bf4e-478a03153d11"
+storage_version_token = "1795283876242989"
+content_type = "image/png"
+
+[[outputs]]
+id = "AmPaYNtyVHYs6ugNoITeX"
+uri = "file://generated-artifacts/email-wording/reviewed-email.png"
+type = "image"
+title = "Final notice before delivery"
+description = "Development Review and Send rendering of the test message, not an inbox screenshot."
+logical_id = "ac59b8fe-474c-4743-b0f8-f6be0d1784c2"
+content_hash = "sha256:2c05145493a9496fa714877fc3b7cbdeaf9d047242cdb864fbf42e3445a93a79"
+size = 82262
+mtime_ms = 1795283762670
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ac59b8fe-474c-4743-b0f8-f6be0d1784c2/ed6600e7-c2a7-431e-942b-2d836a4c4aea"
+storage_version_token = "1795283876732495"
+content_type = "image/png"

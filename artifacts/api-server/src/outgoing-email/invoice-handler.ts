@@ -10,9 +10,8 @@ import { ObjectStorageService } from "../objectStorage";
 import { requireInvoiceSend } from "../routes/role-guards";
 import { storage } from "../storage";
 import { billingDateRange, invoiceCurrency as currency, invoiceShortDate as shortDate } from "./invoice-email-format";
-import { formatPhone, renderEmailLayout } from "./layout";
+import { buildInvoiceEmail, INVOICE_GUIDE_ATTACHMENT_TITLE as guideTitle } from "./invoice-email";
 import { INVOICE_CHANGED, INVOICE_GUIDE_CHANGED, OutgoingEmailError, type BuiltDraft, type OutgoingEmailHandler } from "./types";
-import { fillWording, getEmailWording } from "./wording";
 
 export interface InvoiceEmailEntity {
   invoice: Invoice;
@@ -60,27 +59,24 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
       const to = input.to || customer.email?.trim() || invoice.customerEmail?.trim() || "";
       const note = input.note ?? "";
       const dueDate = computeEffectiveDueDate(invoice.dueDate, invoice.createdAt, customer.paymentTerms);
-      const values = {
-        customerName: customer.irrigoName ?? customer.name,
-        companyName: company.name,
-        companyPhone: formatPhone(company.phone),
-        companyEmail: company.email?.trim() ?? "",
-        invoiceNumber: invoice.invoiceNumber,
-        billingMonth: invoiceBillingPeriod(invoice),
-        balanceDue: currency.format(resolveBalanceDue(invoice)),
-        dueDate: Number.isFinite(dueDate.getTime()) ? shortDate.format(dueDate) : "",
-      };
       const filename = buildInvoicePdfFilename(invoice, customer, invoice.id);
-      const [latest, versionStamp, wording, guide] = await Promise.all([
+      const [latest, versionStamp, guide] = await Promise.all([
         deps.storage.getLatestInvoiceSentCopy(invoice.id, invoice.companyId),
         deps.pdf.getDocumentVersion(invoice.id, invoice.companyId),
-        getEmailWording(invoice.companyId, "invoice"),
         company.attachInvoiceGuide
           ? guideSnapshot === undefined ? guides.getCurrentInvoiceGuide() : guideSnapshot
           : undefined,
       ]);
-      const guideTitle = "Guide: how to read your invoice";
-      const subject = input.subject || fillWording(wording.subject, values);
+      const content = await buildInvoiceEmail({
+        company, customerName: customer.irrigoName ?? customer.name, invoiceNumber: invoice.invoiceNumber,
+        billingMonth: invoiceBillingPeriod(invoice), billingPeriodRange: billingDateRange(invoice),
+        dueDateLabel: Number.isFinite(dueDate.getTime()) ? shortDate.format(dueDate) : null,
+        balanceDue: currency.format(resolveBalanceDue(invoice)), note, subject: input.subject,
+        attachments: [
+          { title: "Billing detail report", filename },
+          ...(guide ? [{ title: guideTitle, filename: guide.filename }] : []),
+        ],
+      });
       const warnings: string[] = [];
       if (invoice.qbVoidDetectedAt) warnings.push("QuickBooks shows this invoice as voided.");
       if (latest?.sentAt && latest.sentToEmail) {
@@ -92,27 +88,7 @@ export function createInvoiceEmailHandler(deps: InvoiceEmailDeps = defaultDeps) 
       if (!to) warnings.push(noRecipient);
       if (company.attachInvoiceGuide && !guide) warnings.push("No invoice guide is uploaded yet, so this email goes without it.");
       return {
-        sender, to, cc: input.cc ?? [], bcc: input.bcc ?? [], subject, note,
-        ...renderEmailLayout({
-          company, subject, docType: "Invoice", docNumber: invoice.invoiceNumber, stripe: "green",
-          wording: {
-            eyebrow: fillWording(wording.eyebrow, values),
-            headline: fillWording(wording.headline, values),
-            intro: fillWording(wording.intro, values),
-            closing: fillWording(wording.closing, values),
-          },
-          customerName: values.customerName, note,
-          facts: [
-            { label: "Invoice", value: invoice.invoiceNumber },
-            { label: "Billing period", value: billingDateRange(invoice) },
-            ...(values.dueDate ? [{ label: "Due", value: values.dueDate }] : []),
-          ],
-          total: { label: "Amount due", value: values.balanceDue },
-          attachments: [
-            { title: "Billing detail report", filename },
-            ...(guide ? [{ title: guideTitle, filename: guide.filename }] : []),
-          ],
-        }),
+        sender, to, cc: input.cc ?? [], bcc: input.bcc ?? [], note, ...content,
         attachments: [
           { filename, viewUrl: `/api/invoices/${invoice.id}/pdf/download` },
           ...(guide ? [{ title: guideTitle, filename: guide.filename, viewUrl: `/api/platform-documents/${guide.id}/file` }] : []),

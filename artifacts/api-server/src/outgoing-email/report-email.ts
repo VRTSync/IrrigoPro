@@ -1,12 +1,13 @@
 import type { Company } from "@workspace/db";
 import { formatPhone, renderEmailLayout, type EmailLayoutInput } from "./layout";
-import { fillWording, getEmailWording, type EmailKey } from "./wording";
+import { fillWording, getEmailWording, type EmailKey, type Wording } from "./wording";
 
 type ReportEmailInput = {
   company: Company;
   customerName: string;
   propertyAddress: string | null;
   note: string;
+  wording?: Wording;
 };
 type ReportEmail = { subject: string; html: string; text: string; filename: string };
 
@@ -15,7 +16,7 @@ const reportDate = new Intl.DateTimeFormat("en-US", {
 });
 
 async function buildReportEmail(
-  { company, customerName, propertyAddress, note }: ReportEmailInput,
+  { company, customerName, propertyAddress, note, wording: override }: ReportEmailInput,
   report: {
     key: EmailKey;
     docType: string;
@@ -28,7 +29,7 @@ async function buildReportEmail(
   const address = propertyAddress?.trim() ?? "";
   const property = address || customerName;
   const filename = `${property.replace(/[/\\:*?"<>|]/g, " ").replace(/\s+/g, " ").trim()} - ${report.filenameSuffix}.pdf`;
-  const wording = await getEmailWording(company.id, report.key);
+  const wording = override ?? await getEmailWording(company.id, report.key);
   const values = {
     customerName, property, propertyAddress: address,
     companyName: company.name,
@@ -65,10 +66,10 @@ export async function buildWetCheckReportEmail(
 }
 
 export async function buildIrrigationProfileReportEmail(
-  args: ReportEmailInput & { controllerCount: number },
+  args: ReportEmailInput & { controllerCount: number; reportDate?: Date },
 ): Promise<ReportEmail> {
   return buildReportEmail(args, {
-    key: "irrigation_profile_report", docType: "System profile", docNumber: reportDate.format(new Date()),
+    key: "irrigation_profile_report", docType: "System profile", docNumber: reportDate.format(args.reportDate ?? new Date()),
     attachmentTitle: "System profile", filenameSuffix: "Irrigation Profile",
     facts: [{ label: "Controllers", value: String(args.controllerCount) }],
   });

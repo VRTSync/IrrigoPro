@@ -3,7 +3,7 @@ import { storage } from './storage';
 import { formatEstimateNumber } from '@workspace/shared';
 import { DEFAULT_FROM_EMAIL, SENDGRID_FROM_NAME, senderFromCompany, type CompanySender } from './lib/company-sender';
 import { emailBaseUrl } from './lib/email-base-url';
-import { buildEstimateApprovalEmail, buildEstimateConfirmationEmail } from './outgoing-email/estimate-email';
+import { buildEstimateApprovalEmail, buildApprovalConfirmationEmail } from './outgoing-email/estimate-email';
 import { escapeHtml } from './outgoing-email/layout';
 import { logger } from './lib/logger';
 import type { Company, Estimate } from '@workspace/db';
@@ -279,7 +279,11 @@ export class EmailService {
         ? customer.irrigoName ?? customer.name
         : estimate.customerName;
       const sender = senderFromCompany(company);
-      const content = await buildEstimateConfirmationEmail(args, company, customerName);
+      const content = await buildApprovalConfirmationEmail({
+        company, companyId: estimate.companyId, customerName, estimateNumber: estimate.estimateNumber,
+        projectName: estimate.projectName, approved: args.approved, decidedAt: args.decidedAt,
+        totalAmount: estimate.totalAmount,
+      });
       await sgMail.send({
         from: sender.from,
         ...(sender.replyTo ? { replyTo: sender.replyTo } : {}),

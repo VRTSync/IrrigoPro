@@ -62,3 +62,15 @@ An invoice guide replacement is a version change even if its filename and copy a
 **Why:** A content fingerprint can reject a stale review but cannot explain which component changed. A filename is editable metadata, not the identity of the reviewed file.
 
 **How to apply:** When a stale-review message must name the changed component, carry its identity in the authenticated review claims. Bind each batch review to one guide snapshot and check the current version again before delivering; never substitute the latest guide for the one that was reviewed.
+
+Company wording overrides are complete five-field snapshots. Reset removes the snapshot, not just its changed fields. The editor previews proposed wording through the production builders with synthetic document data, and never sends from that preview.
+
+**Why:** A partial override could silently mix company-approved copy with new platform defaults. Rendering samples separately from the real builders would let the editor misrepresent what customers receive.
+
+**How to apply:** Keep defaults and allowed placeholders in the catalog, store overrides by tenant and email key, and pass proposed copy explicitly to the same builder Review and Send uses. Leave document facts, layout and delivery outside the editor.
+
+Permanently deleting the last editor leaves company wording and its last-changed date intact, removes the attribution from the card, and keeps the audit event.
+
+**Why:** The company owns its wording independently of any employee. The user approved clearing the name rather than blocking account removal or removing saved wording.
+
+**How to apply:** Treat last-editor attribution as optional after offboarding; do not carry the account or name forward solely for the editor card.

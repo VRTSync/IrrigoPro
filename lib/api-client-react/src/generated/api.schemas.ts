@@ -5,6 +5,52 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface EmailWordingContent {
+  subject: string;
+  eyebrow: string;
+  headline: string;
+  intro: string;
+  closing: string;
+}
+
+export interface EmailWordingFieldErrors {
+  /** @nullable */
+  subject: string | null;
+  /** @nullable */
+  eyebrow: string | null;
+  /** @nullable */
+  headline: string | null;
+  /** @nullable */
+  intro: string | null;
+  /** @nullable */
+  closing: string | null;
+}
+
+export interface EmailWordingValidationProblem {
+  message: string;
+  fieldErrors: EmailWordingFieldErrors;
+}
+
+export interface EmailWordingPreview {
+  fieldErrors: EmailWordingFieldErrors | null;
+  subject?: string;
+  html?: string;
+  text?: string;
+}
+
+export interface CompanyEmailWordingEntry {
+  key: string;
+  label: string;
+  placeholders: string[];
+  defaults: EmailWordingContent;
+  wording: EmailWordingContent;
+  isCustom: boolean;
+  /** @nullable */
+  updatedAt: string | null;
+  /** @nullable */
+  updatedBy: string | null;
+}
+
 export interface OutgoingEmailAttachmentInput {
   confirmationToken: string;
 }

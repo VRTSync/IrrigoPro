@@ -16,6 +16,7 @@ import { apiRequest } from "@/lib/queryClient";
 import CompanySetup from "@/components/company/company-setup";
 import { CustomerRecordsCard } from "@/components/company/customer-records-card";
 import { OutgoingEmailCard } from "@/components/company/outgoing-email-card";
+import { EmailWordingCard } from "@/components/company/email-wording-card";
 import { ObjectUploader } from "@/components/ObjectUploader";
 
 const companyProfileSchema = z.object({
@@ -502,6 +503,7 @@ export default function CompanyProfile() {
           <CustomerRecordsCard companyId={companyId} canEdit={user?.role === "company_admin"} />
 
           <OutgoingEmailCard companyId={companyId} canEdit={user?.role === "company_admin"} />
+          {user?.role === "company_admin" && <EmailWordingCard key={companyId} companyId={companyId} />}
 
           {/* Company Stats */}
           <Card>

@@ -40,3 +40,9 @@ rather than silently "fixed" into scope creep.
 **Why:** Chromium's PDF viewer can leave Puppeteer's response buffer empty for a response that successfully delivers bytes. A popup can also steal focus and stall the next interaction on the source page.
 
 **How to apply:** Check status, MIME, and bytes with `fetch` and `arrayBuffer` inside the signed-in page. If testing the View click itself, capture its request separately and run later interactions in the foreground or in a fresh page.
+
+**Rule:** Confirm React-controlled edits by observing a new server response or rendered result, not by reading the input's DOM value alone.
+
+**Why:** Browser automation could put new text in a controlled textarea without triggering the form change; the textarea looked updated while the editor kept the old validation and preview.
+
+**How to apply:** Use real keyboard selection and Puppeteer's `keyboard.sendCharacter(text)` or `keyboard.type(text)`, then assert what changed outside the input.

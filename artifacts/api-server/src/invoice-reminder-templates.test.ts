@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { Company } from "@workspace/db";
 import { pastDueText, REMINDER_EMAIL_KEY, renderReminderEmail, type ReminderTemplateInput } from "./invoice-reminder-templates";
-import { getEmailWording } from "./outgoing-email/wording";
+import { defaultEmailWording } from "./outgoing-email/wording";
 
 const input = {
   company: { name: "Green Valley Irrigation", phone: "9705550100" } as Company,
@@ -22,8 +22,8 @@ for (const [templateKey, stripe, subjectPrefix] of [
   ["firm", "#f0b429", "Past due:"],
   ["final_notice", "#d64545", "Final notice:"],
 ] as const) {
-  it(`${templateKey} uses the catalog, shared facts and saved invoice filename`, async () => {
-    const wording = await getEmailWording(1, REMINDER_EMAIL_KEY[templateKey]);
+  it(`${templateKey} uses the catalog, shared facts and saved invoice filename`, () => {
+    const wording = defaultEmailWording(REMINDER_EMAIL_KEY[templateKey]);
     const { subject, html, text } = renderReminderEmail({ ...input, templateKey, wording });
     assert.equal(subject, `${subjectPrefix} Invoice INV-123 – The Ranch – October 2026`);
     assert.ok(html.includes(`<tr bgcolor="${stripe}"><td height="5"`));

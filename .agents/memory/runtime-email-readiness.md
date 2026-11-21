@@ -16,3 +16,9 @@ A successful SendGrid send and an empty Activity API lookup can coexist with con
 **How to apply:** Report provider acceptance, Activity results, and inbox confirmation as separate evidence. Do not send again just because an Activity lookup has no matches.
 
 If a live acceptance script loses its response capture after clicking Send, check the running server's completed request status before trying again. A capture failure is not a delivery failure: the provider can have accepted the message already. Do not resend a successful or unresolved attempt just to get cleaner evidence; ask the inbox owner to verify receipt. Provider acceptance and inbox receipt are separate checks.
+
+Keep any synthetic public logo referenced by a live test message available through inbox screenshot collection, even when cleaning up the fixture tenant.
+
+**Why:** Email clients load the logo when the recipient opens the message, potentially after the development script has finished.
+
+**How to apply:** Use a disposable graphic with no private data, and do not remove the image object as part of immediate fixture cleanup if a real message references it.

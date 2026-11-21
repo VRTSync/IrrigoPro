@@ -102,6 +102,24 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const companyEmailWording = pgTable("company_email_wording", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id).notNull(),
+  emailKey: text("email_key", { enum: [
+    "invoice", "estimate", "reminder_friendly", "reminder_past_due", "reminder_final",
+    "estimate_approved", "estimate_declined", "wet_check_report", "irrigation_profile_report",
+  ] }).notNull(),
+  subject: text("subject").notNull(),
+  eyebrow: text("eyebrow").notNull(),
+  headline: text("headline").notNull(),
+  intro: text("intro").notNull(),
+  closing: text("closing").notNull(),
+  // Wording belongs to the company. Permanently removing an editor clears
+  // the attribution without removing the wording or its audit history.
+  updatedByUserId: integer("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({ uniq: uniqueIndex("company_email_wording_company_key").on(t.companyId, t.emailKey) }));
+
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").references(() => companies.id).notNull(),

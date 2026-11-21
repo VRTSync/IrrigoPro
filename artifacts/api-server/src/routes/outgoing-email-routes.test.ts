@@ -9,6 +9,7 @@ import { requireInvoiceRead } from "./role-guards";
 
 // Storage initialization must not run in this in-memory HTTP suite.
 mock.module("../storage", { namedExports: { storage: {} } });
+mock.module("../outgoing-email/wording-store", { namedExports: { findEmailWordingOverride: async () => undefined } });
 const estimateMessages: Array<{ html: string; text: string; to: string; subject: string; attachments?: Array<{ filename: string; content: string }> }> = [];
 const estimateRenders: Array<{ estimate: EstimateWithItems; sentAt: Date; html: string }> = [];
 let failEstimatePdf = false;

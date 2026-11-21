@@ -1354,6 +1354,106 @@ export const GetCustomerPullStatusResponse = zod.object({
   ]),
 });
 
+export const ListCompanyEmailWordingParams = zod.object({
+  companyId: zod.coerce.number().min(1),
+});
+
+export const ListCompanyEmailWordingResponseItem = zod.object({
+  key: zod.string(),
+  label: zod.string(),
+  placeholders: zod.array(zod.string()),
+  defaults: zod.object({
+    subject: zod.string(),
+    eyebrow: zod.string(),
+    headline: zod.string(),
+    intro: zod.string(),
+    closing: zod.string(),
+  }),
+  wording: zod.object({
+    subject: zod.string(),
+    eyebrow: zod.string(),
+    headline: zod.string(),
+    intro: zod.string(),
+    closing: zod.string(),
+  }),
+  isCustom: zod.boolean(),
+  updatedAt: zod.string().nullable(),
+  updatedBy: zod.string().nullable(),
+});
+export const ListCompanyEmailWordingResponse = zod.array(
+  ListCompanyEmailWordingResponseItem,
+);
+
+export const SaveCompanyEmailWordingParams = zod.object({
+  companyId: zod.coerce.number().min(1),
+  key: zod.coerce.string(),
+});
+
+export const SaveCompanyEmailWordingBody = zod.object({
+  subject: zod.string(),
+  eyebrow: zod.string(),
+  headline: zod.string(),
+  intro: zod.string(),
+  closing: zod.string(),
+});
+
+export const SaveCompanyEmailWordingResponse = zod.object({
+  key: zod.string(),
+  label: zod.string(),
+  placeholders: zod.array(zod.string()),
+  defaults: zod.object({
+    subject: zod.string(),
+    eyebrow: zod.string(),
+    headline: zod.string(),
+    intro: zod.string(),
+    closing: zod.string(),
+  }),
+  wording: zod.object({
+    subject: zod.string(),
+    eyebrow: zod.string(),
+    headline: zod.string(),
+    intro: zod.string(),
+    closing: zod.string(),
+  }),
+  isCustom: zod.boolean(),
+  updatedAt: zod.string().nullable(),
+  updatedBy: zod.string().nullable(),
+});
+
+export const ResetCompanyEmailWordingParams = zod.object({
+  companyId: zod.coerce.number().min(1),
+  key: zod.coerce.string(),
+});
+
+export const PreviewCompanyEmailWordingParams = zod.object({
+  companyId: zod.coerce.number().min(1),
+  key: zod.coerce.string(),
+});
+
+export const PreviewCompanyEmailWordingBody = zod.object({
+  subject: zod.string(),
+  eyebrow: zod.string(),
+  headline: zod.string(),
+  intro: zod.string(),
+  closing: zod.string(),
+});
+
+export const PreviewCompanyEmailWordingResponse = zod.object({
+  fieldErrors: zod.union([
+    zod.object({
+      subject: zod.string().nullable(),
+      eyebrow: zod.string().nullable(),
+      headline: zod.string().nullable(),
+      intro: zod.string().nullable(),
+      closing: zod.string().nullable(),
+    }),
+    zod.null(),
+  ]),
+  subject: zod.string().optional(),
+  html: zod.string().optional(),
+  text: zod.string().optional(),
+});
+
 /**
  * Returns server health status
  * @summary Health check

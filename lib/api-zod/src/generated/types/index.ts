@@ -7,6 +7,7 @@
  */
 
 export * from "./activateMarkupScheduleParams";
+export * from "./companyEmailWordingEntry";
 export * from "./controllerLetterConflict";
 export * from "./controllerLetterConflictHolder";
 export * from "./controllerLetterInput";
@@ -44,6 +45,10 @@ export * from "./documentationSiteSummary";
 export * from "./documentationZone";
 export * from "./documentationZonePatch";
 export * from "./documentationZonePatchZoneType";
+export * from "./emailWordingContent";
+export * from "./emailWordingFieldErrors";
+export * from "./emailWordingPreview";
+export * from "./emailWordingValidationProblem";
 export * from "./getActiveInvoiceBatchParams";
 export * from "./getActiveMarkupScheduleParams";
 export * from "./getCustomerMarkupOverrideParams";

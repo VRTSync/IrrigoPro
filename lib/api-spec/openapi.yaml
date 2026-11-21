@@ -612,6 +612,80 @@ paths:
           description: QuickBooks access is required
         "500":
           description: Failed to read sync state
+  /company/{companyId}/email-wording:
+    parameters:
+      - $ref: "#/components/parameters/EmailWordingCompany"
+    get:
+      operationId: listCompanyEmailWording
+      tags: [email-wording]
+      responses:
+        "200":
+          description: The company's nine wording templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyEmailWordingEntry"
+        "403": { description: Access denied }
+        "404": { description: Company not found }
+  /company/{companyId}/email-wording/{key}:
+    parameters:
+      - $ref: "#/components/parameters/EmailWordingCompany"
+      - $ref: "#/components/parameters/EmailWordingKey"
+    put:
+      operationId: saveCompanyEmailWording
+      tags: [email-wording]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailWordingContent"
+      responses:
+        "200":
+          description: Saved wording and last change details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyEmailWordingEntry"
+        "403": { description: Access denied }
+        "404": { description: Company or template not found }
+        "422":
+          description: Invalid wording
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailWordingValidationProblem"
+    delete:
+      operationId: resetCompanyEmailWording
+      tags: [email-wording]
+      responses:
+        "204": { description: Default wording restored }
+        "403": { description: Access denied }
+        "404": { description: Company or template not found }
+  /company/{companyId}/email-wording/{key}/preview:
+    parameters:
+      - $ref: "#/components/parameters/EmailWordingCompany"
+      - $ref: "#/components/parameters/EmailWordingKey"
+    post:
+      operationId: previewCompanyEmailWording
+      tags: [email-wording]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailWordingContent"
+      responses:
+        "200":
+          description: Rendered sample email or field errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailWordingPreview"
+        "403": { description: Access denied }
+        "404": { description: Company or template not found }
   /healthz:
     get:
       operationId: healthCheck
@@ -627,6 +701,16 @@ paths:
                 $ref: "#/components/schemas/HealthStatus"
 components:
   parameters:
+    EmailWordingCompany:
+      name: companyId
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    EmailWordingKey:
+      name: key
+      in: path
+      required: true
+      schema: { type: string }
     InvoiceBatchCompany:
       name: companyId
       in: query
@@ -638,6 +722,55 @@ components:
       description: Required explicit company context for an unscoped super administrator
       schema: { type: integer, minimum: 1 }
   schemas:
+    EmailWordingContent:
+      type: object
+      required: [subject, eyebrow, headline, intro, closing]
+      properties:
+        subject: { type: string }
+        eyebrow: { type: string }
+        headline: { type: string }
+        intro: { type: string }
+        closing: { type: string }
+    EmailWordingFieldErrors:
+      type: object
+      required: [subject, eyebrow, headline, intro, closing]
+      properties:
+        subject: { type: [string, "null"] }
+        eyebrow: { type: [string, "null"] }
+        headline: { type: [string, "null"] }
+        intro: { type: [string, "null"] }
+        closing: { type: [string, "null"] }
+    EmailWordingValidationProblem:
+      type: object
+      required: [message, fieldErrors]
+      properties:
+        message: { type: string }
+        fieldErrors: { $ref: "#/components/schemas/EmailWordingFieldErrors" }
+    EmailWordingPreview:
+      type: object
+      required: [fieldErrors]
+      properties:
+        fieldErrors:
+          anyOf:
+            - $ref: "#/components/schemas/EmailWordingFieldErrors"
+            - type: "null"
+        subject: { type: string }
+        html: { type: string }
+        text: { type: string }
+    CompanyEmailWordingEntry:
+      type: object
+      required: [key, label, placeholders, defaults, wording, isCustom, updatedAt, updatedBy]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        placeholders:
+          type: array
+          items: { type: string }
+        defaults: { $ref: "#/components/schemas/EmailWordingContent" }
+        wording: { $ref: "#/components/schemas/EmailWordingContent" }
+        isCustom: { type: boolean }
+        updatedAt: { type: [string, "null"] }
+        updatedBy: { type: [string, "null"] }
     OutgoingEmailAttachmentInput:
       type: object
       required: [confirmationToken]

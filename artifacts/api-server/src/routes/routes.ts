@@ -344,6 +344,7 @@ import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerCustomerRecordsRoutes, resolveExternalCustomer } from "./customer-records-routes";
 import { registerCompanyEmailSenderRoutes, updateCompanyHandler } from "./company-email-sender-routes";
+import { registerEmailWordingRoutes } from "./email-wording-routes";
 import { registerCustomerReviewRoutes, type QbReadIntegration, type QbReadError } from "./customer-review-routes";
 import { getCustomerRecordsLock } from "../lib/customer-records-lock";
 import { registerBudgetRoutes } from "./budget-routes";
@@ -4638,6 +4639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   registerCustomerRecordsRoutes(app, { requireAuthentication });
   registerCompanyEmailSenderRoutes(app, { requireAuthentication });
+  registerEmailWordingRoutes(app, { requireAuthentication });
   registerCustomerReviewRoutes(app, { requireAuthentication, requireQuickBooksAccess,
     integrationFor, fetchAllQbCustomers, fetchQbCustomerById, fetchQbTermNames });
 

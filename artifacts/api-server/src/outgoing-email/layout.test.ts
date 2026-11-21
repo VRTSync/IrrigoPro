@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { displayWebsite, formatPhone, renderEmailLayout, type EmailLayoutInput } from "./layout";
-import { DEFAULT_WORDING, fillWording, getEmailWording, PLACEHOLDERS, WORDING_FIELDS, type EmailKey, type Wording } from "./wording";
+import { DEFAULT_WORDING, fillWording, PLACEHOLDERS, WORDING_FIELDS, type EmailKey, type Wording } from "./wording";
 
 const fixture: EmailLayoutInput = {
   company: {
@@ -42,9 +42,8 @@ it("throws for unknown and case-mismatched placeholders even in a sentence that 
   assert.throws(() => fillWording("{constructor}", {}), /Unknown email placeholder: constructor/);
 });
 
-it("every approved wording field uses only placeholders allowed for that email", async () => {
+it("every approved wording field uses only placeholders allowed for that email", () => {
   for (const [key, wording] of Object.entries(DEFAULT_WORDING) as [EmailKey, Wording][]) {
-    assert.deepEqual(await getEmailWording(42, key), wording);
     const values = Object.fromEntries(PLACEHOLDERS[key].map(name => [name, name]));
     for (const field of WORDING_FIELDS) {
       assert.notEqual(wording[field], "");

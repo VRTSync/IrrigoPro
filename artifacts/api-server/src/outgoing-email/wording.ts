@@ -1,6 +1,6 @@
-export type EmailKey =
-  | "invoice" | "estimate" | "reminder_friendly" | "reminder_past_due" | "reminder_final"
-  | "estimate_approved" | "estimate_declined" | "wet_check_report" | "irrigation_profile_report";
+import type { companyEmailWording } from "@workspace/db/schema";
+
+export type EmailKey = typeof companyEmailWording.$inferSelect.emailKey;
 export const WORDING_FIELDS = ["subject", "eyebrow", "headline", "intro", "closing"] as const;
 export type WordingField = typeof WORDING_FIELDS[number];
 export type Wording = Record<WordingField, string>;
@@ -116,6 +116,49 @@ export function fillWording(template: string, values: Record<string, string>): s
   return sentences.join(" ");
 }
 
-export async function getEmailWording(_companyId: number, key: EmailKey): Promise<Wording> {
-  return DEFAULT_WORDING[key];
+export const WORDING_LIMITS: Record<WordingField, number> = {
+  subject: 150, eyebrow: 60, headline: 120, intro: 800, closing: 400,
+};
+export type WordingErrors = Record<WordingField, string | null>;
+
+export function isEmailKey(value: unknown): value is EmailKey {
+  return typeof value === "string" && Object.hasOwn(EMAIL_LABELS, value);
+}
+
+export function validateWording(key: EmailKey, w: Wording): WordingErrors {
+  const allowed = PLACEHOLDERS[key];
+  function validate(field: WordingField): string | null {
+    const raw = w?.[field];
+    if (typeof raw !== "string" || !raw.trim()) return "This field is required.";
+    if (/[\r\n\u0085\u2028\u2029]/.test(raw)) return "Keep this to one paragraph.";
+    const value = raw.trim();
+    const limit = WORDING_LIMITS[field];
+    if (value.length > limit) return `Use ${limit} characters or fewer.`;
+    if (/[{}]/.test(value.replace(/\{[^{}]*\}/g, ""))) {
+      return "Placeholders need both braces, like {invoiceNumber}.";
+    }
+    for (const [token, name] of value.matchAll(/\{([^{}]*)\}/g)) {
+      if (!allowed.includes(name)) {
+        return `Unknown placeholder ${token}. Use one of: ${allowed.map(p => `{${p}}`).join(", ")}.`;
+      }
+    }
+    return null;
+  }
+  return {
+    subject: validate("subject"), eyebrow: validate("eyebrow"), headline: validate("headline"),
+    intro: validate("intro"), closing: validate("closing"),
+  };
+}
+
+export function wordingFields(w: Wording): Wording {
+  return { subject: w.subject, eyebrow: w.eyebrow, headline: w.headline, intro: w.intro, closing: w.closing };
+}
+
+export function defaultEmailWording(key: EmailKey): Wording {
+  return wordingFields(DEFAULT_WORDING[key]);
+}
+
+export async function getEmailWording(companyId: number, key: EmailKey): Promise<Wording> {
+  const { findEmailWordingOverride } = await import("./wording-store");
+  return (await findEmailWordingOverride(companyId, key)) ?? defaultEmailWording(key);
 }

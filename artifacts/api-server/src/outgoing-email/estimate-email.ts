@@ -1,4 +1,4 @@
-import type { Company, Estimate } from "@workspace/db";
+import type { Company } from "@workspace/db";
 import type { EstimateEmailData } from "../email-service";
 import { storage } from "../storage";
 import { renderEstimateDetail } from "./estimate-detail";
@@ -35,10 +35,10 @@ function fillEstimateWording(
 }
 
 export async function buildEstimateApprovalEmail(
-  data: EstimateEmailData, { approveUrl, rejectUrl, viewUrl }: EstimateApprovalLinks,
+  data: EstimateEmailData, { approveUrl, rejectUrl, viewUrl }: EstimateApprovalLinks, wording?: Wording,
 ): Promise<{ subject: string; html: string; text: string }> {
   const company = emailCompany(data.companyProfile === undefined ? await storage.getCompanyProfile(data.companyId) : data.companyProfile);
-  const copy = fillEstimateWording(await getEmailWording(data.companyId, "estimate"), company, data.customerLabel, data.estimateNumber, data.projectName);
+  const copy = fillEstimateWording(wording ?? await getEmailWording(data.companyId, "estimate"), company, data.customerLabel, data.estimateNumber, data.projectName);
   const subject = data.subject || copy.subject;
   const lat = data.workLocationLat?.trim();
   const lng = data.workLocationLng?.trim();
@@ -81,24 +81,35 @@ const decisionDate = new Intl.DateTimeFormat("en-US", {
 });
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
-export async function buildEstimateConfirmationEmail(
-  { estimate, approved, decidedAt }: { estimate: Estimate; approved: boolean; decidedAt: Date },
-  companyProfile: Company | undefined,
-  customerName: string,
-): Promise<{ subject: string; html: string; text: string }> {
+export async function buildApprovalConfirmationEmail({
+  company: companyProfile, companyId, customerName, estimateNumber, projectName, approved, decidedAt, totalAmount, wording,
+}: {
+  company: Company | undefined;
+  // Preserve the existing sender's missing-company fallback and tenant lookup.
+  companyId?: number;
+  customerName: string;
+  estimateNumber: string;
+  projectName: string;
+  approved: boolean;
+  decidedAt: Date;
+  totalAmount: string | number;
+  wording?: Wording;
+}): Promise<{ subject: string; html: string; text: string }> {
   const company = emailCompany(companyProfile);
-  const wording = await getEmailWording(estimate.companyId, approved ? "estimate_approved" : "estimate_declined");
-  const copy = fillEstimateWording(wording, company, customerName, estimate.estimateNumber, estimate.projectName);
+  const key = approved ? "estimate_approved" : "estimate_declined";
+  const tenantId = companyProfile?.id ?? companyId;
+  if (!wording && tenantId == null) throw new Error("Approval confirmation needs a company.");
+  const copy = fillEstimateWording(wording ?? await getEmailWording(tenantId!, key), company, customerName, estimateNumber, projectName);
   return {
     subject: copy.subject,
     ...renderEmailLayout({
       ...copy, company, docType: "Estimate", stripe: approved ? "green" : "slate", customerName, note: "",
       facts: [
         { label: "Estimate", value: copy.docNumber },
-        ...(estimate.projectName.trim() ? [{ label: "Project", value: estimate.projectName }] : []),
+        ...(projectName.trim() ? [{ label: "Project", value: projectName }] : []),
         { label: approved ? "Approved on" : "Declined on", value: decisionDate.format(decidedAt) },
       ],
-      total: approved ? { label: "Approved total", value: currency.format(Number(estimate.totalAmount)) } : undefined,
+      total: approved ? { label: "Approved total", value: currency.format(Number(totalAmount)) } : undefined,
       attachments: [],
     }),
   };

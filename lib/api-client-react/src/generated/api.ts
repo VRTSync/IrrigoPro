@@ -18,6 +18,7 @@ import type {
 
 import type {
   ActivateMarkupScheduleParams,
+  CompanyEmailWordingEntry,
   ControllerLetterConflict,
   ControllerLetterInput,
   ControllerLetterResult,
@@ -34,6 +35,9 @@ import type {
   DocumentationSiteBlock,
   DocumentationSiteInput,
   DocumentationSites,
+  EmailWordingContent,
+  EmailWordingPreview,
+  EmailWordingValidationProblem,
   GetActiveInvoiceBatchParams,
   GetActiveMarkupScheduleParams,
   GetCustomerMarkupOverrideParams,
@@ -3741,6 +3745,354 @@ export function useGetCustomerPullStatus<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+export const getListCompanyEmailWordingUrl = (companyId: number) => {
+  return `/api/company/${companyId}/email-wording`;
+};
+
+export const listCompanyEmailWording = async (
+  companyId: number,
+  options?: RequestInit,
+): Promise<CompanyEmailWordingEntry[]> => {
+  return customFetch<CompanyEmailWordingEntry[]>(
+    getListCompanyEmailWordingUrl(companyId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListCompanyEmailWordingQueryKey = (companyId: number) => {
+  return [`/api/company/${companyId}/email-wording`] as const;
+};
+
+export const getListCompanyEmailWordingQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCompanyEmailWording>>,
+  TError = ErrorType<void>,
+>(
+  companyId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCompanyEmailWording>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListCompanyEmailWordingQueryKey(companyId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listCompanyEmailWording>>
+  > = ({ signal }) =>
+    listCompanyEmailWording(companyId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!companyId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCompanyEmailWording>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListCompanyEmailWordingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCompanyEmailWording>>
+>;
+export type ListCompanyEmailWordingQueryError = ErrorType<void>;
+
+export function useListCompanyEmailWording<
+  TData = Awaited<ReturnType<typeof listCompanyEmailWording>>,
+  TError = ErrorType<void>,
+>(
+  companyId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCompanyEmailWording>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCompanyEmailWordingQueryOptions(
+    companyId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSaveCompanyEmailWordingUrl = (
+  companyId: number,
+  key: string,
+) => {
+  return `/api/company/${companyId}/email-wording/${key}`;
+};
+
+export const saveCompanyEmailWording = async (
+  companyId: number,
+  key: string,
+  emailWordingContent: EmailWordingContent,
+  options?: RequestInit,
+): Promise<CompanyEmailWordingEntry> => {
+  return customFetch<CompanyEmailWordingEntry>(
+    getSaveCompanyEmailWordingUrl(companyId, key),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(emailWordingContent),
+    },
+  );
+};
+
+export const getSaveCompanyEmailWordingMutationOptions = <
+  TError = ErrorType<void | EmailWordingValidationProblem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveCompanyEmailWording>>,
+    TError,
+    { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof saveCompanyEmailWording>>,
+  TError,
+  { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+  TContext
+> => {
+  const mutationKey = ["saveCompanyEmailWording"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof saveCompanyEmailWording>>,
+    { companyId: number; key: string; data: BodyType<EmailWordingContent> }
+  > = (props) => {
+    const { companyId, key, data } = props ?? {};
+
+    return saveCompanyEmailWording(companyId, key, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SaveCompanyEmailWordingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof saveCompanyEmailWording>>
+>;
+export type SaveCompanyEmailWordingMutationBody = BodyType<EmailWordingContent>;
+export type SaveCompanyEmailWordingMutationError =
+  ErrorType<void | EmailWordingValidationProblem>;
+
+export const useSaveCompanyEmailWording = <
+  TError = ErrorType<void | EmailWordingValidationProblem>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof saveCompanyEmailWording>>,
+    TError,
+    { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof saveCompanyEmailWording>>,
+  TError,
+  { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+  TContext
+> => {
+  return useMutation(getSaveCompanyEmailWordingMutationOptions(options));
+};
+
+export const getResetCompanyEmailWordingUrl = (
+  companyId: number,
+  key: string,
+) => {
+  return `/api/company/${companyId}/email-wording/${key}`;
+};
+
+export const resetCompanyEmailWording = async (
+  companyId: number,
+  key: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getResetCompanyEmailWordingUrl(companyId, key), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getResetCompanyEmailWordingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetCompanyEmailWording>>,
+    TError,
+    { companyId: number; key: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resetCompanyEmailWording>>,
+  TError,
+  { companyId: number; key: string },
+  TContext
+> => {
+  const mutationKey = ["resetCompanyEmailWording"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resetCompanyEmailWording>>,
+    { companyId: number; key: string }
+  > = (props) => {
+    const { companyId, key } = props ?? {};
+
+    return resetCompanyEmailWording(companyId, key, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResetCompanyEmailWordingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resetCompanyEmailWording>>
+>;
+
+export type ResetCompanyEmailWordingMutationError = ErrorType<void>;
+
+export const useResetCompanyEmailWording = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetCompanyEmailWording>>,
+    TError,
+    { companyId: number; key: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resetCompanyEmailWording>>,
+  TError,
+  { companyId: number; key: string },
+  TContext
+> => {
+  return useMutation(getResetCompanyEmailWordingMutationOptions(options));
+};
+
+export const getPreviewCompanyEmailWordingUrl = (
+  companyId: number,
+  key: string,
+) => {
+  return `/api/company/${companyId}/email-wording/${key}/preview`;
+};
+
+export const previewCompanyEmailWording = async (
+  companyId: number,
+  key: string,
+  emailWordingContent: EmailWordingContent,
+  options?: RequestInit,
+): Promise<EmailWordingPreview> => {
+  return customFetch<EmailWordingPreview>(
+    getPreviewCompanyEmailWordingUrl(companyId, key),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(emailWordingContent),
+    },
+  );
+};
+
+export const getPreviewCompanyEmailWordingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewCompanyEmailWording>>,
+    TError,
+    { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewCompanyEmailWording>>,
+  TError,
+  { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+  TContext
+> => {
+  const mutationKey = ["previewCompanyEmailWording"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewCompanyEmailWording>>,
+    { companyId: number; key: string; data: BodyType<EmailWordingContent> }
+  > = (props) => {
+    const { companyId, key, data } = props ?? {};
+
+    return previewCompanyEmailWording(companyId, key, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewCompanyEmailWordingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewCompanyEmailWording>>
+>;
+export type PreviewCompanyEmailWordingMutationBody =
+  BodyType<EmailWordingContent>;
+export type PreviewCompanyEmailWordingMutationError = ErrorType<void>;
+
+export const usePreviewCompanyEmailWording = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewCompanyEmailWording>>,
+    TError,
+    { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewCompanyEmailWording>>,
+  TError,
+  { companyId: number; key: string; data: BodyType<EmailWordingContent> },
+  TContext
+> => {
+  return useMutation(getPreviewCompanyEmailWordingMutationOptions(options));
+};
 
 /**
  * Returns server health status

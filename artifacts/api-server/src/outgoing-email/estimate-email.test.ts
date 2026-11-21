@@ -21,6 +21,7 @@ type Message = {
 const messages: Message[] = [];
 const companyLookups: number[] = [];
 mock.module("../db", { namedExports: { db: {} } });
+mock.module("./wording-store", { namedExports: { findEmailWordingOverride: async () => undefined } });
 mock.module("../storage", { namedExports: { storage: {
   async getCompanyProfile(id: number) {
     companyLookups.push(id);
@@ -32,11 +33,11 @@ mock.module("@sendgrid/mail", { defaultExport: {
   setApiKey() {},
   async send(message: Message) { messages.push(message); },
 } });
-mock.property(process, "env", { SENDGRID_API_KEY: "test-only-key", APP_BASE_URL: "https://irrigation.example.invalid" });
+const emailEnv = mock.property(process, "env", { SENDGRID_API_KEY: "test-only-key", APP_BASE_URL: "https://irrigation.example.invalid" });
 const { EmailService } = await import("../email-service");
 const { buildEstimateApprovalEmail, ESTIMATE_PREVIEW_LINK } = await import("./estimate-email");
 const { buildEmailZoneGroups } = await import("./estimate-detail");
-mock.restoreAll();
+emailEnv.mock.restore();
 
 const line = {
   description: "Replace & tune <main valve>", partName: "Valve", quantity: 2,

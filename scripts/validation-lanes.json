@@ -107,6 +107,10 @@
   ],
   "api-field": [
     {
+      "name": "customer-email-wording",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-force-exit --test-concurrency=1 --test-reporter=spec src/outgoing-email/wording.test.ts src/routes/email-wording-routes.test.ts"
+    },
+    {
       "name": "customer-email-layout",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/outgoing-email/layout.test.ts src/invoice-reminder-templates.test.ts"
     },
@@ -255,6 +259,10 @@
     {
       "name": "customer-records-card",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/company/customer-records-card.test.tsx"
+    },
+    {
+      "name": "customer-email-wording-card",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/company/email-wording-card.test.tsx"
     },
     {
       "name": "customer-selector-one-modal",

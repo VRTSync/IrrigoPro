@@ -7,6 +7,7 @@ import type { EstimateEmailData } from "./email-service";
 const sent: any[] = [];
 let confirmationCompany: Partial<Company>;
 mock.module("./db", { namedExports: { db: {} } });
+mock.module("./outgoing-email/wording-store", { namedExports: { findEmailWordingOverride: async () => undefined } });
 mock.module("@sendgrid/mail", { defaultExport: {
   setApiKey() {},
   async send(message: unknown) { sent.push(message); return [{ statusCode: 202 }]; },
@@ -15,12 +16,12 @@ mock.module("./storage", { namedExports: { storage: {
   async getCompanyProfile() { return confirmationCompany; },
 } } });
 // Test-only configuration; no real credential is read or used.
-mock.property(process, "env", {
+const emailEnv = mock.property(process, "env", {
   SENDGRID_API_KEY: "test-only-key", SENDGRID_FROM_EMAIL: "platform@example.com", SENDGRID_FROM_NAME: "Platform",
 });
 const { EmailService } = await import("./email-service");
 const { senderFromCompany } = await import("./lib/company-sender");
-mock.restoreAll();
+emailEnv.mock.restore();
 
 const companySender: CompanySender = {
   from: { email: "billing@company.test", name: "Company" },
