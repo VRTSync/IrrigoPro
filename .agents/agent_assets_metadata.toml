@@ -1467,3 +1467,17 @@ mtime_ms = 1795283762670
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/ac59b8fe-474c-4743-b0f8-f6be0d1784c2/ed6600e7-c2a7-431e-942b-2d836a4c4aea"
 storage_version_token = "1795283876732495"
 content_type = "image/png"
+
+[[outputs]]
+id = "KNYGfiSSEphwmMaYy4ztN"
+uri = "file://generated-artifacts/bookkeeper-invoices-1024.png"
+type = "image"
+title = "Bookkeeper Invoices at 1024 px"
+description = "Development preview, signed in as a bookkeeper with the sidebar and an invoice row expanded. Browser measurements confirmed no window-level horizontal scrolling."
+logical_id = "33735211-6c32-47f2-b178-b66bf3dc007d"
+content_hash = "sha256:f67f5d23417d2e49bdd9107a10920987a4533663d74fd7671e0ee44e7193c89f"
+size = 207471
+mtime_ms = 1795374001169
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/33735211-6c32-47f2-b178-b66bf3dc007d/5913b991-adcb-473e-a8ab-998a8cce234d"
+storage_version_token = "1795374014772054"
+content_type = "image/png"

@@ -307,7 +307,8 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
             userRole={userRole}
           />
         </div>
-        <SidebarInset className="min-h-screen pb-20 lg:pb-0">
+        {/* min-w-0: without it this flex child grows to its widest table and the whole window scrolls sideways. */}
+        <SidebarInset className="min-h-screen min-w-0 pb-20 lg:pb-0">
           <div className="lg:hidden">
             <Navigation />
           </div>

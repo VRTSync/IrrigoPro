@@ -189,6 +189,13 @@ describe("bookkeeperNav — desktop sidebar", () => {
     expect(screen.queryByText("Manager Workspace")).toBeNull();
     expect(screen.queryByText("Wet Checks")).toBeNull();
   });
+
+  it("lets the content column shrink so wide tables cannot widen the window", () => {
+    renderShell();
+    const main = screen.getByTestId("desktop-shell").querySelector("main");
+    expect(main).not.toBeNull();
+    expect(main!.className).toContain("min-w-0");
+  });
 });
 
 // ── Surface 2: navigation.tsx role switch ────────────────────────────────────
