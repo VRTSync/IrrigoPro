@@ -1481,3 +1481,45 @@ mtime_ms = 1795374001169
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/33735211-6c32-47f2-b178-b66bf3dc007d/5913b991-adcb-473e-a8ab-998a8cce234d"
 storage_version_token = "1795374014772054"
 content_type = "image/png"
+
+[[outputs]]
+id = "QMPP1bRhCVcaUoBJahRzT"
+uri = "file://generated-artifacts/invoice-table-fit/invoice-table-1024x768.png"
+type = "image"
+title = "Bookkeeper invoices at 1024 × 768"
+description = "Signed-in development preview with the sidebar expanded and an invoice open. Long customer and line-item text stay inside the table."
+logical_id = "b7900cae-4fd9-48fa-a35f-542cbb9b3fe1"
+content_hash = "sha256:2c2e843cdb1d9efac75f149a3f26cdc5e6ef43ed2e374a12ec971c8020d5823d"
+size = 210998
+mtime_ms = 1795382435658
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b7900cae-4fd9-48fa-a35f-542cbb9b3fe1/bea0a365-a963-4940-81d7-90948d0c32f0"
+storage_version_token = "1795382460019287"
+content_type = "image/png"
+
+[[outputs]]
+id = "lnQ328pHDcACA3jGaKpO3"
+uri = "file://generated-artifacts/invoice-table-fit/invoice-table-1280x720.png"
+type = "image"
+title = "Bookkeeper invoices at 1280 × 720"
+description = "Signed-in development preview with the sidebar expanded and an invoice open. Long customer and line-item text stay inside the table."
+logical_id = "3ba986b7-30d4-4640-b9df-e9abf2ffc44f"
+content_hash = "sha256:559919c2fede10396171ba8e1303ea198347403515318ebf6a860f51a735af72"
+size = 212655
+mtime_ms = 1795382435802
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3ba986b7-30d4-4640-b9df-e9abf2ffc44f/bfcca3e9-ff6e-44fe-ad55-35278741cbfe"
+storage_version_token = "1795382460449127"
+content_type = "image/png"
+
+[[outputs]]
+id = "uOy1R6ad4oHmmdnjSKNkC"
+uri = "file://generated-artifacts/invoice-table-fit/invoice-table-1366x768.png"
+type = "image"
+title = "Bookkeeper invoices at 1366 × 768"
+description = "Signed-in development preview with the sidebar expanded and an invoice open. Long customer and line-item text stay inside the table."
+logical_id = "d975b210-f6e7-42e9-a751-5902cda4b19f"
+content_hash = "sha256:3adfb0dfd29ebaaf86ff75dde8cd9c5d2a5b60dc9752690c92885062671bb095"
+size = 228423
+mtime_ms = 1795382435966
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/d975b210-f6e7-42e9-a751-5902cda4b19f/6f5a0b85-61c4-40e8-99ef-ba6bd9aa9237"
+storage_version_token = "1795382461010093"
+content_type = "image/png"

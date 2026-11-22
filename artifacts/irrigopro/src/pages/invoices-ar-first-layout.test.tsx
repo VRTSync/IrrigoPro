@@ -243,6 +243,15 @@ async function waitForList() {
   await waitFor(() => expect(requestedUrls.some(isListRequest)).toBe(true));
 }
 
+it("lays the desktop table out fixed so it can never be wider than its card", async () => {
+  renderInvoices();
+  await waitFor(() => expect(screen.getAllByTestId("invoice-row-1").length).toBeGreaterThan(0));
+  const table = document.querySelector("table");
+  expect(table!.className).toContain("table-fixed");
+  expect(screen.getByTestId("button-view-pdf-inline-1").className).toContain("hidden");
+  expect(screen.getByTestId("button-view-pdf-inline-1").className).toContain("xl:inline-flex");
+});
+
 // ── 0. one scope for the list and the aggregate ──────────────────────────────
 
 describe("company scope", () => {

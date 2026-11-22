@@ -112,6 +112,7 @@ import {
   type ReminderEligibilityResponse,
 } from "@/components/billing/invoice-primary-action";
 import { formatCurrency } from "@/lib/format-currency";
+import { cn } from "@/lib/utils";
 // Task #1942 — the A/R query model moved out of this file so the filter bar,
 // the strip and the header can share it without importing the page.
 import {
@@ -631,19 +632,21 @@ function ArNoteIndicator({
 function ArSortableHeader({
   sortKey,
   align = "left",
+  className,
   sort,
   dir,
   onSort,
 }: {
   sortKey: ArSortKey;
   align?: "left" | "right";
+  className?: string;
   sort: ArSortKey | null;
   dir: SortDir;
   onSort: (key: ArSortKey) => void;
 }) {
   const active = sort === sortKey;
   return (
-    <TableHead className={align === "right" ? "text-right" : undefined}>
+    <TableHead className={cn(align === "right" ? "text-right" : undefined, className)}>
       <button
         type="button"
         onClick={() => onSort(sortKey)}
@@ -1454,9 +1457,9 @@ export default function InvoicesPage() {
   const renderInvoiceCell = (invoice: Invoice, history: Invoice[], isExpanded: boolean) => {
     const mergedCount = history.filter((p) => p.status === "merged").length;
     return (
-      <TableCell className="max-w-[300px]">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate font-medium text-gray-900">{invoice.customerName}</span>
+      <TableCell>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate font-medium text-gray-900" title={invoice.customerName}>{invoice.customerName}</span>
           {/* Task #1889 — a conversation is already in flight on this invoice.
               Absent entirely for a role the server strips the data for. */}
           <ArNoteIndicator invoice={invoice} />
@@ -1525,7 +1528,7 @@ export default function InvoicesPage() {
           {formatCurrency(balanceDueOf(invoice))}
           {fallback && (
             <span
-              className="ml-1 text-xs font-normal text-amber-700"
+              className="block text-xs font-normal text-amber-700"
               title="No payment sync has run for this invoice."
             >
               (unsynced)
@@ -1558,7 +1561,7 @@ export default function InvoicesPage() {
     const paymentStatus = invoice.paymentStatus ?? "unpaid";
     const reminderCount = invoice.reminderCount ?? 0;
     return (
-      <TableCell className="max-w-[300px] align-top">
+      <TableCell className="align-top">
         {/* Line 1 — the money state. */}
         <div className="flex flex-wrap items-center gap-1.5">
           {getStatusBadge(invoice.status)}
@@ -1648,7 +1651,7 @@ export default function InvoicesPage() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 text-gray-500 hover:text-gray-900"
+          className="hidden h-8 w-8 text-gray-500 hover:text-gray-900 xl:inline-flex"
           title={`View PDF for invoice ${invoice.invoiceNumber}`}
           aria-label={`View PDF for invoice ${invoice.invoiceNumber}`}
           onClick={(e) => {
@@ -1663,7 +1666,7 @@ export default function InvoicesPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-gray-500 hover:text-gray-900"
+            className="hidden h-8 w-8 text-gray-500 hover:text-gray-900 xl:inline-flex"
             title={
               invoice.quickbooksInvoiceId
                 ? `Re-sync invoice ${invoice.invoiceNumber} to QuickBooks`
@@ -2376,11 +2379,11 @@ export default function InvoicesPage() {
                     Task #1890 added the A/R columns, so the table scrolls
                     horizontally rather than crushing the existing ones. */}
                 <div className="hidden md:block rounded-lg border border-gray-200 bg-white overflow-x-auto">
-                  <Table>
+                  <Table className="table-fixed">
                     <TableHeader>
                       <TableRow className="bg-gray-50 hover:bg-gray-50">
                         {canSelectRows && (
-                          <TableHead className="w-8">
+                          <TableHead className="w-12">
                             {/* Selects exactly what the active filters are
                                 showing — "select what I am looking at". */}
                             <Checkbox
@@ -2399,9 +2402,9 @@ export default function InvoicesPage() {
                             Balance header; both are the same controls as
                             before, on the cell that now carries the data. */}
                         <SortableHeader sortKey="customer" label="Invoice" sort={sort} onSort={toggleSort} />
-                        <ArSortableHeader sortKey="balanceDue" align="right" sort={arQuery.sort} dir={arQuery.dir} onSort={toggleArSort} />
+                        <ArSortableHeader sortKey="balanceDue" align="right" className="w-40" sort={arQuery.sort} dir={arQuery.dir} onSort={toggleArSort} />
                         <TableHead className="whitespace-nowrap">Status</TableHead>
-                        <TableHead className="w-10 text-right whitespace-nowrap">Action</TableHead>
+                        <TableHead className="w-44 xl:w-[15.5rem] text-right whitespace-nowrap">Action</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2445,7 +2448,7 @@ export default function InvoicesPage() {
                         {isExpanded && history.map((prev) => (
                           <TableRow key={prev.id} className="bg-amber-50 text-xs text-gray-400 italic">
                             {canSelectRows && <TableCell />}
-                            <TableCell className="max-w-[300px] pl-8">
+                            <TableCell className="pl-8">
                               <div className="truncate">{prev.customerName}</div>
                               <div className="mt-0.5">
                                 ↳ #{prev.invoiceNumber}
@@ -2476,7 +2479,7 @@ export default function InvoicesPage() {
                                 id={regionId}
                                 role="region"
                                 aria-labelledby={rowId}
-                                className="px-4 py-4"
+                                className="min-w-0 px-4 py-4 break-words"
                                 data-testid={`invoice-row-expansion-${invoice.id}`}
                               >
                                 <InvoiceRowExpansion
