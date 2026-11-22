@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import { getQueryFn } from "@/lib/queryClient";
 import MissingLocationDataReportPage from "./missing-location-data-report";
+
+const authState = { role: "super_admin" as string };
+vi.mock("@/lib/auth-context", () => ({
+  useAuth: () => ({ user: { id: 7, companyId: 3, role: authState.role } }),
+}));
 
 const row = {
   ticketType: "work_order",
@@ -28,6 +33,7 @@ let responseBody: unknown = { count: 1, rows: [row] };
 let requestedUrls: string[] = [];
 
 beforeEach(() => {
+  authState.role = "super_admin";
   responseStatus = 200;
   responseBody = { count: 1, rows: [row] };
   requestedUrls = [];
@@ -72,6 +78,8 @@ describe("Missing Location Data report page", () => {
     expect(await screen.findByText("WO-0042")).toBeInTheDocument();
     expect(screen.getByText("Acme Grounds")).toBeInTheDocument();
     expect(screen.getByText("Irrigo North")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Company" })).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(7);
     expect(screen.getByText("Controller missing")).toBeInTheDocument();
     expect(screen.getByText("Zone missing")).toBeInTheDocument();
     expect(screen.getByText("Low")).toBeInTheDocument();
@@ -79,6 +87,24 @@ describe("Missing Location Data report page", () => {
       "href",
       "/work-orders?openWorkOrder=42",
     );
+  });
+
+  it("shows six columns for bookkeepers, keeping type with the ticket and confidence with status", async () => {
+    authState.role = "bookkeeper";
+    renderReport();
+
+    const ticketLink = await screen.findByRole("link", { name: "WO-0042" });
+    expect(screen.getByText("Acme Grounds")).toBeInTheDocument();
+    expect(screen.queryByText("Irrigo North")).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Company" })).toBeNull();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+
+    const cells = within(screen.getByTestId("row-ticket-42")).getAllByRole("cell");
+    expect(cells).toHaveLength(6);
+    expect(cells[0]).toContainElement(ticketLink);
+    expect(within(cells[0]).getByText("WO")).toBeInTheDocument();
+    expect(within(cells[5]).getByText("billed")).toBeInTheDocument();
+    expect(within(cells[5]).getByText("Low")).toBeInTheDocument();
   });
 
   it("sends technician, date, and low-confidence filters to the report endpoint", async () => {

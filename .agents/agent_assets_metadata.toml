@@ -1523,3 +1523,45 @@ mtime_ms = 1795382435966
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/d975b210-f6e7-42e9-a751-5902cda4b19f/6f5a0b85-61c4-40e8-99ef-ba6bd9aa9237"
 storage_version_token = "1795382461010093"
 content_type = "image/png"
+
+[[outputs]]
+id = "nTrf0aovPPEddMltNFUXr"
+uri = "file://generated-artifacts/bookkeeper-screen-fit/bookkeeper-customers-1024x768.png"
+type = "image"
+title = "Bookkeeper Customers at 1024 × 768"
+description = "Signed-in Chromium check with an expanded sidebar. Long names and addresses wrap; email truncates."
+logical_id = "8be2c772-3f87-47f2-9eb8-44269c37bd93"
+content_hash = "sha256:7edd40a66a848ac6274941c8ad79550acc541a414cb156145877b7efccdbc12c"
+size = 192273
+mtime_ms = 1795382584852
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/8be2c772-3f87-47f2-9eb8-44269c37bd93/e7223320-2baf-4159-baf2-6da9926182d3"
+storage_version_token = "1795382609380282"
+content_type = "image/png"
+
+[[outputs]]
+id = "r3vOn6HSVvZLWVIeJiTEa"
+uri = "file://generated-artifacts/bookkeeper-screen-fit/bookkeeper-missing-location-data-1024x768.png"
+type = "image"
+title = "Bookkeeper Missing Location Data at 1024 × 768"
+description = "Signed-in Chromium check showing six columns, with type above the ticket and confidence below status."
+logical_id = "d9a01253-0763-47c9-a41f-f62c63fafbaf"
+content_hash = "sha256:a4c3cf621d227a1cee414c0fa3641c7c8244c2435e5f76ea0ddc35a95318bee4"
+size = 213894
+mtime_ms = 1795382586176
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/d9a01253-0763-47c9-a41f-f62c63fafbaf/d330f84e-f6eb-45e3-858d-533bbd953306"
+storage_version_token = "1795382609878194"
+content_type = "image/png"
+
+[[outputs]]
+id = "GSYAkhLVlx7LccOncd06W"
+uri = "file://generated-artifacts/bookkeeper-screen-fit/super_admin-missing-location-data-1280x768.png"
+type = "image"
+title = "Super Admin Missing Location Data at 1280 × 768"
+description = "Signed-in Chromium check showing Company as the seventh column."
+logical_id = "b79d2caf-efd4-48b7-9132-568986eb92e9"
+content_hash = "sha256:fb9599db2269842e0d952661fc0fcdbcb95755722bfcf9d3d8c420a127962016"
+size = 138198
+mtime_ms = 1795382600920
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b79d2caf-efd4-48b7-9132-568986eb92e9/9af0b76b-f1a0-411e-b004-c69f97566748"
+storage_version_token = "1795382610313495"
+content_type = "image/png"

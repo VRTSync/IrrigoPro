@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PageContainer, PageContent, PageHeader } from "@/components/ui/page-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/lib/auth-context";
 
 function useDebounce<T>(value: T, delay?: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -80,6 +81,8 @@ function ConfidenceBadge({ level }: { level: Row['confidence'] }) {
 }
 
 export default function MissingLocationDataReportPage() {
+  const { user } = useAuth();
+  const showCompany = user?.role === "super_admin";
   const [ticketType, setTicketType] = useState<string>("all");
   const [technicianInput, setTechnicianInput] = useState<string>("");
   const [from, setFrom] = useState<string>("");
@@ -267,18 +270,16 @@ export default function MissingLocationDataReportPage() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
+                <table className="w-full table-fixed text-sm text-left">
                   <thead className="bg-white border-b border-slate-200">
                     <tr>
-                      <th className="p-3 font-semibold text-slate-600">Type</th>
-                      <th className="p-3 font-semibold text-slate-600">Number</th>
+                      <th className="w-32 p-3 font-semibold text-slate-600">Ticket</th>
                       <th className="p-3 font-semibold text-slate-600">Customer</th>
-                      <th className="p-3 font-semibold text-slate-600">Company</th>
-                      <th className="p-3 font-semibold text-slate-600">Date</th>
+                      {showCompany && <th className="w-40 p-3 font-semibold text-slate-600">Company</th>}
+                      <th className="w-28 p-3 font-semibold text-slate-600">Date</th>
                       <th className="p-3 font-semibold text-slate-600">Technician</th>
                       <th className="p-3 font-semibold text-slate-600">Violations</th>
-                      <th className="p-3 font-semibold text-slate-600">Confidence</th>
-                      <th className="p-3 font-semibold text-slate-600">Status</th>
+                      <th className="w-32 p-3 font-semibold text-slate-600">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -288,26 +289,28 @@ export default function MissingLocationDataReportPage() {
                           <Badge variant="secondary" className="font-mono text-[10px] uppercase tracking-wider bg-slate-100 text-slate-600 hover:bg-slate-200 border-none shadow-none mt-0.5">
                             {sourceLabel(r.ticketType)}
                           </Badge>
+                          <div className="mt-1">
+                            <Link
+                              href={r.canonicalPath}
+                              className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                              data-testid={`link-ticket-${r.ticketId}`}
+                            >
+                              {r.ticketNumber}
+                            </Link>
+                          </div>
                         </td>
-                        <td className="p-3 font-mono text-xs align-top pt-3.5">
-                          <Link 
-                            href={r.canonicalPath} 
-                            className="text-blue-600 hover:text-blue-800 hover:underline font-medium" 
-                            data-testid={`link-ticket-${r.ticketId}`}
-                          >
-                            {r.ticketNumber}
-                          </Link>
-                        </td>
-                        <td className="p-3 align-top max-w-[200px]">
+                        <td className="p-3 align-top">
                           <div className="font-medium text-slate-900 truncate" title={r.customerName}>{r.customerName}</div>
                           {r.branchName && <div className="text-xs text-slate-500 truncate" title={r.branchName}>{r.branchName}</div>}
                         </td>
-                        <td className="p-3 align-top text-slate-600 whitespace-nowrap">
-                          {r.companyName ?? "—"}
-                        </td>
+                        {showCompany && (
+                          <td className="p-3 align-top text-slate-600 truncate" title={r.companyName ?? undefined}>
+                            {r.companyName ?? "—"}
+                          </td>
+                        )}
                         <td className="p-3 text-slate-600 whitespace-nowrap align-top pt-3.5">{fmtDate(r.workDate)}</td>
-                        <td className="p-3 text-slate-900 whitespace-nowrap align-top pt-3.5">
-                          <div className="truncate max-w-[150px]" title={r.technicianName}>
+                        <td className="p-3 text-slate-900 align-top pt-3.5">
+                          <div className="truncate" title={r.technicianName}>
                             {r.technicianName}
                           </div>
                           {r.technicianId && <div className="text-xs text-slate-400 font-mono">#{r.technicianId}</div>}
@@ -323,12 +326,12 @@ export default function MissingLocationDataReportPage() {
                           </div>
                         </td>
                         <td className="p-3 align-top pt-3.5">
-                          <ConfidenceBadge level={r.confidence} />
-                        </td>
-                        <td className="p-3 align-top pt-3.5">
-                          <Badge variant="outline" className="capitalize text-slate-600 font-normal whitespace-nowrap">
+                          <Badge variant="outline" className="capitalize text-slate-600 font-normal">
                             {r.status.replace(/_/g, ' ')}
                           </Badge>
+                          <div className="mt-1">
+                            <ConfidenceBadge level={r.confidence} />
+                          </div>
                         </td>
                       </tr>
                     ))}

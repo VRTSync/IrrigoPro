@@ -252,26 +252,26 @@ export default function Customers() {
                   {activeExpanded && (
                     <CardContent className="p-0">
                       <div className="overflow-x-auto">
-                        <table className="w-full">
+                        <table className="w-full table-fixed">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                              <th className="w-[30%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                               {userRole !== 'field_tech' && (
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                                <th className="w-[30%] px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
                               )}
-                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Address</th>
-                              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Address</th>
+                              <th className="w-40 px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="bg-white divide-y divide-gray-200">
                             {sortedCustomers.map((customer) => (
                               <tr key={customer.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setLocation(`/customers/${customer.id}/profile`)}>
-                                <td className="px-6 py-4 whitespace-nowrap">
+                                <td className="px-4 py-4">
                                   <div className="flex items-center">
                                     <div className="p-2 rounded-lg mr-3 bg-blue-50">
                                       <Users className="w-4 h-4 text-blue-600" />
                                     </div>
-                                    <div className="flex-1">
+                                    <div className="flex-1 min-w-0 break-words">
                                       <div className="text-sm font-medium text-gray-900">{customer.irrigoName || customer.name}</div>
                                       {customer.irrigoName && customer.irrigoName !== customer.name && (
                                         <div className="text-xs text-gray-400 mt-0.5">{customer.name}</div>
@@ -280,23 +280,24 @@ export default function Customers() {
                                   </div>
                                 </td>
                                 {userRole !== 'field_tech' && (
-                                  <td className="px-6 py-4 whitespace-nowrap">
+                                  <td className="px-4 py-4">
                                     <div className="space-y-1">
-                                      <div className="flex items-center text-sm text-gray-900">
-                                        <Mail className="w-4 h-4 mr-2 text-gray-400" />{customer.email}
+                                      <div className="flex min-w-0 items-center text-sm text-gray-900">
+                                        <Mail className="w-4 h-4 mr-2 shrink-0 text-gray-400" />
+                                        <span className="min-w-0 truncate" title={customer.email}>{customer.email}</span>
                                       </div>
                                       {customer.phone && (
                                         <div className="flex items-center text-sm text-gray-500">
-                                          <Phone className="w-4 h-4 mr-2 text-gray-400" />{customer.phone}
+                                          <Phone className="w-4 h-4 mr-2 shrink-0 text-gray-400" />{customer.phone}
                                         </div>
                                       )}
                                     </div>
                                   </td>
                                 )}
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                  <div className="text-sm text-gray-900">{displayCustomerAddress(customer)}</div>
+                                <td className="px-4 py-4">
+                                  <div className="break-words text-sm text-gray-900">{displayCustomerAddress(customer)}</div>
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <td className="px-4 py-4 whitespace-nowrap text-right text-sm font-medium">
                                   <div className="flex items-center space-x-2 justify-end">
                                     {userRole === 'field_tech' ? (
                                       <Button variant="ghost" size="sm" className="text-blue-600 hover:text-blue-900" onClick={() => setLocation(`/customers/${customer.id}/profile`)}>
