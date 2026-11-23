@@ -223,6 +223,14 @@ export function agingSummaryParams(q: ArQuery): string {
   return p.toString();
 }
 
+// Tenant readers are scoped by their session. Platform reads can instead
+// name a company or span all companies, so they must never share a tenant key.
+export function invoiceAgingSummaryKey(q: ArQuery, platformParams?: string) {
+  return platformParams === undefined
+    ? ["/api/invoices", "aging-summary", agingSummaryParams(q)] as const
+    : ["/api/invoices", "aging-summary", platformParams, "platform"] as const;
+}
+
 /**
  * Task #1942 — one removable chip per active filter.
  *

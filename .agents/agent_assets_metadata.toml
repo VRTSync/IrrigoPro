@@ -1635,3 +1635,31 @@ mtime_ms = 1795412361287
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/42bc4eef-61e9-4630-990d-7efa98d25869/dfa1017e-afb1-42a8-b981-cebb490298ca"
 storage_version_token = "1795412368238057"
 content_type = "text/html"
+
+[[outputs]]
+id = "WHhApL_zErf4_IcDvdbCX"
+uri = "file://generated-artifacts/role-dashboard/browser-evidence.html"
+type = "html"
+title = "Role Dashboard: all 12 screen-size checks"
+description = "Chromium captures for company admin and bookkeeper at 360, 390, 820, 1024, 1366, and 1920 px, using synthetic data."
+logical_id = "5f1b0619-8b05-4ea3-bafa-71a776a388d2"
+content_hash = "sha256:028c14ba5f626524fa920cc2a50c0e17d742b64220d4097a9446d39d364ad683"
+size = 1756890
+mtime_ms = 1795440228460
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/5f1b0619-8b05-4ea3-bafa-71a776a388d2/50bf620f-6916-4ce6-a5f3-537409a94a52"
+storage_version_token = "1795440291327674"
+content_type = "text/html"
+
+[[outputs]]
+id = "-kS96FMMJK5Jvtqtgdoqm"
+uri = "file://generated-artifacts/role-dashboard/b2-browser-evidence.html"
+type = "html"
+title = "Role Dashboard: B2 comparison and screen-size checks"
+description = "Side-by-side B2 comparisons at 390 and 1366 px, plus all 12 Chromium screenshots for company admin and bookkeeper using synthetic data."
+logical_id = "5d2dea8e-a37e-48da-9e28-8b0375e60afd"
+content_hash = "sha256:7b5f4c70391079e9c19657294801d156ffd64a8286b8a97a50bdc8f83e2ba70e"
+size = 2498246
+mtime_ms = 1795440730556
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/5d2dea8e-a37e-48da-9e28-8b0375e60afd/15d39654-120c-48b3-a884-7ed60f87c2c2"
+storage_version_token = "1795440746466369"
+content_type = "text/html"

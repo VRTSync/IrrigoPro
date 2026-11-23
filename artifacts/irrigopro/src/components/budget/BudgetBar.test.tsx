@@ -621,45 +621,12 @@ const CUSTOMER_SUMMARY = {
   annual: { cap: 40000, spend: 12000, percent: 0.3, status: "healthy" as const },
 };
 
-const TOP_CUSTOMERS = {
-  rows: [
-    {
-      customerId: 1,
-      name: "Over Customer",
-      revenue: 9600,
-      monthlyCap: 8000,
-      monthlyUsedPct: 1.2,
-      monthlyStatus: "over" as const,
-    },
-    {
-      customerId: 2,
-      name: "Near Customer",
-      revenue: 7200,
-      monthlyCap: 8000,
-      monthlyUsedPct: 0.9,
-      monthlyStatus: "approaching" as const,
-    },
-    {
-      customerId: 3,
-      name: "Fine Customer",
-      revenue: 2000,
-      monthlyCap: 8000,
-      monthlyUsedPct: 0.25,
-      monthlyStatus: "healthy" as const,
-    },
-  ],
-  total: 3,
-};
-
 describe("migrated surface — Financial Pulse widget", () => {
   beforeEach(() => {
     useQueryMock.mockImplementation((opts: { queryKey: unknown[] }) => {
       const key = String(opts.queryKey?.[0] ?? "");
       if (key.includes("/customer/")) {
         return { data: CUSTOMER_SUMMARY, isLoading: false, error: null };
-      }
-      if (key.includes("/top-customers")) {
-        return { data: TOP_CUSTOMERS, isLoading: false, error: null };
       }
       return { data: null, isLoading: false, error: null };
     });
@@ -687,31 +654,4 @@ describe("migrated surface — Financial Pulse widget", () => {
     expect(meter.textContent).not.toMatch(/Invoiced|Pending/);
   });
 
-  it("top customers badges speak the analytic vocabulary and leak no percentage", async () => {
-    const { FinancialPulseWidget } = await import(
-      "@/components/financial-pulse/financial-pulse-widget"
-    );
-    await renderWidget(
-      <FinancialPulseWidget variant="top-customers-compact" />,
-    );
-
-    expect(screen.getByTestId("fp-top-customer-status-1").textContent).toBe(
-      "Over",
-    );
-    expect(screen.getByTestId("fp-top-customer-status-2").textContent).toBe(
-      "Approaching",
-    );
-    expect(screen.getByTestId("fp-top-customer-status-3").textContent).toBe(
-      "Healthy",
-    );
-
-    // The badges are pill-only: no track of their own.
-    for (const id of [1, 2, 3]) {
-      expect(
-        within(screen.getByTestId(`fp-top-customer-status-${id}`)).queryByRole(
-          "progressbar",
-        ),
-      ).toBeNull();
-    }
-  });
 });

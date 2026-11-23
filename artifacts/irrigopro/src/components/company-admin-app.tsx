@@ -4,7 +4,7 @@ import { Switch, Route, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { DesktopShell } from "@/components/layout/desktop-shell";
 import InvoicesPage from "@/pages/invoices";
-import AdminDashboard from "@/pages/admin-dashboard";
+import RoleDashboard from "@/pages/role-dashboard";
 import Operations from "@/pages/operations";
 import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
@@ -33,6 +33,12 @@ function RedirectToBillingWorkspace() {
 function RedirectToAllCustomers() {
   const [, navigate] = useLocation();
   useEffect(() => { navigate("/customers?view=all", { replace: true }); }, [navigate]);
+  return null;
+}
+
+function RedirectToDashboard() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/", { replace: true }); }, [navigate]);
   return null;
 }
 
@@ -111,6 +117,7 @@ interface CompanyAdminAppProps {
 }
 
 export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
+  const [currentPath] = useLocation();
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isCheckingSetup, setIsCheckingSetup] = useState(true);
 
@@ -172,10 +179,10 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
   // Regular company admin app
   return (
     <DesktopShell role={user.role}>
-      <div className="px-4 bg-gray-50">
+      <div className={currentPath === "/" ? "bg-gray-50" : "px-4 bg-gray-50"}>
         <Switch>
-          <Route path="/" component={AdminDashboard} />
-          <Route path="/admin" component={AdminDashboard} />
+          <Route path="/" component={RoleDashboard} />
+          <Route path="/admin" component={RedirectToDashboard} />
           <Route path="/operations" component={Operations} />
           <Route path="/users" component={CompanyUserManagement} />
           <Route path="/company-profile" component={CompanyProfile} />

@@ -11,6 +11,10 @@ export const DASHBOARD_ROLES = [
   "company_admin", "irrigation_manager", "billing_manager", "bookkeeper",
 ] as const;
 
+export const IRRIGATION_SEASON = {
+  firstMonth: 4, firstDay: 1, lastMonth: 10, lastDay: 31,
+} as const;
+
 export const DASHBOARD_TILE_ROLES: Record<DashboardTileKey, readonly string[]> = {
   "wet-checks":     ["company_admin", "irrigation_manager", "billing_manager"],
   "estimates":      ["company_admin", "irrigation_manager", "billing_manager"],

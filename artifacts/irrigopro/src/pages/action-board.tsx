@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Calendar, ClipboardCheck, Send, ShieldAlert } from "lucide-react";
 import { CAN_VIEW_ACTION_BOARD, generateActionBoardPlan, hasCapability } from "@workspace/shared";
 import { useAuth } from "@/lib/auth-context";
+import { actionBoardQueryOptions } from "@/lib/action-board-query";
 import { copyText } from "@/lib/copy-text";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -137,16 +138,7 @@ function ActionBoardContent({ companyId }: { companyId?: number }) {
   const now = new Date();
   const [selection, setSelection] = useState(`${now.getFullYear()}-${now.getMonth() + 1}`);
   const [year, month] = selection.split("-").map(Number);
-  const url = `/api/action-board?year=${year}&month=${month}${companyId ? `&companyId=${companyId}` : ""}`;
-  const { data, isLoading, error } = useQuery<BoardResponse>({
-    queryKey: [url],
-    queryFn: async () => {
-      const response = await fetch(url, { credentials: "include" });
-      if (!response.ok) throw new Error("Unable to load Action Board");
-      return response.json();
-    },
-    staleTime: 30_000,
-  });
+  const { data, isLoading, error } = useQuery(actionBoardQueryOptions<BoardResponse>(year, month, companyId));
   const grouped: Record<Lane, BoardRow[]> = { clear_to_send: [], over_budget: [], nothing_pending: [] };
   for (const row of data?.rows ?? []) {
     const lane = (row.lane === "over_budget_nothing_approved" ? "over_budget" : row.lane) as Lane;

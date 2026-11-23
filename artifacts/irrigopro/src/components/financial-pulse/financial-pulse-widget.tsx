@@ -1,20 +1,19 @@
 // Task #708 — Financial Pulse Slice 5: consolidation & widgetization.
 //
-// Shared FP widget used across Admin Dashboard, Customer Profile,
-// Customer Billing, and the Invoices page. Backed by the existing
+// Shared FP widget used across Manager Workspace, Customer Profile,
+// and Action Board. Backed by the existing
 // /api/financial-pulse/* endpoints (plus the new
 // /api/financial-pulse/customer/:id/summary added in this slice) so
 // every surface reads from a single source of truth.
 
 import { useQuery } from "@tanstack/react-query";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight, AlertCircle, TrendingUp } from "lucide-react";
 import { MetricTile } from "@/components/financial-pulse/metric-tile";
 import { adaptiveRefetchInterval } from "@/lib/queryClient";
@@ -22,18 +21,13 @@ import { BudgetBar } from "@/components/budget/BudgetBar";
 import { cn } from "@/lib/utils";
 
 export type FinancialPulseVariant =
-  | "admin-dashboard"
   | "billing-header"
   | "customer-detail"
-  | "top-customers-compact"
   | "action-board";
 
 interface BaseProps {
   variant: FinancialPulseVariant;
   className?: string;
-}
-interface AdminDashboardProps extends BaseProps {
-  variant: "admin-dashboard";
 }
 interface BillingHeaderProps extends BaseProps {
   variant: "billing-header";
@@ -42,10 +36,6 @@ interface CustomerDetailProps extends BaseProps {
   variant: "customer-detail";
   customerId: number;
 }
-interface TopCustomersCompactProps extends BaseProps {
-  variant: "top-customers-compact";
-  limit?: number;
-}
 interface ActionBoardProps extends BaseProps {
   variant: "action-board";
   year?: number;
@@ -53,10 +43,8 @@ interface ActionBoardProps extends BaseProps {
   companyId?: number;
 }
 export type FinancialPulseWidgetProps =
-  | AdminDashboardProps
   | BillingHeaderProps
   | CustomerDetailProps
-  | TopCustomersCompactProps
   | ActionBoardProps;
 
 const CURRENCY = new Intl.NumberFormat("en-US", {
@@ -70,7 +58,7 @@ function formatCurrency(n: number | null | undefined): string {
   return CURRENCY.format(n);
 }
 
-// ─── KPIs response (admin-dashboard variant) ──────────────────────────────
+// ─── KPIs response (billing-header variant) ───────────────────────────────
 interface KpiTile {
   value: number | null;
   deltaPct?: number | null;
@@ -78,16 +66,8 @@ interface KpiTile {
 }
 interface KpisResponse {
   billedMtd: KpiTile;
-  /**
-   * Task #2012 — the server split this into `invoicedYtd` + `workBookedYtd`
-   * because it counted invoiced work twice. No tile here reads it; kept
-   * optional so older cached responses still type-check.
-   */
-  billedYtd?: KpiTile;
   collectedMtd?: KpiTile;
   outstandingAr: KpiTile;
-  unbilledExposure: KpiTile;
-  projectedMonthEnd: KpiTile & { method: string };
 }
 
 // Task #720 — canonical per-tile captions (matches
@@ -120,19 +100,6 @@ interface BudgetBucket {
   status: "unset" | "healthy" | "approaching" | "over";
 }
 
-interface TopCustomerRow {
-  customerId: number;
-  name: string;
-  revenue: number;
-  monthlyCap: number | null;
-  monthlyUsedPct: number | null;
-  monthlyStatus: BudgetBucket["status"];
-}
-interface TopCustomersResponse {
-  rows: TopCustomerRow[];
-  total: number;
-}
-
 interface ActionBoardRollup {
   totalAllocation?: number;
   totalInvoiced?: number;
@@ -159,15 +126,10 @@ async function fetchFp<T>(url: string): Promise<T | null> {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────
 
-export function useFinancialPulseData<T>(
-  variant: FinancialPulseVariant,
-  url: string,
-  enabled: boolean = true,
-) {
+function useFinancialPulseData<T>(url: string) {
   return useQuery<T | null>({
     queryKey: [url],
     queryFn: () => fetchFp<T>(url),
-    enabled,
     refetchInterval: adaptiveRefetchInterval(60_000),
     refetchIntervalInBackground: false,
     retry: false,
@@ -222,67 +184,12 @@ function ErrorState({ testId }: { testId?: string }) {
   );
 }
 
-// ─── Variant: admin-dashboard ─────────────────────────────────────────────
-
-function AdminDashboardVariant() {
-  const url = "/api/financial-pulse/kpis?period=mtd";
-  const { data, isLoading, error } = useFinancialPulseData<KpisResponse>(
-    "admin-dashboard",
-    url,
-  );
-  // 403 collapses to null → render nothing so non-FP roles see no chrome.
-  if (!isLoading && data == null && !error) return null;
-  return (
-    <WidgetCard
-      title="Financial Pulse"
-      href="/financial-pulse"
-      testId="fp-widget-admin-dashboard"
-    >
-      {error ? (
-        <ErrorState testId="fp-widget-admin-dashboard" />
-      ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <MetricTile
-            label="Money Owed"
-            value={data?.outstandingAr.value ?? null}
-            format="currency"
-            isLoading={isLoading}
-            testId="fp-tile-outstanding-ar"
-          />
-          <MetricTile
-            label="Work Not Yet Billed"
-            value={data?.unbilledExposure.value ?? null}
-            format="currency"
-            isLoading={isLoading}
-            testId="fp-tile-unbilled-exposure"
-          />
-          <MetricTile
-            label="Billed MTD"
-            value={data?.billedMtd.value ?? null}
-            format="currency"
-            deltaPct={data?.billedMtd.deltaPct ?? null}
-            isLoading={isLoading}
-            testId="fp-tile-billed-mtd"
-          />
-          <MetricTile
-            label="Projected by Month-End"
-            value={data?.projectedMonthEnd.value ?? null}
-            format="currency"
-            isLoading={isLoading}
-            testId="fp-tile-projected-month-end"
-          />
-        </div>
-      )}
-    </WidgetCard>
-  );
-}
-
 // ─── Variant: billing-header ──────────────────────────────────────────────
 //
 function BillingHeaderVariant({ className }: { className?: string }) {
   const url = "/api/financial-pulse/kpis?period=mtd";
   const { data, isLoading, error, refetch } =
-    useFinancialPulseData<KpisResponse>("billing-header", url);
+    useFinancialPulseData<KpisResponse>(url);
   // 403 → render nothing for field techs, the only role excluded from FP.
   if (!isLoading && data == null && !error) return null;
 
@@ -415,10 +322,7 @@ const CUSTOMER_DETAIL_TIPS = {
 
 function CustomerDetailVariant({ customerId }: { customerId: number }) {
   const url = `/api/financial-pulse/customer/${customerId}/summary`;
-  const { data, isLoading, error } = useFinancialPulseData<CustomerSummary>(
-    "customer-detail",
-    url,
-  );
+  const { data, isLoading, error } = useFinancialPulseData<CustomerSummary>(url);
   if (!isLoading && data == null && !error) return null;
   return (
     <WidgetCard
@@ -501,101 +405,12 @@ function CustomerDetailVariant({ customerId }: { customerId: number }) {
   );
 }
 
-// ─── Variant: top-customers-compact ───────────────────────────────────────
-
-function TopCustomersCompactVariant({ limit = 5 }: { limit?: number }) {
-  const url = `/api/financial-pulse/top-customers?sort=revenue&period=mtd&limit=${limit}`;
-  const [, setLocation] = useLocation();
-  const { data, isLoading, error } = useFinancialPulseData<TopCustomersResponse>(
-    "top-customers-compact",
-    url,
-  );
-  if (!isLoading && data == null && !error) return null;
-  const rows = data?.rows ?? [];
-  return (
-    <WidgetCard
-      title="Top Customers"
-      href="/financial-pulse"
-      testId="fp-widget-top-customers"
-    >
-      {error ? (
-        <ErrorState testId="fp-widget-top-customers" />
-      ) : isLoading ? (
-        <div className="space-y-2">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-9" />
-          ))}
-        </div>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-4">No revenue this period</p>
-      ) : (
-        <ul className="divide-y divide-gray-100">
-          {rows.map((r, idx) => {
-            const pct =
-              r.monthlyUsedPct == null
-                ? null
-                : Math.max(0, Math.min(100, r.monthlyUsedPct * 100));
-            return (
-              <li
-                key={r.customerId}
-                className="flex items-center justify-between gap-3 py-2 cursor-pointer hover:bg-gray-50 -mx-2 px-2 rounded"
-                onClick={() => setLocation(`/customers/${r.customerId}/profile`)}
-                data-testid={`fp-top-customer-${r.customerId}`}
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className="text-xs font-bold text-gray-400 w-4 shrink-0">
-                    {idx + 1}
-                  </span>
-                  <span className="text-sm font-medium text-gray-800 truncate">
-                    {r.name}
-                  </span>
-                </div>
-                <span className="text-sm font-semibold text-gray-900 shrink-0 tabular-nums">
-                  {formatCurrency(r.revenue)}
-                </span>
-                <div className="w-16 shrink-0 hidden sm:block">
-                  {pct == null ? (
-                    <span className="text-xs text-gray-400">—</span>
-                  ) : (
-                    /* Task #2009 — proportion mode: this row carries a used
-                       percentage and a cap, but no spend figure, so it passes
-                       the ratio it has rather than inventing an allocation. */
-                    <BudgetBar
-                      fillPercent={pct}
-                      forcedStatus={r.monthlyStatus}
-                      tone="analytic"
-                      size="sm"
-                      hideLabel
-                      hideDollars
-                      hidePercent
-                    />
-                  )}
-                </div>
-                <div className="shrink-0">
-                  {/* Analytic vocabulary — this is a revenue table a
-                      bookkeeper reads, not an instruction to a crew. */}
-                  <BudgetBar
-                    pillOnly
-                    tone="analytic"
-                    forcedStatus={r.monthlyStatus}
-                    data-testid={`fp-top-customer-status-${r.customerId}`}
-                  />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </WidgetCard>
-  );
-}
-
 function ActionBoardVariant({ year, month, companyId, className }: { year?: number; month?: number; companyId?: number; className?: string }) {
   const now = new Date();
   const selectedYear = year ?? now.getFullYear();
   const selectedMonth = month ?? now.getMonth() + 1;
   const url = `/api/action-board?year=${selectedYear}&month=${selectedMonth}${companyId ? `&companyId=${companyId}` : ""}`;
-  const { data, isLoading, error } = useFinancialPulseData<ActionBoardResponse>("action-board", url);
+  const { data, isLoading, error } = useFinancialPulseData<ActionBoardResponse>(url);
   const rollup = data?.rollup;
   const billed = rollup?.billedThisMonth ?? rollup?.totalInvoiced ?? null;
   const allocation = rollup?.totalAllocation ?? null;
@@ -628,14 +443,10 @@ function ActionBoardVariant({ year, month, companyId, className }: { year?: numb
 
 export function FinancialPulseWidget(props: FinancialPulseWidgetProps) {
   switch (props.variant) {
-    case "admin-dashboard":
-      return <AdminDashboardVariant />;
     case "billing-header":
       return <BillingHeaderVariant className={props.className} />;
     case "customer-detail":
       return <CustomerDetailVariant customerId={props.customerId} />;
-    case "top-customers-compact":
-      return <TopCustomersCompactVariant limit={props.limit} />;
     case "action-board":
       return <ActionBoardVariant year={props.year} month={props.month} companyId={props.companyId} className={props.className} />;
   }

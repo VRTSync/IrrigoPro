@@ -17,7 +17,7 @@ vi.mock("@/pages/action-board", () => page("action-board"));
 vi.mock("@/pages/admin-budget-goals", () => page("budget-goals"));
 vi.mock("@/pages/admin-client-errors", () => page("client-errors"));
 vi.mock("@/pages/admin-controllers", () => page("controllers"));
-vi.mock("@/pages/admin-dashboard", () => page("dashboard"));
+vi.mock("@/pages/role-dashboard", () => page("dashboard"));
 vi.mock("@/pages/admin-issue-types", () => page("issue-types"));
 vi.mock("@/pages/admin-wc-labor-backfill", () => page("wc-labor-backfill"));
 vi.mock("@/pages/admin/migrations", () => page("db-migrations"));
@@ -62,9 +62,7 @@ const roles: NavRole[] = [
 ];
 const routeAliases: Partial<Record<NavRole, Record<string, string>>> = {
   company_admin: { estimates: "estimate-command-center" },
-  irrigation_manager: { dashboard: "manager-workspace" },
-  billing_manager: { dashboard: "manager-workspace", estimates: "estimates-pending-approval" },
-  bookkeeper: { dashboard: "invoices" },
+  billing_manager: { estimates: "estimates-pending-approval" },
   super_admin: { companies: "app-health" },
 };
 
@@ -102,6 +100,18 @@ function mountAt(role: NavRole, href: string) {
   );
   return location;
 }
+
+it("replaces the legacy company admin dashboard bookmark with /", async () => {
+  const location = mountAt("company_admin", "/admin");
+  expect(await screen.findByTestId("route-destination")).toHaveTextContent("dashboard");
+  expect(location.history).toEqual(["/"]);
+});
+
+it("keeps the super admin landing on App Health", async () => {
+  const location = mountAt("super_admin", "/");
+  expect(await screen.findByTestId("route-destination")).toHaveTextContent("app-health");
+  expect(location.history).toEqual(["/super-admin/app-health"]);
+});
 
 for (const role of roles) {
   describe(`${role} menu route parity`, () => {

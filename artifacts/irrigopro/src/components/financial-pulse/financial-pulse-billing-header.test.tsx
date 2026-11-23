@@ -175,45 +175,11 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
     });
   });
 
-  it("Outstanding A/R tile equals the admin-dashboard variant on the same fixture (cross-page parity)", async () => {
-    // Both variants hit the same endpoint. We mock it once per render
-    // and assert the rendered Outstanding A/R string matches.
-    fetchSpy.mockImplementation(
-      async () =>
-        new Response(JSON.stringify(KPIS), { status: 200 }),
-    );
-
-    const { unmount } = render(
-      withClient(<FinancialPulseWidget variant="billing-header" />),
-    );
-    await screen.findByText(/\$4,500/);
-    const billingTile = screen.getByTestId(
-      "fp-tile-billing-header-outstanding-ar",
-    );
-    expect(billingTile.textContent ?? "").toMatch(/\$4,500/);
-    unmount();
-
-    render(withClient(<FinancialPulseWidget variant="admin-dashboard" />));
-    await screen.findByText(/\$4,500/);
-    const adminTile = screen.getByTestId("fp-tile-outstanding-ar");
-    expect(adminTile.textContent ?? "").toMatch(/\$4,500/);
-  });
-
-  // Task #2013 — the `ar-aging` variant was deleted; the invoices page's own
-  // aging strip is the one card now, so there is no variant to smoke here.
-  it("smoke: the pre-existing variants still render without throwing", async () => {
+  it("smoke: the customer detail variant still renders without throwing", async () => {
     fetchSpy.mockResolvedValue(
       new Response(
         JSON.stringify({
           ...KPIS,
-          buckets: [
-            { key: "current", label: "Current", amount: 0, count: 0 },
-            { key: "days30", label: "30", amount: 0, count: 0 },
-            { key: "days60", label: "60", amount: 0, count: 0 },
-            { key: "days90", label: "90+", amount: 0, count: 0 },
-          ],
-          total: 0,
-          rows: [],
           customerId: 1,
           name: "X",
           billedYtd: 0,
@@ -228,20 +194,12 @@ describe("FinancialPulseWidget — billing-header variant (Task #711)", () => {
       ),
     );
 
-    for (const variant of [
-      "admin-dashboard",
-      "top-customers-compact",
-    ] as const) {
-      const { unmount } = render(
-        withClient(<FinancialPulseWidget variant={variant} />),
-      );
-      unmount();
-    }
     const { unmount } = render(
       withClient(
         <FinancialPulseWidget variant="customer-detail" customerId={1} />,
       ),
     );
+    expect(await screen.findByTestId("fp-widget-customer-detail")).toBeInTheDocument();
     unmount();
   });
 });

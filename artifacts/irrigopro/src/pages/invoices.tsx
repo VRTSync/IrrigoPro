@@ -122,6 +122,7 @@ import {
   EMPTY_AR_QUERY,
   agingSummaryParams,
   arQueryToParams,
+  invoiceAgingSummaryKey,
   isEmptyArQuery,
   readArQuery,
   type AgingFilter,
@@ -764,8 +765,7 @@ export default function InvoicesPage() {
   const [auditInvoice, setAuditInvoice] = useState<{ id: number; label: string; total: string } | null>(null);
   const [exportingInvoiceId, setExportingInvoiceId] = useState<number | null>(null);
   const userRole = getCurrentUserRole();
-  // Task #1942 — the last role-string comparison on this page is gone. The
-  // single-invoice CSV carries the invoice's cost and margin breakdown and is
+  // The single-invoice CSV carries the invoice's cost and margin breakdown and is
   // built from `/api/invoices/:id/audit`, so it is gated on the capability
   // that already governs cost visibility rather than on a hand-written role
   // list that no server guard corresponds to.
@@ -1035,7 +1035,7 @@ export default function InvoicesPage() {
     // by prefix, so the aggregate refetches with the rows. A sibling key would
     // leave the header and the strip quoting pre-sync totals over refreshed
     // rows until something unrelated happened to refetch them.
-    queryKey: ["/api/invoices", "aging-summary", agingParams],
+    queryKey: invoiceAgingSummaryKey(arQuery, userRole === "super_admin" ? agingParams : undefined),
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const res = await fetch(

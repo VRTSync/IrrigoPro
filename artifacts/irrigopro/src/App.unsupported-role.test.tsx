@@ -5,7 +5,7 @@ import { Router } from "wouter";
 
 vi.mock("@/pages/login", () => ({ default: () => <div>Login page</div> }));
 vi.mock("@/pages/field-tech-dashboard", () => ({ default: () => <div>Field tech dashboard</div> }));
-vi.mock("@/pages/admin-dashboard", () => ({ default: () => <div>AdminDashboard</div> }));
+vi.mock("@/pages/role-dashboard", () => ({ default: () => <div>RoleDashboard</div> }));
 vi.mock("@/pages/manager-workspace", () => ({ default: () => <div>Manager workspace</div> }));
 vi.mock("@/pages/estimate-approval", () => ({ default: () => <div>Estimate approval</div> }));
 vi.mock("@/components/company-admin-app", () => ({ default: () => <div>Company admin app</div> }));
@@ -57,7 +57,7 @@ describe("unsupported roles fail closed at real app routing", () => {
       mount(role, path);
       expect(screen.getByRole("heading", { name: "No screens for this account" })).toBeTruthy();
       expect(screen.getByText(`This account's role (${role}) has no screens in IrrigoPro yet. Ask your company admin to check your role.`)).toBeTruthy();
-      expect(screen.queryByText("AdminDashboard")).toBeNull();
+      expect(screen.queryByText("RoleDashboard")).toBeNull();
       expect(screen.queryByRole("navigation")).toBeNull();
       expect(screen.queryByText("Company admin app")).toBeNull();
       expect(screen.queryByText("Desktop admin shell")).toBeNull();

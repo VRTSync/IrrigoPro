@@ -13,6 +13,7 @@ import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import FieldTechDashboard from "@/pages/field-tech-dashboard";
 import ManagerWorkspace from "@/pages/manager-workspace";
+import RoleDashboard from "@/pages/role-dashboard";
 // Eager: public token-gated page — must cold-load from a direct URL with no session.
 import EstimateApproval from "@/pages/estimate-approval";
 
@@ -311,10 +312,10 @@ export function AppRoutes() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <DesktopShell role={user.role}>
-            <div className="px-4">
+            <div className={currentPath === "/" ? undefined : "px-4"}>
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
-                  <Route path="/" component={ManagerWorkspace} />
+                  <Route path="/" component={RoleDashboard} />
                   <Route path="/manager-workspace" component={ManagerWorkspace} />
                   <Route path="/budget-status" component={BudgetStatusPage} />
                   <Route path="/action-board" component={ActionBoardPage} />
@@ -380,16 +381,16 @@ export function AppRoutes() {
   // a role-filtered menu and its own (much shorter) route list. Work Orders and
   // Billing Sheets are deep-link targets for the read-only location report;
   // they remain absent from navigation and their mutation controls stay
-  // role-gated. Landing route is the invoice list.
+  // role-gated.
   if (user.role === "bookkeeper") {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <DesktopShell role={user.role}>
-            <div className="px-4">
+            <div className={currentPath === "/" ? undefined : "px-4"}>
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
-                  <Route path="/" component={InvoicesPage} />
+                  <Route path="/" component={RoleDashboard} />
                   <Route path="/invoices" component={InvoicesPage} />
                   <Route path="/reports/missing-location-data" component={MissingLocationDataReportPage} />
                   <Route path="/work-orders">
@@ -423,10 +424,10 @@ export function AppRoutes() {
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <DesktopShell role={user.role}>
-            <div className="px-4">
+            <div className={currentPath === "/" ? undefined : "px-4"}>
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
-                  <Route path="/" component={ManagerWorkspace} />
+                  <Route path="/" component={RoleDashboard} />
                   <Route path="/manager-workspace" component={ManagerWorkspace} />
                   <Route path="/budget-status" component={BudgetStatusPage} />
                   <Route path="/billing-workspace" component={RedirectToBillingWorkspace} />

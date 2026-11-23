@@ -76,6 +76,7 @@
 - [Bookkeeper screen fit](bookkeeper-screen-fit.md) — 1024 px minimum with sidebar expanded; prove narrow layouts with real browser measurements, not hidden overflow.
 - [App audit standards](app-audit-standards.md) — six-width fit checks, full-width office pages, container-based table cards, and read-only page opens.
 - [Navigation Redesign scope](navigation-redesign-decisions.md) — locked design overrides the options memo; 1024 px rail, pages-only Jump To, and role dashboard boundaries.
+- [Focus refetch and query freshness](focus-refetch-query-freshness.md) — with the app's infinite default freshness, opting in to focus refetches also requires a stale-time override.
 - [Access Hardening policy](access-hardening-policy.md) — fail closed on missing company context, keep foreign records opaque, and retire Switch User.
 - [Shared QuickBooks billing](shared-quickbooks-billing.md) — High Plains CRM shares the QB company; keep ownership safety separate from staged numbering changes.
 - [Customer records saved plan](customer-record-ownership-plan.md) — Overview of the Customer Records slices; the slice ticket in hand is always authoritative.
