@@ -30,7 +30,7 @@ vi.mock("@/utils/safeStorage", () => ({
     return localStorage.getItem(key);
   },
   safeSet: vi.fn((key: string, value: string) => localStorage.setItem(key, value)),
-  safeRemove: vi.fn(),
+  safeRemove: (key: string) => localStorage.removeItem(key),
 }));
 
 vi.mock("@assets/IrrigoPro_2026-05_1778193170303.png", () => ({
@@ -39,12 +39,13 @@ vi.mock("@assets/IrrigoPro_2026-05_1778193170303.png", () => ({
 
 import { DesktopShell } from "./desktop-shell";
 
+let viewportWidth: number;
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
-  vi.stubGlobal("innerWidth", 1366);
-  vi.stubGlobal("matchMedia", vi.fn(() => ({
-    matches: false,
+  viewportWidth = 1366;
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+    matches: query === "(min-width: 1200px)" && viewportWidth >= 1200,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   })));
@@ -54,7 +55,10 @@ beforeEach(() => {
   }));
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 function makeQueryClient() {
   return new QueryClient({
@@ -79,6 +83,8 @@ function mount(path = "/wet-checks") {
         <QueryClientProvider client={makeQueryClient()}>
           <DesktopShell role="irrigation_manager">
             <input aria-label="Search work" />
+            <textarea aria-label="Long notes" />
+            <select aria-label="Work filter"><option>All</option></select>
             <div contentEditable tabIndex={0} aria-label="Notes" />
           </DesktopShell>
         </QueryClientProvider>
@@ -91,7 +97,7 @@ function mount(path = "/wet-checks") {
 describe("irrigation manager rail and panel", () => {
   const rail = () => within(screen.getByRole("navigation", { name: "Desktop sections" }));
   const panel = () => within(screen.getByTestId("pages-panel"));
-  const toggle = () => screen.getByRole("button", { name: "Show or hide the pages menu" });
+  const toggle = () => screen.getByTestId("button-toggle-main-menu");
 
   it("shows six sections and follows the reviews tab on the shared wet-check route", () => {
     const location = mount();
@@ -141,40 +147,62 @@ describe("irrigation manager rail and panel", () => {
     expect(within(panel().getByRole("link", { name: "Wet Check Reviews" })).getByText("2")).toBeVisible();
   });
 
-  it("toggles with Cmd+B and the button, saves the preference, and shows the first-use hint", async () => {
-    const first = mount();
-    fireEvent.keyDown(window, { key: "b", metaKey: true });
-    expect(screen.queryByTestId("pages-panel")).not.toBeInTheDocument();
+  it("toggles with Cmd+B and the button, saves the preference, and never hides Work Orders pages", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    const first = mount("/work-orders");
+    const pages = screen.getByTestId("pages-panel");
+    expect(toggle()).toHaveAccessibleName("Expand main menu");
+    expect(toggle()).toHaveAttribute("title", "Expand main menu (Cmd+B)");
     expect(toggle()).toHaveAttribute("aria-pressed", "false");
-    expect(safeSet).toHaveBeenCalledWith("irrigopro_nav_panel_open", "false");
-    expect(await screen.findByText("Press Cmd+B (Ctrl+B on Windows) to hide the pages menu.")).toBeVisible();
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(toggle()).toHaveAccessibleName("Collapse main menu");
+    expect(toggle()).toHaveAttribute("title", "Collapse main menu (Cmd+B)");
+    expect(toggle()).toHaveAttribute("aria-pressed", "true");
+    expect(safeSet).toHaveBeenCalledWith("irrigopro_nav_expanded", "true");
+    expect(screen.getByTestId("pages-panel")).toBe(pages);
+    expect(await screen.findByText("Press Cmd+B (Ctrl+B on Windows) to show section names in the main menu.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss hint" }));
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(toggle()).toHaveAttribute("aria-pressed", "false");
+    expect(safeSet).toHaveBeenCalledWith("irrigopro_nav_expanded", "false");
+    expect(screen.getByTestId("pages-panel")).toBe(pages);
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-pressed", "true");
     first.unmount();
 
-    mount();
-    expect(screen.queryByTestId("pages-panel")).not.toBeInTheDocument();
-    fireEvent.click(toggle());
-    expect(screen.getByTestId("pages-panel")).toBeVisible();
+    mount("/work-orders");
     expect(toggle()).toHaveAttribute("aria-pressed", "true");
-    expect(safeSet).toHaveBeenCalledWith("irrigopro_nav_panel_open", "true");
+    fireEvent.click(rail().getByRole("button", { name: "Collapse menu" }));
+    expect(toggle()).toHaveAttribute("aria-pressed", "false");
+    expect(localStorage.getItem("irrigopro_nav_expanded")).toBe("false");
+    expect(panel().getByRole("link", { name: "Work Orders" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("button", { name: "Dismiss hint" })).not.toBeInTheDocument();
   });
 
-  it("ignores Ctrl+B while editing and on tablet, but toggles on desktop", () => {
-    mount();
-    const input = screen.getByRole("textbox", { name: "Search work" });
-    const notes = screen.getByLabelText("Notes");
-    for (const field of [input, notes]) {
+  it("deletes the old preference without hiding the pages menu", () => {
+    const retiredKey = "irrigopro_nav_panel_open";
+    localStorage.setItem(retiredKey, "false");
+    mount("/work-orders");
+    expect(localStorage.getItem(retiredKey)).toBeNull();
+    expect(panel().getByRole("link", { name: "Work Orders" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("ignores Ctrl+B while editing and below 1200 px", () => {
+    mount("/work-orders");
+    for (const name of ["Search work", "Long notes", "Work filter", "Notes"]) {
+      const field = screen.getByLabelText(name);
       field.focus();
       expect(fireEvent.keyDown(field, { key: "b", ctrlKey: true })).toBe(true);
+      field.blur();
     }
-    notes.blur();
-    vi.stubGlobal("innerWidth", 820);
-    expect(fireEvent.keyDown(window, { key: "b", ctrlKey: true })).toBe(true);
-    expect(screen.getByTestId("pages-panel")).toBeVisible();
+    for (viewportWidth of [820, 1024, 1199]) {
+      expect(fireEvent.keyDown(window, { key: "b", ctrlKey: true })).toBe(true);
+    }
     expect(safeSet).not.toHaveBeenCalled();
-    vi.stubGlobal("innerWidth", 1024);
+    viewportWidth = 1200;
     expect(fireEvent.keyDown(window, { key: "b", ctrlKey: true })).toBe(false);
-    expect(screen.queryByTestId("pages-panel")).not.toBeInTheDocument();
+    expect(localStorage.getItem("irrigopro_nav_expanded")).toBe("true");
+    expect(panel().getByRole("link", { name: "Work Orders" })).toHaveAttribute("aria-current", "page");
   });
 });

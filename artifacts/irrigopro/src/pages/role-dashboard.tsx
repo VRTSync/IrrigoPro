@@ -13,14 +13,14 @@ import { getQueryFn } from "@/lib/queryClient";
 
 type BoardPreview = { rows: { lane: string }[] };
 
-function countLanes({ rows }: BoardPreview) {
+function summarizePlan({ rows }: BoardPreview) {
   const counts = { clear_to_send: 0, over_budget_nothing_approved: 0, nothing_pending: 0 };
   for (const { lane } of rows) {
     if (lane === "clear_to_send" || lane === "over_budget_nothing_approved" || lane === "nothing_pending") {
       counts[lane]++;
     }
   }
-  return counts;
+  return { counts, isEmpty: rows.length === 0 };
 }
 
 export default function RoleDashboard() {
@@ -59,7 +59,7 @@ function RoleDashboardContent({ role, userId, companyId }: {
   const plan = useQuery({
     ...actionBoardQueryOptions<BoardPreview>(now.getFullYear(), now.getMonth() + 1),
     enabled: showPlan,
-    select: countLanes,
+    select: summarizePlan,
   });
   const aging = useQuery<AgingSummary>({
     queryKey: invoiceAgingSummaryKey(EMPTY_AR_QUERY),
@@ -94,7 +94,12 @@ function RoleDashboardContent({ role, userId, companyId }: {
       />
       <DashboardPreviews
         role={role}
-        plan={{ counts: plan.data, isLoading: plan.isLoading, isError: plan.isError }}
+        plan={{
+          data: plan.data,
+          monthLabel: new Intl.DateTimeFormat("en-US", { month: "long" }).format(now),
+          isLoading: plan.isLoading,
+          isError: plan.isError,
+        }}
         aging={{ summary: aging.data, isLoading: aging.isLoading, isError: aging.isError }}
       />
     </div>

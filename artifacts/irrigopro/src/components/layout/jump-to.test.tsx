@@ -18,6 +18,7 @@ vi.mock("@/components/notifications/notification-system", () => ({
 beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal("innerWidth", 1366);
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   vi.stubGlobal("ResizeObserver", class {
     observe() {}
     unobserve() {}
@@ -90,20 +91,21 @@ describe("Jump To", () => {
     expect(openWithShortcut().getByRole("combobox")).toHaveValue("");
   });
 
-  it("opens and closes with Cmd+K without toggling the pages panel", async () => {
+  it("opens and closes with Cmd+K without toggling the main menu", async () => {
     localStorage.setItem("irrigopro_desktop_shell_seen", "true");
     renderJumpTo("company_admin", true);
-    const toggle = screen.getByRole("button", { name: "Show or hide the pages menu" });
+    const toggle = screen.getByRole("button", { name: "Expand main menu" });
     const user = userEvent.setup();
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-    fireEvent.keyDown(window, { key: "b", metaKey: true });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.keyboard("{Meta>}k{/Meta}");
     expect(screen.getByRole("dialog", { name: "Jump to a page" })).toBeInTheDocument();
     await user.keyboard("{Meta>}k{/Meta}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("pages-panel")).toBeInTheDocument();
   });
 
   it("filters by label, highlights Invoices, and navigates to it on Enter", async () => {

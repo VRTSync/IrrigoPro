@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -18,7 +18,7 @@ import { ChevronRight, PanelLeft, Search, X } from "lucide-react";
 import { PhoneNav } from "@/components/layout/phone-nav";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
-import { safeGet, safeSet } from "@/utils/safeStorage";
+import { safeGet, safeRemove, safeSet } from "@/utils/safeStorage";
 import { useAuth } from "@/lib/auth-context";
 import { resolveRouteMeta } from "./route-meta";
 import { JumpToProvider, useJumpTo } from "./jump-to";
@@ -32,9 +32,9 @@ import {
 import { useNavPins } from "./nav-pins";
 import { NavRail } from "./nav-rail";
 import { PagesPanel } from "./pages-panel";
+import { NAV_EXPANDED_MEDIA, useNavExpanded } from "./use-nav-expanded";
 import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
 
-const NAV_PANEL_STORAGE_KEY = "irrigopro_nav_panel_open";
 const SHELL_HINT_SEEN_KEY = "irrigopro_desktop_shell_seen";
 
 // Task #1914 — the overdue-invoice badge reads its number from the invoice
@@ -172,24 +172,18 @@ interface DesktopShellProps {
 }
 
 export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
-  const [panel, setPanel] = useState(() => ({
-    open: safeGet(NAV_PANEL_STORAGE_KEY) !== "false",
-    toggled: false,
-  }));
-  const togglePanel = useCallback(() => {
-    setPanel(({ open }) => ({ open: !open, toggled: true }));
-  }, []);
+  const { saved, effective, toggle, collapse } = useNavExpanded();
 
   useEffect(() => {
-    if (panel.toggled) safeSet(NAV_PANEL_STORAGE_KEY, String(panel.open));
-  }, [panel]);
+    safeRemove("irrigopro_nav_panel_open");
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
-        window.innerWidth < 1024 || event.defaultPrevented || event.repeat ||
+        event.defaultPrevented || event.repeat ||
         event.key.toLowerCase() !== "b" || !(event.metaKey || event.ctrlKey) ||
-        event.altKey || event.shiftKey
+        event.altKey || event.shiftKey || !window.matchMedia?.(NAV_EXPANDED_MEDIA)?.matches
       ) return;
       const focus = document.activeElement;
       const editable = focus?.closest("[contenteditable]")?.getAttribute("contenteditable")?.toLowerCase();
@@ -199,11 +193,11 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
         editable === "" || editable === "true" || editable === "plaintext-only"
       ) return;
       event.preventDefault();
-      togglePanel();
+      toggle();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [togglePanel]);
+  }, [toggle]);
 
   const { user: authUser } = useAuth();
   const user: SessionUser = useMemo<SessionUser>(
@@ -236,7 +230,7 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
   }, [activePage]);
 
   const panelSection = sections.find(({ id }) => id === (activePage?.sectionId ?? recent.sectionId));
-  const panelVisible = panel.open && panelSection && panelSection.pages.length > 1;
+  const panelVisible = panelSection && panelSection.pages.length > 1;
   const pins = useNavPins(user.id, userRole);
   const selectSection = (sectionId: string) => {
     const section = sections.find(({ id }) => id === sectionId);
@@ -278,6 +272,8 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
               activePage={activePage}
               brandThemed={brandThemed}
               onSelectSection={selectSection}
+              expanded={effective}
+              onCollapse={collapse}
             />
             {panelVisible && (
               <PagesPanel key={panelSection.id} section={panelSection} activePage={activePage} badges={badges} pins={pins} />
@@ -293,8 +289,9 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
               sections={sections}
               user={user}
               actionsRef={setActionsTarget}
-              panelOpen={panel.open}
-              togglePanel={togglePanel}
+              navSavedExpanded={saved}
+              navExpanded={effective}
+              toggleNav={toggle}
             />
             <div className="flex-1 min-w-0 bg-gray-50">{children}</div>
             <PoweredByFooter />
@@ -309,17 +306,20 @@ function TopStrip({
   sections,
   user,
   actionsRef,
-  panelOpen,
-  togglePanel,
+  navSavedExpanded,
+  navExpanded,
+  toggleNav,
 }: {
   sections: ResolvedNavSection[];
   user: SessionUser;
   actionsRef: (el: HTMLDivElement | null) => void;
-  panelOpen: boolean;
-  togglePanel: () => void;
+  navSavedExpanded: boolean;
+  navExpanded: boolean;
+  toggleNav: () => void;
 }) {
   const { open: openJumpTo, isOpen: jumpToOpen } = useJumpTo();
   const isApple = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  const toggleLabel = navExpanded ? "Collapse main menu" : "Expand main menu";
   const [location] = useLocation();
   const search = useSearch();
   const meta = useMemo(
@@ -328,15 +328,17 @@ function TopStrip({
   );
   return (
     <header className="hidden lg:flex sticky top-0 z-30 h-14 shrink-0 items-center gap-2.5 border-b border-gray-200 bg-white px-5">
-      <ShellHint panelOpen={panelOpen}>
+      <ShellHint savedExpanded={navSavedExpanded}>
         <Button
           type="button"
           variant="outline"
           size="icon"
-          className="size-9 shrink-0 rounded-[10px] border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-          aria-label="Show or hide the pages menu"
-          aria-pressed={panelOpen}
-          onClick={togglePanel}
+          className="hidden size-9 shrink-0 rounded-[10px] border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 min-[1200px]:flex"
+          aria-label={toggleLabel}
+          aria-pressed={navExpanded}
+          title={`${toggleLabel} (${isApple ? "Cmd+B" : "Ctrl+B"})`}
+          data-testid="button-toggle-main-menu"
+          onClick={toggleNav}
         >
           <PanelLeft aria-hidden="true" />
         </Button>
@@ -405,22 +407,22 @@ function TopStrip({
 }
 
 function ShellHint({
-  panelOpen,
+  savedExpanded,
   children,
 }: {
-  panelOpen: boolean;
+  savedExpanded: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const interactedRef = useRef(false);
-  const initialOpenRef = useRef(panelOpen);
+  const initialExpandedRef = useRef(savedExpanded);
   useEffect(() => {
     if (interactedRef.current) return;
-    if (panelOpen === initialOpenRef.current) return;
+    if (savedExpanded === initialExpandedRef.current) return;
     interactedRef.current = true;
     if (safeGet(SHELL_HINT_SEEN_KEY) === "true") return;
     setOpen(true);
-  }, [panelOpen]);
+  }, [savedExpanded]);
   const dismiss = () => {
     safeSet(SHELL_HINT_SEEN_KEY, "true");
     setOpen(false);
@@ -437,11 +439,11 @@ function ShellHint({
         side="bottom"
         align="start"
         sideOffset={8}
-        className="w-64 p-3 text-sm"
+        className="hidden w-64 p-3 text-sm min-[1200px]:block"
       >
         <div className="flex items-start gap-2">
           <p className="flex-1 text-gray-700">
-            Press Cmd+B (Ctrl+B on Windows) to hide the pages menu.
+            Press Cmd+B (Ctrl+B on Windows) to show section names in the main menu.
           </p>
           <button
             type="button"

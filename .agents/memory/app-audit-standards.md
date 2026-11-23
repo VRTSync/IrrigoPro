@@ -9,6 +9,8 @@ Pages must fit without horizontal window or inner scrolling at browser widths of
 
 **How to apply:** Measure both window and inner scrolling in a real browser; don't hide overflow or drop columns to pass. Use the same role navigation tree on desktop and in the phone menu, and keep legacy redirects for bookmarks rather than linking to them.
 
+When measuring a width transition, wait for the actual final width rather than a rounded approximation. Separate visible scrollers from offscreen accessibility text and intentional text ellipses; their `scrollWidth` alone does not establish visible overflow.
+
 When comparing sidebar links in Chromium, wait for React to render expanded groups before collecting links, and wait for the sheet to slide onscreen before clicking a link. A mounted, measurable sheet can still be offscreen during its opening animation.
 
 **Why:** Immediate DOM reads can miss nested links, and a browser's visibility check can pass before a sheet has a clickable point.

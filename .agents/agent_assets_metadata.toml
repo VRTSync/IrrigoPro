@@ -1663,3 +1663,17 @@ mtime_ms = 1795440730556
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/5d2dea8e-a37e-48da-9e28-8b0375e60afd/15d39654-120c-48b3-a884-7ed60f87c2c2"
 storage_version_token = "1795440746466369"
 content_type = "text/html"
+
+[[outputs]]
+id = "eEazEcePQnfzsAdzrgf03"
+uri = "file://generated-artifacts/nav-expand/work-orders-gallery.html"
+type = "html"
+title = "Work Orders: collapsed and expanded main menu"
+description = "Four Chromium captures at 1200 and 1366 px, plus the 64-view layout check for company admin and bookkeeper."
+logical_id = "9c9da096-adb2-430b-b046-8adb16dd32bf"
+content_hash = "sha256:a3eab300862ecd082e06b13c88c78479364955de692a10e1cb5f342f34dcae93"
+size = 506191
+mtime_ms = 1795456191842
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/9c9da096-adb2-430b-b046-8adb16dd32bf/9bed5584-d270-4ed0-bf56-54014f690995"
+storage_version_token = "1795456197499108"
+content_type = "text/html"

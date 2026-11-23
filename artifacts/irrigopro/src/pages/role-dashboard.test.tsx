@@ -19,6 +19,11 @@ vi.mock("@/lib/auth-context", () => ({
 
 let failures = 0;
 let profileFails = false;
+const defaultPlanRows = [
+  { lane: "clear_to_send" }, { lane: "clear_to_send" },
+  { lane: "over_budget_nothing_approved" }, { lane: "nothing_pending" },
+];
+let planRows = defaultPlanRows;
 const fetchSpy = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
   const url = new URL(String(input), "http://dashboard.test");
   switch (url.pathname) {
@@ -48,10 +53,7 @@ const fetchSpy = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => 
     case "/api/company/7/profile":
       return profileFails ? new Response(null, { status: 503 }) : Response.json({ name: "Orchard Irrigation Services" });
     case "/api/action-board":
-      return Response.json({ rows: [
-        { lane: "clear_to_send" }, { lane: "clear_to_send" },
-        { lane: "over_budget_nothing_approved" }, { lane: "nothing_pending" },
-      ] });
+      return Response.json({ rows: planRows });
     case "/api/invoices/aging-summary":
       return Response.json({ buckets: Object.entries(AGING_BUCKET_LABELS).map(([key, label]) => ({
         key, label, balanceDue: "120.10", count: 2,
@@ -69,6 +71,7 @@ beforeEach(() => {
   fetchSpy.mockClear();
   failures = 0;
   profileFails = false;
+  planRows = defaultPlanRows;
 });
 
 afterEach(() => {
@@ -99,6 +102,29 @@ const slots = () => testIds(/^dashboard-slot-/, "dashboard-slot-");
 const quickActions = () => screen.getAllByTestId(/^link-quick-action-/).map((link) => [link.textContent, link.getAttribute("href")]);
 
 describe("Role Dashboard", () => {
+  it("explains the empty budget month without showing zero lanes", async () => {
+    vi.setSystemTime(new Date(2026, 10, 23, 12));
+    planRows = [];
+    const client = mount("company_admin");
+    const plan = within(screen.getByTestId("dashboard-preview-plan"));
+    expect(await plan.findByText("No customer budgets for November yet.")).toBeVisible();
+    expect(plan.getByText("Today's plan fills in once monthly budgets are set.")).toBeVisible();
+    expect(plan.queryAllByTestId(/^text-plan-/)).toHaveLength(0);
+    expect(plan.getByRole("link", { name: "Open Action Board" })).toHaveAttribute("href", "/action-board");
+    expect(client.getQueryData(["/api/action-board?year=2026&month=11"])).toEqual({ rows: [] });
+  });
+
+  it("shows all three lanes when a budgeted customer has nothing pending", async () => {
+    vi.setSystemTime(new Date(2026, 10, 23, 12));
+    planRows = [{ lane: "nothing_pending" }];
+    mount("company_admin");
+    const plan = within(screen.getByTestId("dashboard-preview-plan"));
+    expect(await plan.findByTestId("text-plan-clear_to_send")).toHaveTextContent(/^0$/);
+    expect(plan.getByTestId("text-plan-over_budget_nothing_approved")).toHaveTextContent(/^0$/);
+    expect(plan.getByTestId("text-plan-nothing_pending")).toHaveTextContent(/^1$/);
+    expect(plan.queryByText(/No customer budgets/)).not.toBeInTheDocument();
+  });
+
   it("shows the company admin all eight tiles, the two previews, and three quick actions", async () => {
     const client = mount("company_admin");
     expect(await screen.findByText("ORCHARD IRRIGATION SERVICES · IRRIGATION")).toBeInTheDocument();

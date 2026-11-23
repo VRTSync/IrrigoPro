@@ -35,8 +35,8 @@ Gate portalled navigation overlays at the responsive breakpoint, not just their 
 
 The later [Access Hardening policy](access-hardening-policy.md) supersedes the Navigation Redesign overview only where it retains Switch User. Do not restore that entry after retirement, including in the account menus, section list, breadcrumbs, or Jump To.
 
-The expandable main nav decision supersedes the original panel toggle. The main nav lists sections only, at both widths. Starting at 1200 px, the toggle switches between the 76 px rail and 216 px full section labels; the pages panel stays visible for sections with multiple pages. Keep the saved choice when the viewport narrows, but show the narrow rail from 1024 to 1199 px and leave the phone shell unchanged.
+The main nav lists sections only, narrow or wide. Pages always live in the pages menu or Jump To; do not add a user control to hide the pages menu. The expanded preference is per device and applies only from 1200 px, without being lost when the window narrows.
 
-**Why:** Hiding the only list of pages makes them harder to reach, and the wider rail would leave too little room for page content below 1200 px.
+**Why:** Randy confirmed the two-level split on 2026-11-23: hiding the pages menu would hide destinations, and the wider rail below 1200 px would take too much room from the page.
 
-**How to apply:** Keep pages in the panel or Jump To. Measure the actual remaining content width in both rail modes. The Users page switches between cards and table at 860 px of its own container, not at a viewport breakpoint.
+**How to apply:** Preserve the role-specific multi-page visibility rule and leave the phone shell unchanged. Measure the actual remaining content width beside the pages menu in both rail modes. The Users page switches between cards and table at 860 px of its own container, not at a viewport breakpoint.

@@ -8,7 +8,11 @@ import type { DashboardRole } from "./command-band";
 export interface DashboardPreviewsProps {
   role: DashboardRole;
   plan: {
-    counts?: { clear_to_send: number; over_budget_nothing_approved: number; nothing_pending: number };
+    data?: {
+      counts: { clear_to_send: number; over_budget_nothing_approved: number; nothing_pending: number };
+      isEmpty: boolean;
+    };
+    monthLabel: string;
     isLoading: boolean;
     isError: boolean;
   };
@@ -62,7 +66,7 @@ function ErrorLine({ text }: { text: string }) {
 export function DashboardPreviews({ role, plan, aging }: DashboardPreviewsProps) {
   const showPlan = role === "company_admin" || role === "irrigation_manager";
   const showAging = role === "company_admin" || role === "billing_manager" || role === "bookkeeper";
-  const { counts } = plan;
+  const { data: planData } = plan;
   const { summary } = aging;
 
   return (
@@ -70,14 +74,20 @@ export function DashboardPreviews({ role, plan, aging }: DashboardPreviewsProps)
       {showPlan && (
         <Card title="Today's plan" href="/action-board" cta="Open Action Board" testId="dashboard-preview-plan">
           {plan.isError ? <ErrorLine text="Today's plan could not be loaded." />
-            : plan.isLoading || !counts ? <Skeleton rows={3} />
+            : plan.isLoading || !planData ? <Skeleton rows={3} />
+            : planData.isEmpty ? (
+              <div className="space-y-1 py-2.5 text-sm" data-testid="dashboard-plan-no-budgets">
+                <p>No customer budgets for {plan.monthLabel} yet.</p>
+                <p className="text-muted-foreground">Today's plan fills in once monthly budgets are set.</p>
+              </div>
+            )
             : (
               <ul>
                 {PLAN_ROWS.map((r) => (
                   <li key={r.key} className="flex min-h-10 items-center gap-2.5 border-t border-slate-200 py-2.5 text-sm first:border-t-0">
                     <Marker color={r.color} />
                     <span>{r.label}</span>
-                    <span className="ml-auto font-bold tabular-nums" data-testid={`text-plan-${r.key}`}>{counts[r.key]}</span>
+                    <span className="ml-auto font-bold tabular-nums" data-testid={`text-plan-${r.key}`}>{planData.counts[r.key]}</span>
                   </li>
                 ))}
               </ul>

@@ -141,6 +141,23 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+.nav-rail-wide-row {
+  min-height: 44px;
+  border-radius: 12px;
+}
+
+.nav-rail-wide-bottom {
+  border-color: inherit;
+}
+
+.nav-rail-brand .nav-rail-wide-bottom {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-rail-brand .nav-rail-wide-row {
+  color: rgba(226, 240, 253, 0.85);
+}
+
 .nav-rail-brand .nav-rail-section[aria-current="true"] {
   background: linear-gradient(135deg, hsl(199 95% 52%), hsl(188 90% 48%) 50%, hsl(174 80% 45%));
   color: #04212e;
