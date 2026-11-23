@@ -27,6 +27,12 @@ Opening a page must not write data. The throttled invoice payment-status refresh
 
 **How to apply:** Keep inspection estimate creation behind its explicit manager action. Follow the assigned slice and its embedded Design Context, preserving newer Bookkeeper layout and role-visibility fixes. Command Center and site maps remain out of scope.
 
+Keep Billable as the default Customers list for every role. All is an admin-only alternate view; customer details belong in the profile, while billing visibility belongs in the All list.
+
+**Why:** Billing users need an uncluttered list, and customer details should not have competing edit flows.
+
+**How to apply:** Preserve the billable list when a non-admin opens an All link, and don't add an inline details editor back to either view.
+
 **Rule:** Web account switching signs out for every role. Only the super-admin App Health flow is real impersonation.
 
 **Why:** Rewriting the browser's stored role changes the visible shell but not the identity the server uses, so the screens and data can disagree.

@@ -358,7 +358,6 @@ export const companyAdminNav: NavConfig = {
       icon: Users,
       items: [
         { type: "leaf", label: "Customers", path: "/customers", icon: Users },
-        { type: "leaf", label: "All Customers", path: "/admin/customers", icon: Users },
         { type: "leaf", label: "Maps", path: "/site-maps", icon: MapIcon },
       ],
     },

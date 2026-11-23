@@ -31,6 +31,12 @@ function RedirectToBillingWorkspace() {
   return null;
 }
 
+function RedirectToAllCustomers() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/customers?view=all", { replace: true }); }, [navigate]);
+  return null;
+}
+
 function RedirectToWetChecks() {
   const [, navigate] = useLocation();
   useEffect(() => { navigate("/wet-checks", { replace: true }); }, [navigate]);
@@ -68,7 +74,6 @@ import WorkOrdersMissingPhotosReport from "@/pages/work-orders-missing-photos-re
 import PartsSettings from "@/pages/parts-settings";
 import MarkupSchedulePage from "@/pages/markup-schedule";
 import LaborRates from "@/pages/labor-rates";
-import AdminCustomers from "@/pages/admin-customers";
 import AdminControllers from "@/pages/admin-controllers";
 import WetCheckReconciliationPage from "@/pages/wet-check-reconciliation";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
@@ -186,7 +191,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/parts-settings" component={PartsSettings} />
           <Route path="/admin/markup-schedule" component={MarkupSchedulePage} />
           <Route path="/labor-rates" component={LaborRates} />
-          <Route path="/admin/customers" component={AdminCustomers} />
+          <Route path="/admin/customers" component={RedirectToAllCustomers} />
           <Route path="/admin/budget-goals" component={AdminBudgetGoalsPage} />
           <Route path="/admin/controllers" component={AdminControllers} />
           <Route path="/customers" component={Customers} />

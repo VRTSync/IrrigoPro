@@ -358,7 +358,6 @@ describe("no other role's nav structure moved (Task #1914)", () => {
       "  leaf /wet-checks",
       "group Customers",
       "  leaf /customers",
-      "  leaf /admin/customers",
       "  leaf /site-maps",
       "group Billing",
       "  leaf /manager-workspace [awaitingApproval]",

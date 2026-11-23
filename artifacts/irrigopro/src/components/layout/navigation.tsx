@@ -180,7 +180,6 @@ export default function Navigation() {
               { path: "/quickbooks", label: "QuickBooks", icon: Calculator },
               { path: "/labor-rates", label: "Labor Rates", icon: DollarSign },
               { path: "/admin/issue-types", label: "Wet Check Issue Types", icon: Droplets },
-              { path: "/admin/customers", label: "All Customers", icon: Users },
               { path: "/admin/controllers", label: "Controllers & Zones", icon: Cpu },
             ]
           },
