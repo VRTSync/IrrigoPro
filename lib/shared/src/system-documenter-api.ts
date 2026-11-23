@@ -8,6 +8,7 @@ export type ApiRule = { method: "GET" | "POST" | "PUT" | "DELETE"; pattern: RegE
 // equipment delete. Slim documentation reads/verification are reserved here;
 // this module does not implement those future endpoints.
 export const SYSTEM_DOCUMENTER_API: readonly ApiRule[] = [
+  { method: "GET", pattern: /^\/api\/auth\/user$/ },
   { method: "GET", pattern: /^\/api\/system-documentation\/sites$/ },
   { method: "GET", pattern: /^\/api\/system-documentation\/customers\/\d+\/site$/ },
   { method: "POST", pattern: /^\/api\/system-documentation\/customers\/\d+\/site\/(no-backflow|verify)$/ },

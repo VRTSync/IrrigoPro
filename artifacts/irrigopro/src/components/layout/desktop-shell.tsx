@@ -667,12 +667,6 @@ function SidebarUserMenu({
                 My Account
               </DropdownMenuItem>
             </Link>
-            <Link href="/switch-user">
-              <DropdownMenuItem>
-                <UserIcon className="mr-2 h-4 w-4" />
-                Switch User
-              </DropdownMenuItem>
-            </Link>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={clearSessionAndLogout}

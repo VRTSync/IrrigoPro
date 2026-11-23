@@ -50,7 +50,6 @@ const SystemUserManagement = lazyPage(() => import("@/pages/system-user-manageme
 const UserProfile = lazyPage(() => import("@/pages/user-profile"));
 const LicenseAgreement = lazyPage(() => import("@/pages/license-agreement"));
 const PrivacyPolicy = lazyPage(() => import("@/pages/privacy-policy"));
-const SwitchUser = lazyPage(() => import("@/pages/switch-user"));
 const CustomerProfile = lazyPage(() => import("@/pages/customer-profile"));
 const PartsSettings = lazyPage(() => import("@/pages/parts-settings"));
 const MarkupSchedulePage = lazyPage(() => import("@/pages/markup-schedule"));
@@ -158,7 +157,7 @@ function RouteSuspenseFallback() {
 export function AppRoutes() {
   // User state comes from the AuthProvider (wraps the app in main.tsx).
   // The provider reads localStorage synchronously so the very first render
-  // already knows the correct role — no stale-null window.
+  // can use the last known role while the provider checks the session.
   const { user, isLoading } = useAuth();
   const [currentPath] = useLocation();
 
@@ -172,9 +171,9 @@ export function AppRoutes() {
   }, []);
 
   // Public token-gated page — renders regardless of auth state and before the
-  // login gate. No app shell, no sidebar, no authenticated API calls. Hoisted
+  // login gate. No app shell, no sidebar. Hoisted
   // above the loading check so a direct URL works even during auth bootstrap.
-  // Documenters stay in their three-route app, including for pasted approval URLs.
+  // Documenters stay in their own app, including for pasted approval URLs.
   if (currentPath.startsWith("/estimate-approval/") && user?.role !== "system_documenter") {
     return (
       <TooltipProvider>
@@ -246,7 +245,7 @@ export function AppRoutes() {
   }
 
   // Document System Slice 7 — the System Documenter gets its own phone app:
-  // property picker, wizard and Switch User only. No Navigation, DesktopShell,
+  // property picker and wizard only. No Navigation, DesktopShell,
   // notifications or footer (each fetches data the role cannot read).
   if (user.role === "system_documenter") {
     return (
@@ -289,7 +288,6 @@ export function AppRoutes() {
                   <Route path="/customers/:customerId/irrigation-profile" component={IrrigationProfilePage} />
                   <Route path="/site-maps" component={FieldTechMaps} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
-                  <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
                   <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -362,7 +360,6 @@ export function AppRoutes() {
                   <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
-                  <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
                   <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -405,7 +402,6 @@ export function AppRoutes() {
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/quickbooks" component={QuickBooksPage} />
                   <Route path="/customer-review" component={CustomerReviewPage} />
-                  <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
                   <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -471,7 +467,6 @@ export function AppRoutes() {
                   <Route path="/invoices" component={InvoicesPage} />
                   <Route path="/reports/missing-location-data" component={MissingLocationDataReportPage} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
-                  <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
                   <Route path="/privacy-policy" component={PrivacyPolicy} />
@@ -542,7 +537,6 @@ export function AppRoutes() {
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
                   <Route path="/user-manager" component={RedirectToSystemUsers} />
-                  <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
                   <Route path="/privacy-policy" component={PrivacyPolicy} />

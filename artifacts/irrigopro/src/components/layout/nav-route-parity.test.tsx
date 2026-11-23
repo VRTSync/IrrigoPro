@@ -46,7 +46,6 @@ vi.mock("@/pages/quickbooks", () => page("quickbooks"));
 vi.mock("@/pages/site-maps", () => page("maps"));
 vi.mock("@/pages/super-admin-app-health", () => page("app-health"));
 vi.mock("@/pages/super-admin-loose-photos", () => page("loose-photos"));
-vi.mock("@/pages/switch-user", () => page("switch-user"));
 vi.mock("@/pages/system-user-management", () => page("all-users"));
 vi.mock("@/pages/wet-check-reconciliation", () => page("wc-recon"));
 vi.mock("@/pages/wet-checks/WetCheckSystemPage", () => page("wet-checks"));

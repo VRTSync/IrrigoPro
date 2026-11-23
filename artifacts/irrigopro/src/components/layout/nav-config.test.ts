@@ -20,7 +20,6 @@ const table: [sectionId: string, pageId: string, href: string, roles: string, ov
   ["platform", "loose-photos", "/super-admin/loose-photos", "s"],
   ["dashboard", "dashboard", "/", "cibk"],
   ["users", "all-users", "/system-users", "s"],
-  ["users", "switch-user", "/switch-user", "s"],
   ["field", "action-board", "/action-board", "ci"],
   ["field", "estimates", "/estimates", "cib", { c: "/estimates/command-center", b: "/estimates/pending-approval" }],
   ["field", "wet-checks", "/wet-checks", "cibs"],

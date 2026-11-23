@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { autoDownloadDocSites } from "@/lib/offline/doc-download";
 import { QueueView, SyncBadge } from "@/components/offline/sync-ui";
-import { Redirect, Route, Switch, useLocation } from "wouter";
+import { Redirect, Route, Switch } from "wouter";
 import { User } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -14,14 +14,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getSyncEngine } from "@/lib/offline/engine";
 import { getGetDocumentationSitesQueryKey } from "@workspace/api-client-react";
 
-const SwitchUser = lazy(() => import("@/pages/switch-user"));
-
 export interface DocumenterAppProps {
   user: { name?: string | null };
 }
 
 /**
- * Slice 7 — the System Documenter's whole app: picker, wizard, Switch User.
+ * Slice 7 — the System Documenter's whole app: picker and wizard.
  * Deliberately no Navigation, DesktopShell, notifications or footer: each
  * fetches data or links to screens this role cannot use.
  */
@@ -30,7 +28,6 @@ export default function DocumenterApp({ user }: DocumenterAppProps) {
   useEffect(() => getSyncEngine().on(event => {
     if (event.type === "doc-refresh") void queryClient.invalidateQueries({ queryKey: getGetDocumentationSitesQueryKey() });
   }), [queryClient]);
-  const [, setLocation] = useLocation();
   const [queueOpen, setQueueOpen] = useState(false);
   useEffect(() => {
     const download = () => { void autoDownloadDocSites().catch((error) => console.warn("Offline download failed", error)); };
@@ -63,7 +60,6 @@ export default function DocumenterApp({ user }: DocumenterAppProps) {
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel className="font-normal text-slate-600" data-testid="text-signed-in-as">Signed in as {user.name}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="min-h-11" onSelect={() => setLocation("/switch-user")} data-testid="menu-switch-user">Switch User</DropdownMenuItem>
             <DropdownMenuItem className="min-h-11 text-red-600 focus:text-red-700" onSelect={() => clearSessionAndLogout()} data-testid="menu-log-out">Log out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -74,7 +70,6 @@ export default function DocumenterApp({ user }: DocumenterAppProps) {
           <Switch>
             <Route path="/" component={DocPropertyPickerPage} />
             <Route path="/customers/:customerId/document-system">{() => <DocumentSystemPage variant="documenter" />}</Route>
-            <Route path="/switch-user" component={SwitchUser} />
             <Route><Redirect to="/" /></Route>
           </Switch>
         </Suspense>

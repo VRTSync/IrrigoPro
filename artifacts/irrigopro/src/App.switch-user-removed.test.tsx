@@ -33,7 +33,9 @@ const roles = [
   "system_documenter",
 ] as const satisfies readonly WebUser["role"][];
 
+let seededUser: WebUser;
 const fetchStub = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  if (input === "/api/auth/user") return Response.json(seededUser);
   if (input === "/api/system-documentation/sites") return Response.json({ customers: [] });
   return new Response(null, { status: 204 });
 });
@@ -50,29 +52,34 @@ afterEach(() => {
 });
 
 describe("/switch-user", () => {
-  it.each(roles)("signs out %s without requesting the user list", async (role) => {
-    const user: WebUser = {
-      id: 31, role, name: "Switch User Test", companyId: 1,
-      username: "switch-test", email: "switch-test@example.test", isActive: true,
+  it.each(roles)("uses the existing fallback for %s without signing out", async (role) => {
+    seededUser = {
+      id: 31, role, name: "Route Test", companyId: 1,
+      username: "route-test", email: "route-test@example.test", isActive: true,
     };
-    localStorage.setItem("user", JSON.stringify(user));
+    localStorage.setItem("user", JSON.stringify(seededUser));
     localStorage.setItem("onboarding_completed", "true");
 
-    const nav = memoryLocation({ path: "/switch-user" });
+    const nav = memoryLocation({ path: "/switch-user", record: true });
     render(
       <Router hook={nav.hook} searchHook={nav.searchHook}>
         <AuthProvider><AppRoutes /></AuthProvider>
       </Router>,
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Signing out to switch accounts…");
-    expect(clearSessionAndLogout).toHaveBeenCalledTimes(1);
-    expect(fetchStub).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
+    if (role === "system_documenter") {
+      expect(await screen.findByRole("heading", { name: "Which property?" })).toBeInTheDocument();
+      expect(nav.history.at(-1)).toBe("/");
+    } else {
+      expect(await screen.findByRole("heading", { name: "404 Page Not Found" })).toBeInTheDocument();
+    }
+    expect(fetchStub).toHaveBeenCalledWith("/api/auth/user", expect.objectContaining({ method: "GET" }));
+    expect(clearSessionAndLogout).not.toHaveBeenCalled();
     const requestedPaths = fetchStub.mock.calls.map(([input]) =>
       new URL(input instanceof Request ? input.url : input, window.location.origin).pathname,
     );
-    expect(requestedPaths.filter((path) => path === "/api/auth/logout")).toHaveLength(1);
+    expect(requestedPaths).not.toContain("/api/auth/logout");
     expect(requestedPaths).not.toContain("/api/users");
-    expect(localStorage.getItem("user")).toBeNull();
+    expect(JSON.parse(localStorage.getItem("user")!)).toEqual(seededUser);
   });
 });

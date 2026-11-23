@@ -27,7 +27,9 @@ import { AuthProvider } from "@/lib/auth-context";
 import { clearSessionAndLogout, queryClient } from "@/lib/queryClient";
 import { UnsupportedRoleScreen } from "@/components/auth/unsupported-role-screen";
 
-const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
+const fetchSpy = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+  new Response(input === "/api/auth/user" ? localStorage.getItem("user") : "{}", { status: 200 }),
+);
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchSpy);
   fetchSpy.mockClear();
@@ -51,7 +53,7 @@ describe("unsupported roles fail closed at real app routing", () => {
   for (const [role, path] of [
     ["wizard", "/"],
   ]) {
-    it(`${role} at ${path} mounts only the unsupported card, with no queries`, async () => {
+    it(`${role} at ${path} mounts only the unsupported card and checks the session`, async () => {
       mount(role, path);
       expect(screen.getByRole("heading", { name: "No screens for this account" })).toBeTruthy();
       expect(screen.getByText(`This account's role (${role}) has no screens in IrrigoPro yet. Ask your company admin to check your role.`)).toBeTruthy();
@@ -60,7 +62,7 @@ describe("unsupported roles fail closed at real app routing", () => {
       expect(screen.queryByText("Company admin app")).toBeNull();
       expect(screen.queryByText("Desktop admin shell")).toBeNull();
       await new Promise(resolve => setTimeout(resolve, 20));
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(fetchSpy.mock.calls).toEqual([["/api/auth/user", expect.objectContaining({ method: "GET" })]]);
       expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
     });
   }

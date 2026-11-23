@@ -57,10 +57,6 @@ const FALLBACK_PATTERNS: Array<{ regex: RegExp; meta: () => RouteMeta }> = [
     meta: () => ({ title: "My Account", breadcrumb: [{ label: "My Account" }] }),
   },
   {
-    regex: /^\/switch-user$/,
-    meta: () => ({ title: "Switch User", breadcrumb: [{ label: "Switch User" }] }),
-  },
-  {
     regex: /^\/license-agreement$/,
     meta: () => ({ title: "License Agreement", breadcrumb: [{ label: "License Agreement" }] }),
   },

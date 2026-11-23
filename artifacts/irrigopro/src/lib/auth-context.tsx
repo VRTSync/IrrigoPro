@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { safeGet, safeRemove, safeSet } from "@/utils/safeStorage";
-import { clearSessionAndLogout } from "@/lib/queryClient";
+import { apiRequest, clearSessionAndLogout } from "@/lib/queryClient";
 import type { Role } from "@workspace/shared";
 
 export type WebUser = {
@@ -44,20 +44,45 @@ function readUserFromStorage(): WebUser | null {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Lazy initialiser: reads localStorage synchronously so the very first
-  // render already knows the correct role. Eliminates the stale-null window
+  // render already knows the last saved role. Eliminates the stale-null window
   // that caused super_admin to land on AdminDashboard on BFCache restore.
   const [user, setUserState] = useState<WebUser | null>(readUserFromStorage);
 
   // isLoading is only true momentarily when no saved user was found (fresh
-  // first visit / after logout). We resolve it immediately because the web
-  // app uses session cookies — there's no async token check.
+  // first visit / after logout). Session verification runs in the background
+  // so it doesn't block a field user's offline start.
   const [isLoading, setIsLoading] = useState<boolean>(
     () => readUserFromStorage() === null,
   );
 
   useEffect(() => {
-    // Resolve the loading gate immediately — no async bootstrap needed.
     setIsLoading(false);
+
+    let active = true;
+    const storedSnapshot = safeGet("user");
+    const stored = readUserFromStorage();
+    if (stored && navigator.onLine !== false) {
+      void apiRequest("/api/auth/user", "GET")
+        .then((server: WebUser) => {
+          // Don't restore a stale account if logout or login already changed it.
+          if (!active || safeGet("user") !== storedSnapshot) return;
+          const changed =
+            server.id !== stored.id ||
+            server.role !== stored.role ||
+            (server.companyId ?? null) !== (stored.companyId ?? null);
+          const refreshed = { ...stored, ...server };
+          safeSet("user", JSON.stringify(refreshed));
+          if (changed) {
+            window.location.reload();
+            return;
+          }
+          setUserState(refreshed);
+        })
+        .catch(() => {
+          // Keep the stored user offline. apiRequest already handles a 401
+          // through the existing unauthenticated-read path.
+        });
+    }
 
     // BFCache guard: when the browser restores this page from the
     // Back-Forward Cache re-read localStorage so any post-login user change
@@ -71,7 +96,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
     window.addEventListener("pageshow", handlePageShow);
-    return () => window.removeEventListener("pageshow", handlePageShow);
+    return () => {
+      active = false;
+      window.removeEventListener("pageshow", handlePageShow);
+    };
   }, []);
 
   // setUser — updates both the React state and localStorage so non-React

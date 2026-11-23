@@ -14,3 +14,5 @@ The newer design retires Switch User rather than retaining a second way to sign 
 **Why:** The browser's stored role is not proof of server identity, and a shared device must not serve a previous user's cached data after logout.
 
 **How to apply:** Follow the retirement slice to remove the existing entries, and do not restore them in later navigation work. Do not repurpose logout or offline fallback to change server identity.
+
+When adding a signed-in bootstrap request shared by all web roles, test it through the System Documenter API allowlist as well as the browser. A fixture can return a successful session response even when the real middleware would reject the request. Allow only the exact method and path the role needs.

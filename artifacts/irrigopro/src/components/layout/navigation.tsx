@@ -398,12 +398,6 @@ export default function Navigation({ onOpenMenu }: { onOpenMenu?: () => void } =
                       My Account
                     </DropdownMenuItem>
                   </Link>
-                  <Link href="/switch-user">
-                    <DropdownMenuItem>
-                      <User className="mr-2 h-4 w-4" />
-                      Switch User
-                    </DropdownMenuItem>
-                  </Link>
                   <DropdownMenuItem
                     onClick={clearSessionAndLogout}
                     className="text-red-600"
@@ -491,12 +485,6 @@ export default function Navigation({ onOpenMenu }: { onOpenMenu?: () => void } =
                     <DropdownMenuItem>
                       <User className="mr-2 h-4 w-4" />
                       My Account
-                    </DropdownMenuItem>
-                  </Link>
-                  <Link href="/switch-user">
-                    <DropdownMenuItem>
-                      <User className="mr-2 h-4 w-4" />
-                      Switch User
                     </DropdownMenuItem>
                   </Link>
                   <DropdownMenuItem

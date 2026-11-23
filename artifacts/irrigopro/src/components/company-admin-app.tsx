@@ -82,7 +82,6 @@ import RedirectPendingApprovalToCC from "@/components/estimates/redirect-to-comm
 import UserProfile from "@/pages/user-profile";
 import LicenseAgreement from "@/pages/license-agreement";
 import PrivacyPolicy from "@/pages/privacy-policy";
-import SwitchUser from "@/pages/switch-user";
 import Login from "@/pages/login";
 import ForgotPassword from "@/pages/forgot-password";
 import ResetPassword from "@/pages/reset-password";
@@ -237,7 +236,6 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />
           <Route path="/work-orders" component={WorkOrders} />
           <Route path="/user-profile" component={UserProfile} />
-          <Route path="/switch-user" component={SwitchUser} />
           <Route path="/license-agreement" component={LicenseAgreement} />
           <Route path="/privacy-policy" component={PrivacyPolicy} />
           <Route path="/login" component={Login} />

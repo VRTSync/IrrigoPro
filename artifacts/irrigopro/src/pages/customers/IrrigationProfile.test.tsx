@@ -77,7 +77,9 @@ const makeController = (overrides: Record<string, unknown> = {}) => ({
 function setup(role: string, controllers: unknown[] = [makeController()]) {
   // AuthProvider reads from safeGet("user") via readUserFromStorage — the mock
   // injects the test role so useAuth() in IrrigationProfile receives it.
-  mockSafeGet.mockReturnValue(JSON.stringify({ id: 1, role, isActive: true, name: "Test", email: "t@t.com", username: "t" }));
+  const user = { id: 1, role, isActive: true, name: "Test", email: "t@t.com", username: "t" };
+  mockSafeGet.mockReturnValue(JSON.stringify(user));
+  vi.mocked(apiRequest).mockImplementation(async (url) => url === "/api/auth/user" ? user : {});
 
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -138,7 +140,8 @@ describe("IrrigationProfile — re-letter clocks", () => {
         { controllerId: 1, letter: "B" }, { controllerId: 2, letter: "A" }, { controllerId: 3, letter: "C" },
       ],
     }));
-    expect(apiRequest).toHaveBeenCalledTimes(1);
+    expect(apiRequest).toHaveBeenCalledWith("/api/auth/user", "GET");
+    expect(apiRequest).toHaveBeenCalledTimes(2);
     for (const queryKey of [
       ["/api/customers/42/controllers-profile"], ["/api/properties", 42, "controllers"],
       ["/api/irrigation-controllers/1/history"], ["/api/irrigation-controllers/2/history"],
@@ -153,12 +156,12 @@ describe("IrrigationProfile — re-letter clocks", () => {
     fireEvent.change(screen.getByTestId("select-letter-1"), { target: { value: "B" } });
     expect(screen.getAllByText("Used twice")).toHaveLength(2);
     expect(screen.getByTestId("button-save-letters")).toBeDisabled();
-    expect(apiRequest).not.toHaveBeenCalled();
+    expect(vi.mocked(apiRequest).mock.calls).toEqual([["/api/auth/user", "GET"]]);
   });
   it("sends only the selected named branch, never clocks from the default location", async () => {
     route.search = "?branchName=North";
-    vi.mocked(apiRequest).mockResolvedValueOnce({ changed: 2 });
     const { qc } = setup("company_admin", [...clocks(), makeController({ id: 6, letter: "B", branchName: "North" })]);
+    vi.mocked(apiRequest).mockResolvedValueOnce({ changed: 2 });
     vi.spyOn(qc, "invalidateQueries").mockResolvedValue();
     fireEvent.click(screen.getByTestId("button-reletter"));
     expect(screen.queryByTestId("select-letter-1")).toBeNull();
@@ -171,8 +174,8 @@ describe("IrrigationProfile — re-letter clocks", () => {
   });
   it("locks saving while pending; server errors keep selections and expose the server message", async () => {
     let reject!: (e: Error) => void;
-    vi.mocked(apiRequest).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
     setup("company_admin", clocks());
+    vi.mocked(apiRequest).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
     fireEvent.click(screen.getByTestId("button-reletter"));
     fireEvent.change(screen.getByTestId("select-letter-1"), { target: { value: "X" } });
     fireEvent.click(screen.getByTestId("button-save-letters"));

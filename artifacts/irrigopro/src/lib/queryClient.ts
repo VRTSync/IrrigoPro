@@ -323,10 +323,19 @@ export function adaptiveRefetchInterval(baseMs: number): number | false {
 // so the back button can't return to a stale dashboard.
 export function clearSessionAndLogout(): void {
   const cleared = clearDocCopies();
+  const clearedCaches = typeof caches === "undefined"
+    ? Promise.resolve()
+    : caches.keys().then((names) =>
+      Promise.all(names.filter((name) => name.startsWith("wc-")).map((name) => caches.delete(name))),
+    );
   try { queryClient.clear(); } catch { /* non-browser / test context */ }
   try { safeRemove("user"); } catch { /* ignore */ }
   void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
-  void cleared.catch((error) => console.warn("Couldn't clear offline document copies", error))
+  void Promise.allSettled([cleared, clearedCaches])
+    .then(([docs, readCaches]) => {
+      if (docs.status === "rejected") console.warn("Couldn't clear offline document copies", docs.reason);
+      if (readCaches.status === "rejected") console.warn("Couldn't clear offline read caches", readCaches.reason);
+    })
     .finally(() => { try { window.location.replace("/login"); } catch { /* non-browser context */ } });
 }
 

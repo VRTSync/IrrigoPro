@@ -91,6 +91,7 @@ function siteFor(id: number, branchName: string): DocumentationSite | null {
 
 let sites: DocumentationSites;
 const fetchCalls: [string, string][] = [];
+let nextSitesResponse: (() => Promise<Response>) | undefined;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -100,8 +101,13 @@ const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
   const method = (init?.method ?? "GET").toUpperCase();
   fetchCalls.push([method, url]);
   const path = url.split("?")[0];
+  if (method === "GET" && path === "/api/auth/user") return new Response(localStorage.getItem("user"));
   if (method === "POST" && path === "/api/auth/logout") return json({ ok: true });
-  if (method === "GET" && path === "/api/system-documentation/sites") return json(sites);
+  if (method === "GET" && path === "/api/system-documentation/sites") {
+    const respond = nextSitesResponse;
+    nextSitesResponse = undefined;
+    return respond ? respond() : json(sites);
+  }
   const m = path.match(/^\/api\/system-documentation\/customers\/(\d+)\/site(\/verify)?$/);
   if (m) {
     const id = Number(m[1]);
@@ -119,6 +125,7 @@ const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
 
 beforeEach(() => {
   sites = makeSites();
+  nextSitesResponse = undefined;
   fetchCalls.length = 0;
   fetchStub.mockClear();
   vi.mocked(apiRequest).mockClear();
@@ -197,24 +204,22 @@ describe("System Documenter app (Slice 7)", () => {
     expect(screen.queryByRole("navigation")).toBeNull();
     expect(screen.queryByText("Powered by footer")).toBeNull();
     await waitFor(() => expect(cards().length).toBe(4));
-    // Only allowlisted reads on first paint (no background fetchers).
+    // Only allowlisted reads on first paint (no staff background fetchers).
+    expect(fetchCalls).toContainEqual(["GET", "/api/auth/user"]);
     for (const [m, u] of fetchCalls) expect(isApiAllowedForRole("system_documenter", m, u)).toBe(true);
   });
 
   it("shows three skeleton cards while loading, and retry after an error", async () => {
-    let fail = true;
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => { release = r; });
-    fetchStub.mockImplementationOnce(async (input: RequestInfo | URL) => {
-      fetchCalls.push(["GET", String(input)]);
+    nextSitesResponse = async () => {
       await gate;
-      return fail ? json({ message: "boom" }, 500) : json(sites);
-    });
+      return json({ message: "boom" }, 500);
+    };
     mount("/");
     expect(await screen.findAllByTestId("picker-skeleton-card")).toHaveLength(3);
     release();
     expect(await screen.findByTestId("picker-error")).toHaveTextContent("Couldn't load properties.");
-    fail = false;
     fireEvent.click(screen.getByTestId("button-picker-retry"));
     await waitFor(() => expect(cards().length).toBe(4));
   });
@@ -356,22 +361,17 @@ describe("System Documenter app (Slice 7)", () => {
     expect(denied).toEqual([]);
   });
 
-  it("8. account menu: Signed in as, Switch User, Log out", async () => {
+  it("8. account menu: Signed in as, Log out", async () => {
     const user = userEvent.setup();
-    const nav = mount("/");
+    mount("/");
     await screen.findByRole("heading", { name: "Which property?" });
     const account = screen.getByRole("button", { name: "Account" });
     expect(account.className).toContain("h-11 w-11");
     await user.click(account);
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText("Signed in as Rosa Delgado")).toBeInTheDocument();
-    await user.click(within(menu).getByRole("menuitem", { name: "Switch User" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Signing out to switch accounts");
-    expect(nav.history.at(-1)).toBe("/switch-user");
-    expect(clearSessionAndLogout).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(fetchCalls).toContainEqual(["POST", "/api/auth/logout"]));
-    expect(fetchCalls.some(([, url]) => url === "/api/users")).toBe(false);
-    expect(localStorage.getItem("user")).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "Log out" })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /^Switch\sUser$/ })).toBeNull();
   });
 
   it("8b. Log out uses the real logout request and clears the current account", async () => {
@@ -383,13 +383,6 @@ describe("System Documenter app (Slice 7)", () => {
     expect(clearSessionAndLogout).toHaveBeenCalledTimes(1);
     expect(fetchCalls).toContainEqual(["POST", "/api/auth/logout"]);
     expect(localStorage.getItem("user")).toBeNull();
-  });
-
-  it("8c. direct Switch User navigation never mounts the forbidden user-list fetch", async () => {
-    mount("/switch-user");
-    expect(await screen.findByRole("status")).toHaveTextContent("Signing out to switch accounts");
-    await waitFor(() => expect(fetchCalls).toEqual([["POST", "/api/auth/logout"]]));
-    expect(clearSessionAndLogout).toHaveBeenCalledTimes(1);
   });
 
   it("static: the shell imports no staff navigation, notification or footer components", () => {

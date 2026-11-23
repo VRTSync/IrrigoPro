@@ -45,11 +45,11 @@ Keep Billable as the default Customers list for every role. All is an admin-only
 
 **How to apply:** Preserve the billable list when a non-admin opens an All link, and don't add an inline details editor back to either view.
 
-**Rule:** Web account switching signs out for every role. Only the super-admin App Health flow is real impersonation.
+**Rule:** There is no Switch User page or menu item for any role. Switching accounts is Log out, then sign in. Only the super-admin App Health flow is real impersonation.
 
-**Why:** Rewriting the browser's stored role changes the visible shell but not the identity the server uses, so the screens and data can disagree.
+**Why:** Decided by the product owner on 2026-11-22. A local identity picker showed one role's screens while requests ran as another; the sign-out stand-in that replaced it duplicated Log out.
 
-**How to apply:** Keep the “Switch User” label and use the normal logout flow, never a local identity picker. Exercise the actual role routers in tests: a shared menu can link to a page that a role-specific router does not mount.
+**How to apply:** Never add a `/switch-user` route, page or menu entry. Exercise the actual role routers in tests: a shared menu can link to a page that a role-specific router does not mount.
 
 Treat a dead-code ticket's proof greps as a minimum, not the complete consumer search.
 

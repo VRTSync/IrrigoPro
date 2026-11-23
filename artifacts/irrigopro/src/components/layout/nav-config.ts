@@ -1,7 +1,7 @@
 import {
   Activity, AlertTriangle, BarChart3, Building2, Calculator, ClipboardCheck,
   ClipboardList, Cpu, Database, DollarSign, Droplets, Home, ImageOff,
-  LayoutDashboard, MapIcon, Package, Percent, Receipt, Repeat, Scale, Settings,
+  LayoutDashboard, MapIcon, Package, Percent, Receipt, Scale, Settings,
   ShieldCheck, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 
@@ -85,7 +85,6 @@ export const NAV_SECTIONS: NavSection[] = [
     description: "People across every company", icon: Users, placement: "top", showBadgeSum: true,
     groups: [{ label: null, pages: [
       { id: "all-users", label: "All Users", description: "Every user across companies", icon: Users, paths: samePath("/system-users", s) },
-      { id: "switch-user", label: "Switch User", description: "Sign out to switch accounts", icon: Repeat, paths: samePath("/switch-user", s) },
     ] }],
   },
   {

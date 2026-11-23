@@ -220,6 +220,7 @@ describe("documenter registry and exact API matcher", () => {
     }
   });
   const rules = [
+    ["GET", "/api/auth/user"],
     ["GET", "/api/system-documentation/sites"],
     ["GET", "/api/system-documentation/customers/1/site"],
     ["POST", "/api/system-documentation/customers/1/site/no-backflow"],
