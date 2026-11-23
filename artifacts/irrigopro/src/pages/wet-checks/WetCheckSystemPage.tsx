@@ -588,7 +588,7 @@ export default function WetCheckSystemPage() {
       </div>
 
       <div className="border-b border-gray-200 mb-6">
-        <nav className="flex gap-0 -mb-px overflow-x-auto" aria-label="Wet Checks tabs">
+        <nav className="flex flex-wrap gap-0 -mb-px" aria-label="Wet Checks tabs">
           <TabButton
             label="All Wet Checks"
             active={tab === "all"}

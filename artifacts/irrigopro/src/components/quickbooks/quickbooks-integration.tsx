@@ -140,7 +140,7 @@ function ConnectionHealthPanel() {
 
       {health.connections.map((conn) => (
         <div key={conn.realmId} className="border rounded-lg p-3 space-y-2 text-sm">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 font-medium">
               <Building className="w-4 h-4 text-muted-foreground" />
               <span className="font-mono text-xs">{conn.realmId}</span>
@@ -464,7 +464,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
         <CardContent className="space-y-6">
           {/* Connection Status */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-lg font-semibold">Connection Status</h3>
               {isReconnectRequired ? (
                 <Badge className="bg-red-100 text-red-800">
@@ -568,7 +568,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
 
                 {/* Customer Sync Section */}
                 <div className="mt-4 pt-4 border-t border-green-200">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <h4 className="font-medium text-green-900">Customer Data</h4>
                     <Button
                       onClick={() => syncCustomersMutation.mutate()}
@@ -711,8 +711,8 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
             ) : (
               <div className="space-y-3">
                 {estimates.map((estimate: any) => (
-                  <div key={estimate.id} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div className="flex items-center gap-3">
+                  <div key={estimate.id} className="flex flex-wrap items-center justify-between gap-2 p-3 border rounded-lg">
+                    <div className="flex items-center gap-3 min-w-0">
                       {getStatusIcon("not-synced")}
                       <div>
                         <p className="font-medium">{formatEstimateNumber(estimate.estimateNumber)}</p>
@@ -721,7 +721,7 @@ export function QuickBooksIntegration({ className }: QuickBooksConnectionProps) 
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 ml-auto">
                       <Badge className={getStatusColor("not-synced")}>
                         Not Synced
                       </Badge>

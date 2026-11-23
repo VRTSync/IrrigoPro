@@ -310,7 +310,7 @@ export default function CustomerProfile() {
               </div>
             </div>
             {/* Primary action buttons */}
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 max-w-full">
               <Button size="sm" onClick={() => setLocation(`/customers/${id}/site-maps`)} className="bg-blue-600 hover:bg-blue-700 text-white">
                 <MapPin className="w-4 h-4 mr-1.5" />View Site Map
               </Button>
@@ -335,9 +335,9 @@ export default function CustomerProfile() {
             </div>
           </div>
 
-          {/* Tab bar — uses Tabs primitives; scrolls horizontally on mobile */}
-          <div className="overflow-x-auto -mx-1 px-1">
-            <TabsList className="inline-flex gap-0 bg-transparent p-0 h-auto rounded-none min-w-max">
+          {/* Tab bar -- wraps on narrow screens */}
+          <div className="-mx-1 px-1">
+            <TabsList className="flex flex-wrap gap-0 bg-transparent p-0 h-auto rounded-none">
               {tabDefs.map(({ id: tabId, label, Icon }) => (
                 <TabsTrigger
                   key={tabId}

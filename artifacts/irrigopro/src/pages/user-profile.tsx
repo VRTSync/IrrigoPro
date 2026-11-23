@@ -228,15 +228,15 @@ export default function UserProfilePage() {
 
             {/* Account Information */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <div className="flex items-center space-x-2">
                   <Mail className="h-4 w-4 text-gray-500" />
                   <span className="text-sm font-medium">Email</span>
                 </div>
-                <span className="text-sm text-gray-600">{user.email}</span>
+                <span className="text-sm text-gray-600 break-all">{user.email}</span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <div className="flex items-center space-x-2">
                   <Shield className="h-4 w-4 text-gray-500" />
                   <span className="text-sm font-medium">Role</span>
@@ -246,7 +246,7 @@ export default function UserProfilePage() {
                 </Badge>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <div className="flex items-center space-x-2">
                   <Building2 className="h-4 w-4 text-gray-500" />
                   <span className="text-sm font-medium">Company ID</span>
@@ -254,7 +254,7 @@ export default function UserProfilePage() {
                 <span className="text-sm text-gray-600">{user.companyId}</span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <div className="flex items-center space-x-2">
                   <Calendar className="h-4 w-4 text-gray-500" />
                   <span className="text-sm font-medium">Member Since</span>
@@ -264,7 +264,7 @@ export default function UserProfilePage() {
                 </span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <div className="flex items-center space-x-2">
                   <User className="h-4 w-4 text-gray-500" />
                   <span className="text-sm font-medium">Status</span>

@@ -448,7 +448,7 @@ export default function CompanyUserManagement() {
   return (
     <div className="w-full p-6 space-y-8">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
           <p className="text-muted-foreground">

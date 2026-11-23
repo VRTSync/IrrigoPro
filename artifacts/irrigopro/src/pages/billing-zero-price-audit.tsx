@@ -192,13 +192,7 @@ export default function BillingZeroPriceAuditPage() {
         backHref="/billing-sheets"
       />
       <PageContent>
-        <div className="flex items-center justify-between mb-4">
-          <Link href="/billing-sheets">
-            <Button variant="outline" size="sm" data-testid="button-back-billing-sheets">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Billing Sheets
-            </Button>
-          </Link>
+        <div className="flex justify-end mb-4">
           <Button
             variant="outline"
             size="sm"
