@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest, adaptiveRefetchInterval, clearSessionAndLogout } from "@/lib/queryClient";
 import irrigoProLogo from "@assets/IrrigoPro_2026-03_1780427958317.png";
 import { useMemo } from "react";
-import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, Activity, Percent, type LucideIcon } from "lucide-react";
+import { Home, FileText, Package, Users, Wrench, ClipboardList, Calculator, UserCheck, Settings, LogOut, User, ChevronDown, MapIcon, DollarSign, ShieldCheck, Receipt, Droplets, Cpu, Activity, Percent, Menu, type LucideIcon } from "lucide-react";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
 
@@ -28,7 +28,7 @@ type NavItem = {
   dropdownItems?: NavDropdownItem[];
 };
 
-export default function Navigation() {
+export default function Navigation({ onOpenMenu }: { onOpenMenu?: () => void } = {}) {
   const [location] = useLocation();
 
   const isActive = (path: string) => {  
@@ -133,8 +133,8 @@ export default function Navigation() {
             dropdownItems: [
               { path: "/work-orders", label: "Work Orders", icon: Wrench },
               { path: "/billing-sheets", label: "Billing Sheets", icon: ClipboardList },
-              { path: "/estimates/pending-approval", label: "Estimates Pending Approval", icon: ShieldCheck, badge: pendingEstimateCount > 0 ? pendingEstimateCount : undefined },
-              { path: "/wet-checks/admin", label: "Wet Checks", icon: Droplets },
+              { path: "/estimates/command-center", label: "Estimates", icon: ShieldCheck, badge: pendingEstimateCount > 0 ? pendingEstimateCount : undefined },
+              { path: "/wet-checks", label: "Wet Checks", icon: Droplets },
             ]
           },
           { 
@@ -165,7 +165,7 @@ export default function Navigation() {
             icon: DollarSign, 
             isDropdown: true,
             dropdownItems: [
-              { path: "/billing/dashboard", label: "Dashboard", icon: Home },
+              { path: "/manager-workspace", label: "Manager Workspace", icon: Home },
               { path: "/billing/command-center", label: "Command Center", icon: ClipboardList },
             ]
           },
@@ -190,12 +190,12 @@ export default function Navigation() {
           { path: "/work-orders", label: "Work Orders", icon: Wrench },
           { path: "/billing-sheets", label: "Billing", icon: ClipboardList },
           {
-            path: "/wet-checks/admin",
+            path: "/wet-checks",
             label: "Wet Checks",
             icon: Droplets,
             isDropdown: true,
             dropdownItems: [
-              { path: "/wet-checks/admin", label: "Wet Checks", icon: Droplets },
+              { path: "/wet-checks", label: "Wet Checks", icon: Droplets },
               { path: "/admin/issue-types", label: "Issue Types", icon: Droplets },
             ],
           },
@@ -447,6 +447,18 @@ export default function Navigation() {
         {/* Top Bar with Logo and Notifications */}
         <div className="bg-white shadow-sm border-b border-gray-200 m-0 p-0">
           <div className="flex justify-between items-center h-14 px-4">
+            {onOpenMenu && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-2 mr-1"
+                aria-label="Open menu"
+                data-testid="phone-nav-menu"
+                onClick={onOpenMenu}
+              >
+                <Menu className="w-5 h-5" />
+              </Button>
+            )}
             {/* Logo */}
             <div className="flex items-center min-w-0 flex-1 mr-2">
               <div

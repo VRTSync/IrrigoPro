@@ -459,7 +459,7 @@ export default function ManagerWorkspacePage() {
           <LaunchpadTile
             label="Wet Checks"
             icon={<Droplets className="w-6 h-6 text-cyan-600" />}
-            href="/wet-checks/pending-review"
+            href="/wet-checks?tab=needs-review"
             count={wcCounts?.needsReview}
             colorClass="border-l-cyan-500"
           />

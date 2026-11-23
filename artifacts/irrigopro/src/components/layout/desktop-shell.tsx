@@ -298,7 +298,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
   return (
     <div data-testid="desktop-shell">
     <PageActionsContext.Provider value={actionsContextValue}>
-      <SidebarProvider open={open} onOpenChange={setOpen}>
+      <SidebarProvider open={open} onOpenChange={setOpen} mobileBreakpoint={1024}>
         <div className="hidden lg:contents">
           <DesktopSidebar
             navConfig={navConfig}
@@ -310,7 +310,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
         {/* min-w-0: without it this flex child grows to its widest table and the whole window scrolls sideways. */}
         <SidebarInset className="min-h-screen min-w-0 pb-20 lg:pb-0">
           <div className="lg:hidden">
-            <Navigation />
+            <PhoneNav />
           </div>
           <ImpersonationBanner />
           <TopStrip
@@ -326,6 +326,11 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
     </PageActionsContext.Provider>
     </div>
   );
+}
+
+function PhoneNav() {
+  const { setOpenMobile } = useSidebar();
+  return <Navigation onOpenMenu={() => setOpenMobile(true)} />;
 }
 
 function TopStrip({
@@ -468,6 +473,11 @@ function DesktopSidebar({
     () => pickActiveLeafPath(navConfig, location),
     [navConfig, location],
   );
+  const { isMobile, setOpenMobile } = useSidebar();
+  useEffect(() => {
+    if (isMobile) setOpenMobile(false);
+  }, [location, isMobile, setOpenMobile]);
+
   const brandThemed =
     userRole === "company_admin" ||
     userRole === "billing_manager" ||
@@ -567,6 +577,14 @@ function TopLevelEntry({
   );
 }
 
+// A tap on the current page should close the sheet even if the URL doesn't change.
+function useCloseMobileNav() {
+  const { isMobile, setOpenMobile } = useSidebar();
+  return () => {
+    if (isMobile) setOpenMobile(false);
+  };
+}
+
 function LeafItem({
   leaf,
   activePath,
@@ -576,13 +594,14 @@ function LeafItem({
   activePath: string | null;
   badges: NavBadgeMap;
 }) {
+  const closeMobileNav = useCloseMobileNav();
   const Icon = leaf.icon;
   const active = activePath === leaf.path;
   const badgeCount = leaf.badgeKey ? badges[leaf.badgeKey] : undefined;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={active} tooltip={leaf.label}>
-        <Link href={leaf.path}>
+        <Link href={leaf.path} onClick={closeMobileNav}>
           <Icon />
           <span>{leaf.label}</span>
         </Link>
@@ -605,6 +624,7 @@ function NestedGroupItem({
   activePath: string | null;
   badges: NavBadgeMap;
 }) {
+  const closeMobileNav = useCloseMobileNav();
   const hasActive = groupHasActive(group, activePath);
   const [open, setOpen] = useState<boolean>(
     () => hasActive || !!group.defaultOpen,
@@ -638,7 +658,7 @@ function NestedGroupItem({
               return (
                 <SidebarMenuSubItem key={`${idx}-${sub.path}`}>
                   <SidebarMenuSubButton asChild isActive={active}>
-                    <Link href={sub.path}>
+                    <Link href={sub.path} onClick={closeMobileNav}>
                       <span>{sub.label}</span>
                     </Link>
                   </SidebarMenuSubButton>

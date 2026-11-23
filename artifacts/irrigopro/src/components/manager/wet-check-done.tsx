@@ -71,7 +71,7 @@ function OutcomeRow({ testId, accent, icon: Icon, primary, link }: OutcomeRowPro
   );
 }
 
-export function WetCheckDone({ id, returnTo = "/manager" }: { id: number; returnTo?: string }) {
+export function WetCheckDone({ id, returnTo = "/manager-workspace" }: { id: number; returnTo?: string }) {
   const [, navigate] = useLocation();
 
   const { data: wc, isLoading } = useQuery<WetCheckWithDetails>({

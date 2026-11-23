@@ -35,8 +35,8 @@ describe("manager-workspace.tsx — source-level assertions", () => {
     expect(MW_SRC.includes('data-testid="launchpad"')).toBe(true);
   });
 
-  it("launchpad tile links to /wet-checks/pending-review", () => {
-    expect(MW_SRC.includes('href="/wet-checks/pending-review"')).toBe(true);
+  it("launchpad tile links to /wet-checks?tab=needs-review", () => {
+    expect(MW_SRC.includes('href="/wet-checks?tab=needs-review"')).toBe(true);
   });
 
   it("launchpad tile links to /work-orders", () => {

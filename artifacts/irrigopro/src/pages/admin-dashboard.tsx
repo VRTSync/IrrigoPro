@@ -262,10 +262,10 @@ export default function AdminDashboard() {
       { key: "missing-photos",  label: "Missing photos (billing sheets)",count: bsMissing,            href: "/billing-sheets/missing-photos",  icon: AttentionIcons.Camera,      tone: "amber" },
       { key: "missing-photos-wo",label: "Missing photos (work orders)",  count: woMissing,            href: "/work-orders/missing-photos",     icon: AttentionIcons.Camera,      tone: "amber" },
       { key: "parts-approval",  label: "Parts pending approval",         count: partsCount,           href: "/parts-pending-approval",         icon: AttentionIcons.Package,     tone: "blue" },
-      { key: "estimates-pend",  label: "Estimates pending approval",     count: estimatesPending,     href: "/estimates/pending-approval",     icon: AttentionIcons.FileWarning, tone: "blue" },
+      { key: "estimates-pend",  label: "Estimates pending approval",     count: estimatesPending,     href: "/estimates/command-center",      icon: AttentionIcons.FileWarning, tone: "blue" },
       { key: "zero-price",      label: "Zero-price catalog items",       count: zeroPrice,            href: "/billing-sheets/zero-price-audit",icon: AttentionIcons.DollarSign,  tone: "red" },
       { key: "labor-rate",      label: "Labor-rate mismatches",          count: laborMismatch,        href: "/billing-sheets/labor-rate-audit",icon: AttentionIcons.Wrench,      tone: "red" },
-      { key: "wet-checks",      label: "Wet checks pending review",      count: wetChecksPending,     href: "/wet-checks/pending-review",      icon: AttentionIcons.Droplets,    tone: "amber" },
+      { key: "wet-checks",      label: "Wet checks pending review",      count: wetChecksPending,     href: "/wet-checks?tab=needs-review",     icon: AttentionIcons.Droplets,    tone: "amber" },
     ];
   }, [
     // Task #630 — `estimatesQ.data` is intentionally NOT in this list:

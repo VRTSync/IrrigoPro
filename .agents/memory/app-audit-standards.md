@@ -9,6 +9,12 @@ Pages must fit without horizontal window or inner scrolling at browser widths of
 
 **How to apply:** Measure both window and inner scrolling in a real browser; don't hide overflow or drop columns to pass. Use the same role navigation tree on desktop and in the phone menu, and keep legacy redirects for bookmarks rather than linking to them.
 
+When comparing sidebar links in Chromium, wait for React to render expanded groups before collecting links, and wait for the sheet to slide onscreen before clicking a link. A mounted, measurable sheet can still be offscreen during its opening animation.
+
+**Why:** Immediate DOM reads can miss nested links, and a browser's visibility check can pass before a sheet has a clickable point.
+
+**How to apply:** Expand collapsed groups and wait for the updated links. For pointer interaction, wait until the sheet's bounding rectangle reaches its resting position.
+
 Pass independent actions to a wrapping header as siblings. A nested non-wrapping flex row makes the parent treat the whole group as one item; the group can move below the title and still overflow. Check real narrow viewports with all actions present, and include intentional horizontal scrollers such as filter strips when measuring inner overflow.
 
 For a wrapper-only audit slice, repeat any failing measurement on the same rendered view with the original wrapper classes restored. Keep the record, shell and viewport identical.

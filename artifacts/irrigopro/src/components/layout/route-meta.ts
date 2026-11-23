@@ -52,7 +52,7 @@ const FALLBACK_PATTERNS: Array<{ regex: RegExp; meta: () => RouteMeta }> = [
       title: "Wet Check Review",
       breadcrumb: [
         { label: "Operations" },
-        { label: "Wet Check Reviews", path: "/wet-checks/pending-review" },
+        { label: "Wet Check Reviews", path: "/wet-checks?tab=needs-review" },
         { label: "Detail" },
       ],
     }),
@@ -63,7 +63,7 @@ const FALLBACK_PATTERNS: Array<{ regex: RegExp; meta: () => RouteMeta }> = [
       title: "Wet Check",
       breadcrumb: [
         { label: "Operations" },
-        { label: "Wet Checks", path: "/wet-checks/admin" },
+        { label: "Wet Checks", path: "/wet-checks" },
         { label: "Detail" },
       ],
     }),

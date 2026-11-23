@@ -136,6 +136,12 @@ function RedirectToManagerWorkspace() {
   return null;
 }
 
+function RedirectToSystemUsers() {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate("/system-users", { replace: true }); }, [navigate]);
+  return null;
+}
+
 // Lightweight Suspense fallback that mirrors the existing loading style
 // in the auth bootstrap below. Used as the default for every route-split
 // page boundary so there's no jarring "blank page" while the chunk loads.
@@ -536,7 +542,7 @@ export function AppRoutes() {
                   <Route path="/quickbooks" component={QuickBooksPage} />
                   <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
                   <Route path="/financial-pulse" component={FinancialPulsePage} />
-                  <Route path="/user-manager" component={SystemUserManagement} />
+                  <Route path="/user-manager" component={RedirectToSystemUsers} />
                   <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />

@@ -769,7 +769,7 @@ export function WetCheckWizard({ id }: { id: number }) {
         case "Escape":
           e.preventDefault();
           if (editMode) navigate(`/manager/wet-checks/${id}/confirm`);
-          else navigate("/manager/wet-checks");
+          else navigate("/wet-checks");
           break;
       }
     };
@@ -945,7 +945,7 @@ export function WetCheckWizard({ id }: { id: number }) {
         data-testid="wizard-header"
       >
         <div className="flex items-center justify-between gap-2">
-          <Link href="/manager/wet-checks">
+          <Link href="/wet-checks">
             <Button variant="ghost" size="sm" data-testid="wizard-back-to-inbox" className="min-h-[36px] -ml-2">
               <ChevronLeft className="w-4 h-4 mr-1" aria-hidden="true" /> Back to inbox
             </Button>
