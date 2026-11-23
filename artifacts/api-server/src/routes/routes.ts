@@ -327,6 +327,7 @@ import {
 import { ALL_RULES as ALL_INCIDENT_RULES } from "../lib/rules";
 import { z } from "zod/v4";
 import { registerEstimateRoutes, estimateOwnershipMatches } from "./estimate-routes";
+import { canManageUser, selfProfilePatch, toPublicUser } from "./user-access";
 import { registerApproveRoutes } from "./approve-routes";
 import { registerLegacyEstimateGoneRoutes } from "./legacy-estimate-gone";
 import { recordAuditEvent } from "./audit-log";
@@ -765,6 +766,14 @@ const requireNotificationAccess = async (req: any, res: any, next: any) => {
   }
 };
 
+const rejectCompanyless = (req: any, res: any): boolean => {
+  if (req.authenticatedUserRole !== "super_admin" && req.authenticatedUserCompanyId == null) {
+    res.status(403).json({ message: "Your account is not assigned to a company. Contact your administrator." });
+    return false;
+  }
+  return true;
+};
+
 // General authentication middleware that validates user identity and role
 const requireAuthentication = async (req: any, res: any, next: any) => {
   try {
@@ -803,6 +812,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
       req.impersonationToken = impToken;
       // Throttle still applies to impersonated traffic so a stuck
       // automation can't bypass the cap by impersonating.
+      if (!rejectCompanyless(req, res)) return;
       if (!checkAuthenticatedThrottle(req, res)) return;
       if (!enforceRoleApiAllowlist(req, res)) return;
       next();
@@ -836,6 +846,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
       req.authenticatedUserId = user.id;
       req.authenticatedUserRole = user.role;
       req.authenticatedUserCompanyId = user.companyId ?? null;
+      if (!rejectCompanyless(req, res)) return;
       if (!checkAuthenticatedThrottle(req, res)) return;
       if (!enforceRoleApiAllowlist(req, res)) return;
       next();
@@ -844,16 +855,15 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
 
     // Production session-based authentication
     if (req.session && req.session.userId) {
-      try {
-        const user = await storage.getUser(parseInt(String(req.session.userId)));
-        if (user) {
-          userId = req.session.userId;
-          userRole = user.role;
-          userCompanyId = user.companyId;
-        }
-      } catch (dbError) {
-        // Continue to fallback on database error
+      const user = await storage.getUser(parseInt(String(req.session.userId)));
+      if (!user || !user.isActive || user.isDeleted) {
+        req.session.destroy?.(() => {});
+        res.status(401).json({ message: "Authentication required" });
+        return;
       }
+      userId = user.id;
+      userRole = user.role;
+      userCompanyId = user.companyId;
     }
 
     // Legacy header-based auth path (unsigned x-user-* headers). Dev-only.
@@ -912,6 +922,7 @@ const requireAuthentication = async (req: any, res: any, next: any) => {
     req.authenticatedUserRole = userRole;
     req.authenticatedUserCompanyId = userCompanyId ? parseInt(userCompanyId.toString()) : null;
 
+    if (!rejectCompanyless(req, res)) return;
     if (!checkAuthenticatedThrottle(req, res)) return;
     if (!enforceRoleApiAllowlist(req, res)) return;
     next();
@@ -2513,7 +2524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader("Cache-Control", "no-store");
       res.json({
         company,
-        users: usersRes.rows ?? [],
+        users: (usersRes.rows ?? []).map(toPublicUser),
         topIssues: topIssuesRes.rows ?? [],
         resources: {
           storageBytes: null,
@@ -3674,7 +3685,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `);
       const total = totalRes.rows?.[0]?.total ?? 0;
 
-      const usersList = (rowsRes.rows ?? []).map((u) => ({
+      const usersList = (rowsRes.rows ?? []).map((u) => toPublicUser({
         ...u,
         status: u.status as "active" | "offline" | "stuck" | "locked" | "syncing",
         versionLag: !!(latestVersion && u.appVersion && u.appVersion !== latestVersion),
@@ -3781,7 +3792,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         LIMIT 50
       `);
       res.json({
-        user,
+        user: toPublicUser(user),
         devices: devicesRes.rows ?? [],
         sessions: sessionsRes.rows ?? [],
         recentErrors: recentErrorsRes.rows ?? [],
@@ -4242,7 +4253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.json({
         ok: true,
-        target,
+        target: toPublicUser(target),
         impersonationToken: token,
         expiresAt: new Date(claims.exp).toISOString(),
       });
@@ -4312,7 +4323,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ORDER BY (u.role = 'company_admin') DESC
         LIMIT 20
       `);
-      const admins = r.rows ?? [];
+      const admins = (r.rows ?? []).map(toPublicUser);
       // Primary = first company_admin, else first manager.
       const primary = admins[0] ?? null;
       res.setHeader("Cache-Control", "no-store");
@@ -4390,7 +4401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetId: String(id),
         summary: `Reset MFA for ${u.username}`,
       });
-      res.json({ ok: true, user: u });
+      res.json({ ok: true, user: toPublicUser(u) });
     } catch (e) {
       const { status, message } = classifyAndLog(req, e, {
         op: "appHealthResetMfa",
@@ -4423,7 +4434,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetId: String(id),
         summary: `Unlocked / reactivated ${u.username}`,
       });
-      res.json({ ok: true, user: u });
+      res.json({ ok: true, user: toPublicUser(u) });
     } catch (e) {
       const { status, message } = classifyAndLog(req, e, {
         op: "appHealthUnlockUser",
@@ -4852,7 +4863,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.createUser(userData);
 
-      res.status(201).json({ company, user });
+      res.status(201).json({ company, user: toPublicUser(user) });
     } catch (error) {
       console.error('Error creating company admin:', error);
       res.status(500).json({ message: "Failed to create company admin" });
@@ -4892,10 +4903,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/users", requireAuthentication, async (req, res) => {
     try {
-      const users = await storage.getUsers();
-      // Remove passwords for security
-      const usersWithoutPasswords = users.map(({ password, ...user }) => user);
-      res.json(usersWithoutPasswords);
+      const users = req.authenticatedUserRole === 'super_admin'
+        ? await storage.getUsers()
+        : await storage.getUsers(req.authenticatedUserCompanyId!);
+      res.json(users.map(toPublicUser));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch users" });
@@ -4905,10 +4916,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get field technicians and irrigation managers (for work order assignments)
   app.get("/api/users/field-techs", requireAuthentication, async (req, res) => {
     try {
-      const users = await storage.getUsers();
+      const users = req.authenticatedUserRole === 'super_admin'
+        ? await storage.getUsers()
+        : await storage.getUsers(req.authenticatedUserCompanyId!);
       const assignableUsers = users
         .filter(user => (user.role === 'field_tech' || user.role === 'irrigation_manager') && user.isActive)
-        .map(({ password, ...user }) => user);
+        .map(toPublicUser);
       res.json(assignableUsers);
     } catch (error) {
       console.error(error);
@@ -4928,9 +4941,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const userData = insertUserSchema.parse(req.body);
       const user = await storage.createUser(userData);
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
-      res.status(201).json(userWithoutPassword);
+      res.status(201).json(toPublicUser(user));
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
@@ -4941,84 +4952,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Super admin routes for users
-  app.put("/api/users/:id", requireAuthentication, async (req, res) => {
-    try {
-      const userId = parseInt(req.params.id);
-      const callerRole = req.authenticatedUserRole;
-      const callerCompanyId = req.authenticatedUserCompanyId ?? null;
-      const before = await storage.getUser(userId);
-      // Cross-company guard: non-super_admin callers can only edit users in their own company.
-      if (callerRole !== 'super_admin' && before && before.companyId !== callerCompanyId) {
-        res.status(403).json({ message: "Forbidden: cannot edit users from another company" });
-        return;
-      }
-      if (req.body?.role !== undefined && !isRole(req.body.role)) {
-        res.status(400).json({ message: "Unknown role" }); return;
-      }
-      const userData = insertUserSchema.partial().parse(req.body);
-      // Role-ceiling guard: only fires when the role is actually changing (so
-      // echoing the existing role in a self-edit is never blocked).
-      if (userData.role && userData.role !== before?.role && callerRole !== 'super_admin') {
-        const callerRank = ROLE_RANK[callerRole ?? ''] ?? 0;
-        const targetRank = ROLE_RANK[userData.role] ?? 0;
-        if (targetRank >= callerRank) {
-          res.status(403).json({ message: "Forbidden: cannot assign a role at or above your own" });
-          return;
-        }
-      }
-      const user = await storage.updateUser(userId, userData);
-      if (!user) {
-        res.status(404).json({ message: "User not found" });
-        return;
-      }
-      // Task #551 (Phase 2) — surface role/active flips to the audit log.
-      if (before) {
-        const actor = req.authenticatedUserId ?? (headerUserId(req) ? Number(headerUserId(req)) || null : null);
-        const actorRole = req.authenticatedUserRole ?? headerUserRole(req) ?? null;
-        if (userData.role && userData.role !== before.role) {
-          void recordAuditEvent(req, {
-            actorUserId: actor,
-            actorRole,
-            actionType: "role_change",
-            action: "user.role_changed",
-            severity: "warning",
-            targetType: "user",
-            targetId: String(user.id),
-            summary: `${before.username}: ${before.role} → ${userData.role}`,
-            details: { from: before.role, to: userData.role },
-          });
-        }
-        if (userData.isActive != null && userData.isActive !== before.isActive) {
-          void recordAuditEvent(req, {
-            actorUserId: actor,
-            actorRole,
-            actionType: "admin",
-            action: userData.isActive ? "user.reactivated" : "user.deactivated",
-            severity: "warning",
-            targetType: "user",
-            targetId: String(user.id),
-            summary: `${before.username} ${userData.isActive ? "reactivated" : "deactivated"}`,
-          });
-        }
-      }
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
-    } catch (error) {
-      console.error(error);
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ message: "Invalid user data", errors: error.issues });
-        return;
-      }
-      res.status(500).json({ message: "Failed to update user" });
-    }
-  });
-
   // Check user's data dependencies before deletion
   app.get("/api/users/:id/dependencies", requireAuthentication, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
+      const user = await storage.getUser(userId);
+      const verdict = canManageUser({
+        id: req.authenticatedUserId,
+        role: req.authenticatedUserRole,
+        companyId: req.authenticatedUserCompanyId,
+      }, user, "manage");
+      if (verdict !== "ok") {
+        res.status(verdict === "forbidden" ? 403 : 404).json({ message: verdict === "forbidden" ? "Forbidden" : "Not found" });
+        return;
+      }
       const dependencies = await storage.getUserDataDependencies(userId);
       res.json(dependencies);
     } catch (error) {
@@ -5032,8 +4979,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
-      if (!user) {
-        res.status(404).json({ message: "User not found" });
+      const verdict = canManageUser({
+        id: req.authenticatedUserId,
+        role: req.authenticatedUserRole,
+        companyId: req.authenticatedUserCompanyId,
+      }, user, "delete");
+      if (verdict !== "ok" || !user) {
+        res.status(verdict === "forbidden" ? 403 : 404).json({ message: verdict === "forbidden" ? "Forbidden" : "Not found" });
         return;
       }
       
@@ -5045,7 +4997,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ 
         message: "User deleted successfully (soft delete - data preserved)",
-        deletedUser: { id: user.id, name: user.name }
+        deletedUser: toPublicUser({ id: user.id, name: user.name })
       });
     } catch (error) {
       console.error('Failed to soft delete user:', error);
@@ -5058,8 +5010,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
-      if (!user) {
-        res.status(404).json({ message: "User not found" });
+      const verdict = canManageUser({
+        id: req.authenticatedUserId,
+        role: req.authenticatedUserRole,
+        companyId: req.authenticatedUserCompanyId,
+      }, user, "delete");
+      if (verdict !== "ok" || !user) {
+        res.status(verdict === "forbidden" ? 403 : 404).json({ message: verdict === "forbidden" ? "Forbidden" : "Not found" });
         return;
       }
       
@@ -5071,7 +5028,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ 
         message: "User permanently deleted with data cleanup",
-        deletedUser: { id: user.id, name: user.name }
+        deletedUser: toPublicUser({ id: user.id, name: user.name })
       });
     } catch (error) {
       console.error('Failed to hard delete user:', error);
@@ -5084,8 +5041,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = parseInt(req.params.id);
       const user = await storage.getUser(userId);
-      if (!user) {
-        res.status(404).json({ message: "User not found" });
+      const verdict = canManageUser({
+        id: req.authenticatedUserId,
+        role: req.authenticatedUserRole,
+        companyId: req.authenticatedUserCompanyId,
+      }, user, "delete");
+      if (verdict !== "ok") {
+        res.status(verdict === "forbidden" ? 403 : 404).json({ message: verdict === "forbidden" ? "Forbidden" : "Not found" });
         return;
       }
 
@@ -5129,35 +5091,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/users/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const callerRolePatch = req.authenticatedUserRole;
-      const callerCompanyIdPatch = req.authenticatedUserCompanyId ?? null;
-      const before = await storage.getUser(id);
-      // Cross-company guard.
-      if (callerRolePatch !== 'super_admin' && before && before.companyId !== callerCompanyIdPatch) {
-        res.status(403).json({ message: "Forbidden: cannot edit users from another company" });
+      if (id !== req.authenticatedUserId) {
+        res.status(403).json({ message: "You can only edit your own profile" });
         return;
       }
-      if (req.body?.role !== undefined && !isRole(req.body.role)) {
-        res.status(400).json({ message: "Unknown role" }); return;
+      const parsed = selfProfilePatch.parse(req.body === undefined ? {} : req.body);
+      if (Object.keys(parsed).length === 0) {
+        res.status(400).json({ message: "Nothing to update" });
+        return;
       }
-      const userData = insertUserSchema.partial().parse(req.body);
-      // Role-ceiling guard (only fires when the role is actually changing).
-      if (userData.role && userData.role !== before?.role && callerRolePatch !== 'super_admin') {
-        const callerRankPatch = ROLE_RANK[callerRolePatch ?? ''] ?? 0;
-        const targetRankPatch = ROLE_RANK[userData.role] ?? 0;
-        if (targetRankPatch >= callerRankPatch) {
-          res.status(403).json({ message: "Forbidden: cannot assign a role at or above your own" });
-          return;
-        }
-      }
-      const user = await storage.updateUser(id, userData);
+      const user = await storage.updateUser(id, parsed);
       if (!user) {
         res.status(404).json({ message: "User not found" });
         return;
       }
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
+      res.json(toPublicUser(user));
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
@@ -5227,13 +5175,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company-scoped user management routes (for company admins)
+  const assertCompanyUserAdmin = (req: any, res: any, companyId: number): boolean => {
+    const role = req.authenticatedUserRole;
+    if (role !== "super_admin" && role !== "company_admin") {
+      res.status(403).json({ message: "Forbidden: only company admins can manage users" });
+      return false;
+    }
+    if (role === "company_admin" && req.authenticatedUserCompanyId !== companyId) {
+      res.status(404).json({ message: "Not found" });
+      return false;
+    }
+    return true;
+  };
+
   app.get("/api/company/:companyId/users", requireAuthentication, requireCompanySetup, async (req, res) => {
+    const companyId = parseInt(req.params.companyId);
+    if (!assertCompanyUserAdmin(req, res, companyId)) return;
     try {
-      const companyId = parseInt(req.params.companyId);
       const users = await storage.getUsers(companyId);
-      // Remove passwords from response
-      const usersWithoutPasswords = users.map(({ password, ...user }) => user);
-      res.json(usersWithoutPasswords);
+      res.json(users.map(toPublicUser));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch company users" });
@@ -5241,20 +5201,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/company/:companyId/users", requireAuthentication, requireCompanySetup, async (req, res) => {
+    const companyId = parseInt(req.params.companyId);
+    if (!assertCompanyUserAdmin(req, res, companyId)) return;
     try {
-      const companyId = parseInt(req.params.companyId);
       const callerRolePost = req.authenticatedUserRole;
-      const callerCompanyIdPost = req.authenticatedUserCompanyId ?? null;
-      // Admin-only gate: only super_admin or company_admin may manage company users.
-      if (callerRolePost !== 'super_admin' && callerRolePost !== 'company_admin') {
-        res.status(403).json({ message: "Forbidden: only company admins can manage users" });
-        return;
-      }
-      // Company-match guard: non-super_admin callers can only create users in their own company.
-      if (callerRolePost !== 'super_admin' && callerCompanyIdPost !== companyId) {
-        res.status(403).json({ message: "Forbidden: cannot create users in another company" });
-        return;
-      }
       if (req.body?.role !== undefined && !isRole(req.body.role)) {
         res.status(400).json({ message: "Unknown role" }); return;
       }
@@ -5309,9 +5259,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
-      res.status(201).json(userWithoutPassword);
+      res.status(201).json(toPublicUser(user));
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
@@ -5324,26 +5272,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.put("/api/company/:companyId/users/:userId", requireAuthentication, requireCompanySetup, async (req, res) => {
+    const companyId = parseInt(req.params.companyId);
+    if (!assertCompanyUserAdmin(req, res, companyId)) return;
     try {
-      const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
       const callerRolePut = req.authenticatedUserRole;
-      const callerCompanyIdPut = req.authenticatedUserCompanyId ?? null;
-      // Admin-only gate: only super_admin or company_admin may manage company users.
-      if (callerRolePut !== 'super_admin' && callerRolePut !== 'company_admin') {
-        res.status(403).json({ message: "Forbidden: only company admins can manage users" });
-        return;
-      }
-      // Company-match guard: non-super_admin callers can only edit users in their own company.
-      if (callerRolePut !== 'super_admin' && callerCompanyIdPut !== companyId) {
-        res.status(403).json({ message: "Forbidden: cannot edit users in another company" });
-        return;
-      }
-      
-      // Verify user belongs to company
+      const caller = {
+        id: req.authenticatedUserId,
+        role: callerRolePut,
+        companyId: req.authenticatedUserCompanyId,
+      };
       const existingUser = await storage.getUser(userId);
-      if (!existingUser || existingUser.companyId !== companyId) {
-        res.status(403).json({ message: "Not authorized to modify this user" });
+      const verdict = canManageUser(caller, existingUser, "manage");
+      if (verdict !== "ok" || existingUser?.companyId !== companyId) {
+        res.status(verdict === "forbidden" ? 403 : 404).json({ message: verdict === "forbidden" ? "Forbidden" : "Not found" });
         return;
       }
 
@@ -5351,8 +5293,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: "Unknown role" }); return;
       }
       const userData = insertUserSchema.partial().parse(req.body);
+      // The general update must not bypass the tenant or self-removal checks.
+      if (callerRolePut === "company_admin" && userData.companyId !== undefined && userData.companyId !== companyId) {
+        res.status(403).json({ message: "Forbidden: cannot move users out of your company" });
+        return;
+      }
+      if ((userData.isActive === false || userData.isDeleted === true) &&
+          canManageUser(caller, existingUser, "deactivate") !== "ok") {
+        res.status(403).json({ message: "Forbidden: cannot deactivate or delete your own account" });
+        return;
+      }
       // Role-ceiling guard: only fires when the role is actually changing.
-      if (userData.role && userData.role !== existingUser?.role && callerRolePut !== 'super_admin') {
+      if (userData.role && userData.role !== existingUser.role && callerRolePut !== 'super_admin') {
         const callerRankPut = ROLE_RANK[callerRolePut ?? ''] ?? 0;
         const targetRankPut = ROLE_RANK[userData.role] ?? 0;
         if (targetRankPut >= callerRankPut) {
@@ -5378,9 +5330,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(404).json({ message: "User not found" });
         return;
       }
-      // Remove password from response
-      const { password: _, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
+      res.json(toPublicUser(user));
     } catch (error) {
       console.error(error);
       if (error instanceof z.ZodError) {
@@ -5392,14 +5342,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/company/:companyId/users/:userId/deactivate", requireAuthentication, requireCompanySetup, async (req, res) => {
+    const companyId = parseInt(req.params.companyId);
+    if (!assertCompanyUserAdmin(req, res, companyId)) return;
     try {
-      const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
-      
-      // Verify user belongs to company
       const existingUser = await storage.getUser(userId);
-      if (!existingUser || existingUser.companyId !== companyId) {
-        res.status(403).json({ message: "Not authorized to modify this user" });
+      const verdict = canManageUser({
+        id: req.authenticatedUserId,
+        role: req.authenticatedUserRole,
+        companyId: req.authenticatedUserCompanyId,
+      }, existingUser, "deactivate");
+      if (verdict !== "ok" || existingUser?.companyId !== companyId) {
+        res.status(verdict === "forbidden" ? 403 : 404).json({ message: verdict === "forbidden" ? "Forbidden" : "Not found" });
         return;
       }
 
@@ -5417,20 +5371,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Company admin password change endpoint
   app.post("/api/company/:companyId/users/:userId/change-password", requireAuthentication, requireCompanySetup, async (req, res) => {
+    const companyId = parseInt(req.params.companyId);
+    if (!assertCompanyUserAdmin(req, res, companyId)) return;
     try {
-      const companyId = parseInt(req.params.companyId);
       const userId = parseInt(req.params.userId);
-      const { newPassword } = req.body;
-      
-      if (!newPassword || newPassword.length < 6) {
-        res.status(400).json({ message: "Password must be at least 6 characters long" });
+      const existingUser = await storage.getUser(userId);
+      const verdict = canManageUser({
+        id: req.authenticatedUserId,
+        role: req.authenticatedUserRole,
+        companyId: req.authenticatedUserCompanyId,
+      }, existingUser, "manage");
+      if (verdict !== "ok" || existingUser?.companyId !== companyId) {
+        res.status(verdict === "forbidden" ? 403 : 404).json({ message: verdict === "forbidden" ? "Forbidden" : "Not found" });
         return;
       }
-      
-      // Verify user belongs to company
-      const existingUser = await storage.getUser(userId);
-      if (!existingUser || existingUser.companyId !== companyId) {
-        res.status(403).json({ message: "Not authorized to modify this user" });
+
+      const { newPassword } = req.body ?? {};
+      if (typeof newPassword !== "string" || newPassword.length < 6) {
+        res.status(400).json({ message: "Password must be at least 6 characters long" });
         return;
       }
 
@@ -5517,7 +5475,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Write the server-side session so subsequent requests authenticate
       // via the httpOnly cookie rather than the legacy unsigned-header path.
-      const { password: _, ...userWithoutPassword } = user;
       await new Promise<void>((resolve, reject) => {
         req.session.regenerate((err?: Error) => { if (err) reject(err); else resolve(); });
       });
@@ -5525,7 +5482,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await new Promise<void>((resolve, reject) => {
         req.session.save((err?: Error) => { if (err) reject(err); else resolve(); });
       });
-      res.json(userWithoutPassword);
+      res.json(toPublicUser(user));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Login failed" });
@@ -5570,20 +5527,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     return { rawToken, tokenHash };
-  }
-
-  function safeUserShape(user: any) {
-    const {
-      password: _pw,
-      mfaSecret: _mfaSecret,
-      mfaBackupCodes: _mfaBackup,
-      passwordResetToken: _prt,
-      passwordResetExpires: _pre,
-      emailVerificationToken: _evt,
-      emailVerificationExpires: _eve,
-      ...safe
-    } = user ?? {};
-    return safe;
   }
 
   app.post("/api/auth/mobile-login", async (req, res) => {
@@ -5690,7 +5633,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         refreshTokenExpiresAt: refreshExpiresAt.toISOString(),
         // `expiresAt` retained for backward compatibility; matches accessTokenExpiresAt.
         expiresAt: accessExpiresAt.toISOString(),
-        user: safeUserShape(user),
+        user: toPublicUser(user),
       });
     } catch (error) {
       console.error('Mobile login error:', error);
@@ -5748,7 +5691,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // expiry locally can re-cache it.
         refreshTokenExpiresAt: refreshRow.expiresAt.toISOString(),
         expiresAt: accessExpiresAt.toISOString(),
-        user: safeUserShape(user),
+        user: toPublicUser(user),
       });
     } catch (error) {
       console.error('Mobile refresh error:', error);
@@ -5977,19 +5920,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Return user data (excluding sensitive fields)
-      const {
-        password,
-        passwordResetToken,
-        passwordResetExpires,
-        emailVerificationToken,
-        emailVerificationExpires,
-        mfaSecret,
-        mfaBackupCodes,
-        ...safeUserData
-      } = user;
-
-      res.json(safeUserData);
+      res.json(toPublicUser(user));
     } catch (error) {
       console.error('Auth user endpoint error:', error);
       res.status(500).json({

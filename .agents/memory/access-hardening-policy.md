@@ -7,7 +7,7 @@ The Access Hardening design is the authority for company access. Authenticated n
 
 **Why:** An absent company filter can mean all companies in storage. Tenant isolation must not depend on a caller-supplied company ID or reveal whether another company's records exist.
 
-**How to apply:** Reject missing tenant context at authentication, check ownership before operating on a record, and keep role-assignment ceilings separate from the ability to manage an existing peer. Use one public user shape without secrets or wages. Field techs do not get customer or catalog pricing; irrigation managers retain catalog costs and parts-edit access.
+**How to apply:** Reject missing tenant context at authentication, check ownership before operating on a record, and keep role-assignment ceilings separate from the ability to manage an existing peer. Apply tenant and self-removal rules to the submitted fields as well as the target: a general account edit must not move a user outside the admin's company or serve as self-deactivation. Use one public user shape without secrets or wages. Field techs do not get customer or catalog pricing; irrigation managers retain catalog costs and parts-edit access.
 
 The newer design retires Switch User rather than retaining a second way to sign out. App Health remains the only super-admin impersonation flow. Offline access may use the stored identity if the server is unreachable, but a successful identity check takes precedence. Logout clears user-data caches and preserves the app shell.
 

@@ -17,6 +17,7 @@ import {
 import { storage } from "../storage";
 import { registerIrrigationProfileRoutes } from "./irrigation-profile-routes";
 import { enforceRoleApiAllowlist } from "./role-guards";
+import { toPublicUser, canManageUser, selfProfilePatch } from "./user-access";
 
 // Captured on the unmodified branch with these deterministic storage fixtures.
 // Each migrated guard shape is represented, including the individual zone write
@@ -97,7 +98,6 @@ function execute(code: string, deps: Record<string, unknown>) {
 }
 const userWrites = [
   ["post", "/api/users"],
-  ["put", "/api/users/:id"],
   ["patch", "/api/users/:id"],
   ["post", "/api/company/:companyId/users"],
   ["put", "/api/company/:companyId/users/:userId"],
@@ -116,7 +116,7 @@ function userRegistrations() {
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  assert.equal(statements.length, 5);
+  assert.equal(statements.length, 4);
   return statements.join("\n");
 }
 let realAuth: RequestHandler;
@@ -146,7 +146,7 @@ before(async () => {
   mock.method(storage, "getActiveMobileTokenByHash", async () => ({
     userId: 12, revokedAt: null, expiresAt: new Date(Date.now() + 60_000),
   }));
-  realAuth = execute(`${declaration("requireAuthentication")}\nreturn requireAuthentication;`, {
+  realAuth = execute(`${declaration("rejectCompanyless")}\n${declaration("requireAuthentication")}\nreturn requireAuthentication;`, {
     storage, enforceRoleApiAllowlist,
     checkAuthenticatedThrottle: () => true,
     verifyImpersonationToken: () => ({ actorUserId: 13, targetUserId: 12 }),
@@ -163,8 +163,9 @@ before(async () => {
     next();
   });
   registerIrrigationProfileRoutes(app, { requireAuthentication: auth });
-  execute(`${declaration("ROLE_RANK")}\n${declaration("requireCompanySetup")}\n${userRegistrations()}`, {
+  execute(`${declaration("assertCompanyUserAdmin")}\n${declaration("ROLE_RANK")}\n${declaration("requireCompanySetup")}\n${userRegistrations()}`, {
     app, storage, requireAuthentication: auth, isRole, insertUserSchema, z,
+    toPublicUser, canManageUser, selfProfilePatch,
     crypto: { randomBytes: () => ({ toString: () => "fixture-verification" }) },
     EmailService: { sendEmailVerification: async () => {} },
     headerUserId: () => undefined, headerUserRole: () => undefined,
@@ -316,12 +317,10 @@ describe("documenter real route boundaries", () => {
   });
 });
 
-describe("all five real user-write handlers", () => {
+describe("real user-write handlers", () => {
   const body = { role: "system_documenter", phone: "5550001234", username: "fixture", name: "Fixture", password: "fixture-password" };
   const paths = [
     ["POST", "/api/users", "super_admin", 201],
-    ["PUT", "/api/users/1", "company_admin", 200],
-    ["PATCH", "/api/users/1", "company_admin", 200],
     ["POST", "/api/company/1/users", "company_admin", 201],
     ["PUT", "/api/company/1/users/1", "company_admin", 200],
   ] as const;
@@ -342,15 +341,19 @@ describe("all five real user-write handlers", () => {
       }
     }
     assert.equal((await hit("company_admin", "POST", "/api/company/1/users", { ...body, role: "company_admin" })).status, 403);
-    for (const [method, path] of [["PUT", "/api/users/1"], ["PATCH", "/api/users/1"], ["PUT", "/api/company/1/users/1"]]) {
+    for (const [method, path] of [["PUT", "/api/company/1/users/1"]]) {
       assert.equal((await hit("company_admin", method, path, { role: "super_admin" })).status, 403);
       assert.equal((await hit("company_admin", method, path, { name: "Changed" })).status, 200);
     }
+    assert.equal((await hit("company_admin", "PATCH", "/api/users/1", { role: "super_admin" })).status, 403);
   });
   it("keeps company restrictions ahead of validation and never writes foreign users", async () => {
     for (const [method, path] of [
       ["POST", "/api/company/2/users"], ["PUT", "/api/company/2/users/99"],
-      ["PUT", "/api/company/1/users/99"], ["PUT", "/api/users/99"], ["PATCH", "/api/users/99"],
+      ["PUT", "/api/company/1/users/99"],
+    ]) assert.equal((await hit("company_admin", method, path, { role: "wizard" })).status, 404);
+    for (const [method, path] of [
+      ["PATCH", "/api/users/99"],
     ]) assert.equal((await hit("company_admin", method, path, { role: "wizard" })).status, 403);
   });
 });

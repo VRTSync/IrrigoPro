@@ -1,6 +1,10 @@
 {
   "api-billing": [
     {
+      "name": "user-access",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/user-access.test.ts src/routes/user-routes-coverage.test.ts"
+    },
+    {
       "name": "qb-customer-pull",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/lib/qb-customer-pull.test.ts"
     },
