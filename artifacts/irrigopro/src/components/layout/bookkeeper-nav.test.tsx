@@ -1,7 +1,7 @@
 /**
  * bookkeeper-nav.test.tsx (Task #1886)
  *
- * The desktop sidebar and phone tabs are two views of the same role config.
+ * The desktop rail and phone tabs are two views of the same role config.
  *
  * Also covers the customer-profile Billing Details tab, which used to be
  * forced visible for every role by a `billing: isBillingRole || true` entry
@@ -11,6 +11,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -49,7 +51,6 @@ vi.mock("@/utils/safeStorage", () => ({
   safeSet: vi.fn(),
   safeRemove: vi.fn(),
 }));
-vi.mock("@assets/IrrigoPro_2026-03_1778193170303.png", () => ({ default: "logo.png" }));
 vi.mock("@assets/IrrigoPro_2026-05_1778193170303.png", () => ({ default: "mark.png" }));
 vi.mock("@/components/layout/route-meta", () => ({
   resolveRouteMeta: () => ({ breadcrumb: [{ label: "Invoices" }] }),
@@ -75,7 +76,7 @@ vi.mock("@/lib/auth-context", () => ({
 import { DesktopShell } from "./desktop-shell";
 import { navForRole } from "./nav-config";
 
-// jsdom has no matchMedia; DesktopShell's use-mobile hook calls it on mount.
+// jsdom has no matchMedia; PhoneNav calls it on mount.
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
     matches: false,
@@ -106,9 +107,9 @@ const INVOICES_SRC = readFileSync(
   "utf8",
 );
 
-// ── Surface 1: the desktop sidebar (nav-config.ts) ───────────────────────────
+// ── Surface 1: the desktop rail (nav-config.ts) ──────────────────────────────
 
-describe("bookkeeper desktop sidebar", () => {
+describe("bookkeeper desktop rail", () => {
   const expected = [
     ["Dashboard", "/"],
     ["Invoices", "/invoices"],
@@ -122,12 +123,13 @@ describe("bookkeeper desktop sidebar", () => {
       .toEqual(expected);
   });
 
-  it("renders those destinations as plain links and nothing else", () => {
+  it("renders five rail sections and no panel on the single-page Billing section", () => {
     renderShell();
-    // jsdom does not apply Tailwind's responsive display classes.
-    const sidebar = within(screen.getByTestId("desktop-shell").querySelector<HTMLElement>('[data-sidebar="sidebar"]')!);
-    expect(sidebar.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]))
-      .toEqual(expected);
+    const rail = within(screen.getByRole("navigation", { name: "Desktop sections" }));
+    expect(rail.getAllByRole("button").map((button) => button.getAttribute("aria-label")))
+      .toEqual(["Dashboard", "Billing", "Clients", "Insights", "Settings", "Account"]);
+    expect(rail.getByRole("button", { name: "Billing" })).toHaveAttribute("aria-current", "true");
+    expect(screen.queryByTestId("pages-panel")).not.toBeInTheDocument();
   });
 
   it("lets the content column shrink so wide tables cannot widen the window", () => {
@@ -389,22 +391,25 @@ function installFakeInvoiceApi(rows: FixtureInvoice[]) {
 }
 
 function renderShell() {
+  const location = memoryLocation({ path: "/invoices" });
   return render(
-    <QueryClientProvider client={makeQueryClient()}>
-      <DesktopShell role={session.role}>
-        <div>content</div>
-      </DesktopShell>
-    </QueryClientProvider>,
+    <Router hook={location.hook} searchHook={location.searchHook}>
+      <QueryClientProvider client={makeQueryClient()}>
+        <DesktopShell role={session.role}>
+          <div>content</div>
+        </DesktopShell>
+      </QueryClientProvider>
+    </Router>,
   );
 }
 
 function badgeTexts(): string[] {
-  return Array.from(document.querySelectorAll('[data-sidebar="menu-badge"]')).map(
+  return Array.from(document.querySelectorAll('[data-testid^="nav-rail-badge-"]')).map(
     (el) => el.textContent?.trim() ?? "",
   );
 }
 
-describe("bookkeeper sidebar — overdue invoice badge (Task #1914)", () => {
+describe("bookkeeper rail — overdue invoice badge (Task #1914)", () => {
   const realFetch = globalThis.fetch;
 
   beforeEach(() => {

@@ -1607,3 +1607,31 @@ mtime_ms = 1795406365863
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3c3a7169-4995-45cb-b8f2-86c800d02a03/20fc8d68-1f0c-4a54-9f93-0021c8ec16e5"
 storage_version_token = "1795406371265179"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "-e2XVqWZyLvzkqkt1ysjk"
+uri = "file://generated-artifacts/nav-slice3/navigation-browser-evidence.html"
+type = "html"
+title = "Desktop navigation browser evidence"
+description = "15 screenshots and measurements from Work Orders and Invoices, recorded in Chromium with synthetic data."
+logical_id = "df5db9de-f623-4e53-a12e-7af3e154c283"
+content_hash = "sha256:ef9731da261d2d8630536366b6e646a1ba88f1555c92da33524b83a20b50015b"
+size = 1849545
+mtime_ms = 1795409623982
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/df5db9de-f623-4e53-a12e-7af3e154c283/4034f028-b74d-4ff6-9a18-f7eef6399468"
+storage_version_token = "1795409629708967"
+content_type = "text/html"
+
+[[outputs]]
+id = "59pPEajVpRUXwYmFOhWCr"
+uri = "file://generated-artifacts/nav-slice3/b2-navigation-comparison.html"
+type = "html"
+title = "B2 navigation comparison and browser checks"
+description = "See the supplied mockup beside the implemented rail and pages panel, plus all 15 desktop screenshots."
+logical_id = "42bc4eef-61e9-4630-990d-7efa98d25869"
+content_hash = "sha256:b969ba9652a7869ee86a60a70c837fdd8e67e918ea45b2e7107fec28bb7ea179"
+size = 2079729
+mtime_ms = 1795412361287
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/42bc4eef-61e9-4630-990d-7efa98d25869/dfa1017e-afb1-42a8-b981-cebb490298ca"
+storage_version_token = "1795412368238057"
+content_type = "text/html"

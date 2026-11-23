@@ -1,77 +1,39 @@
-import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { clearSessionAndLogout } from "@/lib/queryClient";
 import { getImpersonationToken } from "@/lib/impersonation";
 import {
   hasCapability,
   CAN_READ_INVOICES,
   OVERDUE_AGING_FILTER,
 } from "@workspace/shared";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
-  SidebarProvider,
-  SidebarRail,
-  SidebarTrigger,
-  useSidebar,
-} from "@/components/ui/sidebar";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  ChevronRight,
-  ChevronDown,
-  ChevronsUpDown,
-  LogOut,
-  User as UserIcon,
-  X,
-} from "lucide-react";
+import { ChevronRight, PanelLeft, X } from "lucide-react";
 import { PhoneNav } from "@/components/layout/phone-nav";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import { safeGet, safeSet } from "@/utils/safeStorage";
 import { useAuth } from "@/lib/auth-context";
-import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
-import irrigoProMark from "@assets/IrrigoPro_2026-05_1778193170303.png";
 import { resolveRouteMeta } from "./route-meta";
 import { ImpersonationBanner } from "@/components/app-health/impersonation-banner";
 import {
   findActivePage,
   navForRole,
   type NavBadgeMap,
-  type ResolvedNavPage,
   type ResolvedNavSection,
 } from "./nav-config";
+import { useNavPins } from "./nav-pins";
+import { NavRail } from "./nav-rail";
+import { PagesPanel } from "./pages-panel";
 import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
 
-const SIDEBAR_STORAGE_KEY = "irrigopro_desktop_sidebar_open";
+const NAV_PANEL_STORAGE_KEY = "irrigopro_nav_panel_open";
 const SHELL_HINT_SEEN_KEY = "irrigopro_desktop_shell_seen";
 
 // Task #1914 — the overdue-invoice badge reads its number from the invoice
@@ -178,7 +140,7 @@ function useNavBadges(enabled: boolean, overdueEnabled: boolean): NavBadgeMap {
     wetCheckReviews: wetCheckPending.length,
     estimatesPendingApproval: pendingEstimates.length,
     awaitingApproval: awaitingApprovalCount,
-    // A failed or not-yet-resolved count is 0, which the sidebar renders as no
+    // A failed or not-yet-resolved count is 0, which the navigation renders as no
     // badge at all rather than a "0" the bookkeeper would have to interpret.
     overdueInvoices: typeof overdueInvoicesRaw === "number" ? overdueInvoicesRaw : 0,
   };
@@ -209,15 +171,38 @@ interface DesktopShellProps {
 }
 
 export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
-  const [open, setOpenState] = useState<boolean>(() => {
-    const stored = safeGet(SIDEBAR_STORAGE_KEY);
-    if (stored === null) return true;
-    return stored === "true";
-  });
-  const setOpen = (next: boolean) => {
-    setOpenState(next);
-    safeSet(SIDEBAR_STORAGE_KEY, next ? "true" : "false");
-  };
+  const [panel, setPanel] = useState(() => ({
+    open: safeGet(NAV_PANEL_STORAGE_KEY) !== "false",
+    toggled: false,
+  }));
+  const togglePanel = useCallback(() => {
+    setPanel(({ open }) => ({ open: !open, toggled: true }));
+  }, []);
+
+  useEffect(() => {
+    if (panel.toggled) safeSet(NAV_PANEL_STORAGE_KEY, String(panel.open));
+  }, [panel]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        window.innerWidth < 1024 || event.defaultPrevented || event.repeat ||
+        event.key.toLowerCase() !== "b" || !(event.metaKey || event.ctrlKey) ||
+        event.altKey || event.shiftKey
+      ) return;
+      const focus = document.activeElement;
+      const editable = focus?.closest("[contenteditable]")?.getAttribute("contenteditable")?.toLowerCase();
+      if (
+        focus?.closest("input, textarea, select") ||
+        (focus instanceof HTMLElement && focus.isContentEditable) ||
+        editable === "" || editable === "true" || editable === "plaintext-only"
+      ) return;
+      event.preventDefault();
+      togglePanel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [togglePanel]);
 
   const { user: authUser } = useAuth();
   const user: SessionUser = useMemo<SessionUser>(
@@ -230,12 +215,33 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
     [authUser],
   );
   const sections = useMemo(() => navForRole(userRole), [userRole]);
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const search = useSearch();
   const activePage = useMemo(
     () => findActivePage(sections, location, search),
     [sections, location, search],
   );
+  const [recent, setRecent] = useState<{
+    sectionId?: string;
+    pageIds: Record<string, string>;
+  }>({ pageIds: {} });
+  useEffect(() => {
+    if (!activePage) return;
+    const { sectionId, id } = activePage;
+    setRecent((previous) => {
+      if (previous.sectionId === sectionId && previous.pageIds[sectionId] === id) return previous;
+      return { sectionId, pageIds: { ...previous.pageIds, [sectionId]: id } };
+    });
+  }, [activePage]);
+
+  const panelSection = sections.find(({ id }) => id === (activePage?.sectionId ?? recent.sectionId));
+  const panelVisible = panel.open && panelSection && panelSection.pages.length > 1;
+  const pins = useNavPins(user.id, userRole);
+  const selectSection = (sectionId: string) => {
+    const section = sections.find(({ id }) => id === sectionId);
+    const page = section?.pages.find(({ id }) => id === recent.pageIds[sectionId]) ?? section?.pages[0];
+    if (page) navigate(page.href);
+  };
   const brandThemed =
     userRole === "company_admin" ||
     userRole === "billing_manager" ||
@@ -251,16 +257,6 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
   // rather than firing one that 403s in the background.
   const enableOverdueBadge = hasCapability(userRole, CAN_READ_INVOICES);
   const badges = useNavBadges(enableBadges, enableOverdueBadge);
-  // Task #1946 — the ShellHint (sidebar-collapse tutorial popover) fires for
-  // every desktop role that has a persistent sidebar. The bookkeeper qualifies
-  // but must NOT be added to `enableBadges` above: that flag is also the gate
-  // for five approval-badge queries (parts, reviews, wet-checks, estimates,
-  // manager-workspace) that the bookkeeper has no scope for. A separate flag
-  // lets the popover appear without issuing any of those background requests.
-  const showShellHint =
-    enableBadges ||
-    userRole === "bookkeeper";
-
   const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(
     null,
   );
@@ -270,20 +266,23 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
   );
 
   return (
-    <div data-testid="desktop-shell">
-    <PageActionsContext.Provider value={actionsContextValue}>
-      <SidebarProvider open={open} onOpenChange={setOpen} mobileBreakpoint={1024}>
-        <div className="hidden lg:contents">
-          <DesktopSidebar
+    <div data-testid="desktop-shell" className="flex min-h-screen">
+      <PageActionsContext.Provider value={actionsContextValue}>
+        <div className="hidden shrink-0 lg:flex">
+          <NavRail
             sections={sections}
             badges={badges}
             user={user}
-              activePage={activePage}
-              brandThemed={brandThemed}
+            activePage={activePage}
+            brandThemed={brandThemed}
+            onSelectSection={selectSection}
           />
+          {panelVisible && (
+            <PagesPanel key={panelSection.id} section={panelSection} activePage={activePage} badges={badges} pins={pins} />
+          )}
         </div>
-        {/* min-w-0: without it this flex child grows to its widest table and the whole window scrolls sideways. */}
-        <SidebarInset className="min-h-screen min-w-0 max-lg:pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
+        {/* Let the main column shrink instead of letting a wide table set its width. */}
+        <main className="flex min-w-0 flex-1 flex-col bg-background max-lg:pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
           <div className="sticky top-0 z-30 lg:hidden">
             <PhoneNav sections={sections} activePage={activePage} badges={badges} user={user} brandThemed={brandThemed} />
           </div>
@@ -292,13 +291,13 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
             sections={sections}
             user={user}
             actionsRef={setActionsTarget}
-            showShellHint={showShellHint}
+            panelOpen={panel.open}
+            togglePanel={togglePanel}
           />
           <div className="flex-1 min-w-0 bg-gray-50">{children}</div>
           <PoweredByFooter />
-        </SidebarInset>
-      </SidebarProvider>
-    </PageActionsContext.Provider>
+        </main>
+      </PageActionsContext.Provider>
     </div>
   );
 }
@@ -307,12 +306,14 @@ function TopStrip({
   sections,
   user,
   actionsRef,
-  showShellHint,
+  panelOpen,
+  togglePanel,
 }: {
   sections: ResolvedNavSection[];
   user: SessionUser;
   actionsRef: (el: HTMLDivElement | null) => void;
-  showShellHint: boolean;
+  panelOpen: boolean;
+  togglePanel: () => void;
 }) {
   const [location] = useLocation();
   const search = useSearch();
@@ -321,11 +322,20 @@ function TopStrip({
     [location, sections, search],
   );
   return (
-    <header className="hidden lg:flex sticky top-0 z-30 h-14 items-center gap-3 border-b border-gray-200 bg-white px-4">
-      <ShellHint enabled={showShellHint}>
-        <SidebarTrigger />
+    <header className="hidden lg:flex sticky top-0 z-30 h-14 shrink-0 items-center gap-2.5 border-b border-gray-200 bg-white px-5">
+      <ShellHint panelOpen={panelOpen}>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-9 shrink-0 rounded-[10px] border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          aria-label="Show or hide the pages menu"
+          aria-pressed={panelOpen}
+          onClick={togglePanel}
+        >
+          <PanelLeft aria-hidden="true" />
+        </Button>
       </ShellHint>
-      <div className="h-6 w-px bg-gray-200" />
       <nav
         aria-label="Breadcrumb"
         className="flex items-center text-sm text-gray-600 min-w-0"
@@ -373,29 +383,26 @@ function TopStrip({
 }
 
 function ShellHint({
-  enabled,
+  panelOpen,
   children,
 }: {
-  enabled: boolean;
+  panelOpen: boolean;
   children: React.ReactNode;
 }) {
-  const { open: sidebarOpen } = useSidebar();
   const [open, setOpen] = useState(false);
   const interactedRef = useRef(false);
-  const initialOpenRef = useRef(sidebarOpen);
+  const initialOpenRef = useRef(panelOpen);
   useEffect(() => {
-    if (!enabled) return;
     if (interactedRef.current) return;
-    if (sidebarOpen === initialOpenRef.current) return;
+    if (panelOpen === initialOpenRef.current) return;
     interactedRef.current = true;
     if (safeGet(SHELL_HINT_SEEN_KEY) === "true") return;
     setOpen(true);
-  }, [enabled, sidebarOpen]);
+  }, [panelOpen]);
   const dismiss = () => {
     safeSet(SHELL_HINT_SEEN_KEY, "true");
     setOpen(false);
   };
-  if (!enabled) return <>{children}</>;
   return (
     <Popover
       open={open}
@@ -412,7 +419,7 @@ function ShellHint({
       >
         <div className="flex items-start gap-2">
           <p className="flex-1 text-gray-700">
-            Press Cmd+B (Ctrl+B on Windows) to collapse the rail.
+            Press Cmd+B (Ctrl+B on Windows) to hide the pages menu.
           </p>
           <button
             type="button"
@@ -425,248 +432,5 @@ function ShellHint({
         </div>
       </PopoverContent>
     </Popover>
-  );
-}
-
-function DesktopSidebar({
-  sections,
-  badges,
-  user,
-  activePage,
-  brandThemed,
-}: {
-  sections: ResolvedNavSection[];
-  badges: NavBadgeMap;
-  user: SessionUser;
-  activePage: ResolvedNavPage | undefined;
-  brandThemed: boolean;
-}) {
-  const [location] = useLocation();
-  const search = useSearch();
-  const { isMobile, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
-  const [sectionOverrides, setSectionOverrides] = useState<Record<string, boolean>>({});
-  useEffect(() => setSectionOverrides({}), [location, search, sections]);
-  // CSS alone cannot hide the old sidebar's portalled sheet on a tablet.
-  if (isMobile) return null;
-  return (
-    <Sidebar
-      collapsible="icon"
-      className={brandThemed ? "sidebar-brand-blue" : undefined}
-    >
-      <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1">
-          {/* Dot-icon mark for collapsed (icon-only) sidebar */}
-          <img
-            src={irrigoProMark}
-            alt="IrrigoPro"
-            className="h-12 w-12 object-contain shrink-0 hidden group-data-[collapsible=icon]:block"
-          />
-          {/* Full horizontal lockup when sidebar is expanded */}
-          <img
-            src={irrigoProLogo}
-            alt="IrrigoPro"
-            className="h-12 w-auto object-contain shrink-0 group-data-[collapsible=icon]:hidden"
-          />
-        </div>
-      </SidebarHeader>
-      <SidebarContent>
-        <SidebarMenu className="px-2 py-1">
-          {sections.map((section) => {
-            const active = activePage?.sectionId === section.id;
-            return section.pages.length === 1 ? (
-              <SidebarPageLink
-                key={section.id}
-                page={section.pages[0]}
-                active={active}
-                badges={badges}
-              />
-            ) : (
-              <SidebarSection
-                key={section.id}
-                section={section}
-                activePageId={activePage?.id}
-                open={sectionOverrides[section.id] ?? active}
-                onOpenChange={(next) => {
-                  if (!sidebarOpen) {
-                    setSidebarOpen(true);
-                    next = true;
-                  }
-                  setSectionOverrides((previous) => ({ ...previous, [section.id]: next }));
-                }}
-                badges={badges}
-              />
-            );
-          })}
-        </SidebarMenu>
-      </SidebarContent>
-      <SidebarFooter>
-        <SidebarUserMenu user={user} brandThemed={brandThemed} />
-      </SidebarFooter>
-      <SidebarRail />
-    </Sidebar>
-  );
-}
-
-function SidebarPageLink({
-  page,
-  active,
-  badges,
-  nested = false,
-}: {
-  page: ResolvedNavPage;
-  active: boolean;
-  badges: NavBadgeMap;
-  nested?: boolean;
-}) {
-  const Icon = page.icon;
-  const count = page.badgeKey ? badges[page.badgeKey] ?? 0 : 0;
-  const link = (
-    <Link href={page.href} aria-current={active ? "page" : undefined}>
-      <Icon />
-      <span>{page.label}</span>
-    </Link>
-  );
-  if (nested) {
-    return (
-      <SidebarMenuSubItem className="relative">
-        <SidebarMenuSubButton asChild isActive={active} className={count > 0 ? "pr-9" : undefined}>
-          {link}
-        </SidebarMenuSubButton>
-        <CountBadge count={count} className="top-1" />
-      </SidebarMenuSubItem>
-    );
-  }
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton asChild isActive={active} tooltip={page.label}>
-        {link}
-      </SidebarMenuButton>
-      <CountBadge count={count} />
-    </SidebarMenuItem>
-  );
-}
-
-function CountBadge({ count, className = "" }: { count: number; className?: string }) {
-  if (count <= 0) return null;
-  return (
-    <SidebarMenuBadge className={`bg-destructive text-destructive-foreground ${className}`}>
-      {count > 99 ? "99+" : count}
-    </SidebarMenuBadge>
-  );
-}
-
-function SidebarSection({
-  section,
-  activePageId,
-  open,
-  onOpenChange,
-  badges,
-}: {
-  section: ResolvedNavSection;
-  activePageId?: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  badges: NavBadgeMap;
-}) {
-  const Icon = section.icon;
-  const sum = !open && section.showBadgeSum
-    ? section.pages.reduce((total, page) => total + (page.badgeKey ? badges[page.badgeKey] ?? 0 : 0), 0)
-    : 0;
-  return (
-    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
-      <SidebarMenuItem>
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton
-            tooltip={section.label}
-            isActive={section.pages.some((page) => page.id === activePageId)}
-          >
-            <Icon />
-            <span>{section.label}</span>
-            <ChevronDown
-              className={`ml-auto transition-transform ${
-                open ? "rotate-180" : ""
-              } ${sum > 0 ? "invisible" : ""}`}
-            />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CountBadge count={sum} />
-        <CollapsibleContent>
-          <SidebarMenuSub>
-            {section.pages.map((page) => (
-              <SidebarPageLink
-                key={page.id}
-                page={page}
-                active={page.id === activePageId}
-                badges={badges}
-                nested
-              />
-            ))}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </SidebarMenuItem>
-    </Collapsible>
-  );
-}
-
-function SidebarUserMenu({
-  user,
-  brandThemed,
-}: {
-  user: SessionUser;
-  brandThemed: boolean;
-}) {
-  const initials = user.name?.charAt(0) || "U";
-  const roleLabel = (user.role || "").replace(/_/g, " ");
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton size="lg" tooltip={user.name || "Account"}>
-              <Avatar className="h-8 w-8 rounded-md">
-                <AvatarFallback
-                  className={`rounded-md ${
-                    brandThemed
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "bg-primary text-white"
-                  }`}
-                >
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col text-left min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                <span className="text-sm font-medium truncate">
-                  {user.name}
-                </span>
-                <span
-                  className={`text-xs capitalize truncate ${
-                    brandThemed ? "text-sidebar-foreground/70" : "text-gray-500"
-                  }`}
-                >
-                  {roleLabel}
-                </span>
-              </div>
-              <ChevronsUpDown className="ml-auto h-4 w-4 group-data-[collapsible=icon]:hidden" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" className="w-56">
-            <Link href="/user-profile">
-              <DropdownMenuItem>
-                <UserIcon className="mr-2 h-4 w-4" />
-                My Account
-              </DropdownMenuItem>
-            </Link>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={clearSessionAndLogout}
-              className="text-red-600"
-            >
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
   );
 }
