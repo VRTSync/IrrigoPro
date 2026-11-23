@@ -12,29 +12,17 @@
  *
  *  /wet-checks              → WetChecksListPage      (ALL 4 roles)
  *  /wet-checks/pending-review → WetCheckReviewPage → PendingReviewInbox (ALL 4 roles)
- *  /wet-checks/:id/review:
- *    irrigation_manager  → ManagerWetCheckDetailPage          (App.tsx L346)
- *    company_admin       → ManagerWetCheckDetailPage          (company-admin-app.tsx L199)
- *    billing_manager     → WetCheckReviewPage → WetCheckWizard(id)  (App.tsx L394) ← D1
- *    super_admin         → WetCheckReviewPage → WetCheckWizard(id)  (App.tsx L444) ← D1
+ *  /wet-checks/:id/review → CombinedReviewPage (ALL 4 roles)
  *  /manager-workspace:
  *    irrigation_manager  → ManagerWorkspace          (App.tsx L313)
  *    billing_manager /
  *    super_admin /
  *    company_admin       → NotFound  (D6: no route in their Switch blocks)
  *
- * ── WetCheckReviewPage dual-mode ─────────────────────────────────────────
- *  The component uses useRoute to self-dispatch:
- *    /wet-checks/:id/review  → renders WetCheckWizard(id)    (wizard mode)
- *    /manager/wet-checks/:id → renders WetCheckWizard(id)    (wizard mode)
- *    all other paths         → renders PendingReviewInbox     (queue mode)
- *  D1 delta: billing/super_admin at the :id URL get the wizard shell (not
- *  ManagerWetCheckDetailPage), while irrigation/company_admin get ManagerWetCheckDetailPage.
- *
  * ── Stable-state capture strategy ────────────────────────────────────────
  *  A `defaultQueryFn` is added to the test QueryClient that calls the global
  *  fetch mock. This covers every component query that has no inline queryFn
- *  (e.g. ManagerWorkspace queue/strip, WetCheckWizard parts/issue-types).
+ *  (e.g. ManagerWorkspace approvals/strip, WetCheckWizard parts/issue-types).
  *  Critical keys are also pre-seeded via setQueryData with staleTime:Infinity
  *  for immediate (zero-async) resolution on first render.
  *
@@ -43,33 +31,28 @@
  *    wc-detail:  ["/api/wet-checks", 1]  (number — matches parseInt(params.id))
  *                ["/api/customers", 1]
  *    wc-review:  ["/api/wet-checks/pending-review"]
- *    (parts, issue-types, queue, strip fall through to defaultQueryFn → fetch mock)
+ *    (requests not pre-seeded fall through to defaultQueryFn → fetch mock)
  *
  * ── Sentinels ────────────────────────────────────────────────────────────
  *  wc-list:                "Loading wet checks" absent + page-wet-checks-list
  *                          (waits for isLoading→false so rows are visible)
- *  wc-detail mgr/admin:    mgr-findings-summary        (ManagerWetCheckDetailPage loaded state)
- *  wc-detail billing/super: wizard-two-panel           (WetCheckWizard main panel — real component)
+ *  wc-detail:              crs-triage-complete         (CombinedReviewPage loaded findings state)
  *  wc-review:              wc-row-1                    (QueueCard in PendingReviewInbox)
- *  wc-dashboard mgr:       queue-row-1                 (ManagerWorkspace row; only appears
- *                                                        after queue data resolves)
+ *  wc-dashboard mgr:       approval-row-1              (loaded ManagerWorkspace approval row)
  *  wc-dashboard others:    (sync NotFound, no waitFor)
  *
  * ── API mocking ────────────────────────────────────────────────────────────
  *   global.fetch stubbed (URL→fixture JSON after stripping query params).
  *   React Query cache pre-seeded via setQueryData for all surface-specific keys.
  *
- * ── WetCheckWizard ─────────────────────────────────────────────────────────
- *  NOT mocked — the real component renders for billing_manager / super_admin at
- *  wc-detail, giving genuine token-level evidence for D1 delta (wizard vs
- *  ManagerWetCheckDetailPage shell mismatch). Dependent photo/loose-photos
+ *  The manager review page is not mocked. Dependent photo/loose-photos
  *  components are lightly mocked to avoid Capacitor/native API calls.
  *
  * ── Fail-fast ──────────────────────────────────────────────────────────────
  *   All waitFor calls are un-guarded — a missing sentinel fails the test and
  *   no partial fixture is written.
  *
- * To re-run (regenerates all 16 fixtures):
+ * To regenerate fixtures (validation sets WC_AUDIT_CAPTURE_WRITE=0):
  *   cd artifacts/irrigopro && npx vitest run src/test/wc-audit-capture.test.tsx
  */
 
@@ -78,6 +61,7 @@ import { describe, it, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { render, waitFor, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router, Route } from "wouter";
+import { AuthProvider } from "@/lib/auth-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -89,10 +73,14 @@ const FIXTURES_DIR = resolve(
   "../../../../docs/wc-manager-experience-visual-audit-fixtures",
 );
 
+// Radix Select pointer methods are not implemented in jsdom.
+const proto = HTMLElement.prototype;
+proto.hasPointerCapture ??= () => false;
+proto.setPointerCapture ??= () => {};
+proto.releasePointerCapture ??= () => {};
+proto.scrollIntoView ??= () => {};
+
 // ─── Module mocks ─────────────────────────────────────────────────────────────
-// WetCheckWizard is NOT mocked — the real component renders so billing_manager
-// and super_admin fixtures show genuine wizard UI for token-level comparison.
-//
 // Only components with native / offline / camera dependencies are mocked to
 // keep the test environment clean.
 
@@ -184,25 +172,16 @@ const FIXTURE_CUSTOMER = {
 // Fallback for any query NOT pre-seeded in the cache. Paths matched after
 // stripping query params so /api/wet-checks/admin?status=... works correctly.
 
-// ManagerQueueItem.id is a STRING; QueueResponse uses `items` (not `rows`).
-// testid rendered as: data-testid={`queue-row-${item.id}`} → "queue-row-wc-1"
-const FIXTURE_QUEUE_ITEM = {
-  id: "wc-1",
-  type: "wet_check" as const,
-  refId: 1,
-  number: null,
-  customerId: 1,
-  customerName: "Acme Irrigation",
-  technicianId: null,
-  technicianName: "Jane Tech",
-  total: 245,
-  status: "submitted",
-  hasPhotos: false,
-  flags: [],
-  ageDays: 2,
-  createdAt: "2026-05-01T10:30:00Z",
-  href: "/wet-checks/1/review",
-  wetCheckId: 1,
+const FIXTURE_NEEDS_APPROVAL = {
+  workOrders: [{
+    id: 1,
+    workOrderNumber: "1001",
+    customerName: "Acme Irrigation",
+    totalAmount: "245.00",
+    status: "pending_manager_review",
+    createdAt: null,
+  }],
+  billingSheets: [],
 };
 
 const FETCH_FIXTURE_MAP: Record<string, unknown> = {
@@ -210,16 +189,12 @@ const FETCH_FIXTURE_MAP: Record<string, unknown> = {
   "/api/wet-checks/pending-review":       FIXTURE_PENDING_REVIEW,
   "/api/wet-checks/1":                    FIXTURE_WET_CHECK_DETAIL,
   "/api/wet-checks/issue-types":          [],
-  // queue uses `items` key; one item so queue-row-wc-1 sentinel appears after data resolves
-  "/api/manager-workspace/queue":         {
-    items: [FIXTURE_QUEUE_ITEM],
-    total: 1, page: 1, pageSize: 50,
-  },
+  "/api/manager-workspace/needs-approval": FIXTURE_NEEDS_APPROVAL,
   // StatusStrip shape: { indicators: StatusIndicators }
   "/api/manager-workspace/status-strip":  {
     indicators: {
       wcsPendingReview: 2,
-      wosAwaitingApproval: 0,
+      wosAwaitingApproval: 1,
       approvedThisWeek: 3,
     },
   },
@@ -278,9 +253,6 @@ function clearUser() { localStorage.removeItem("user"); }
 //       billing_manager    → "approved_passed_to_billing,billed"
 //       company_admin / super_admin → "all"
 //
-//   ManagerWorkspace uses queryKey: [queueUrl] where the default URL is:
-//     /api/manager-workspace/queue?sort=age_desc&page=1&pageSize=50
-//
 // WetCheckWizard (real component, not mocked) uses:
 //   ["/api/wet-checks", id]       — number key (parseInt result)
 //   ["/api/customers", customerId] — derived from wc.customerId = 1
@@ -288,7 +260,7 @@ function clearUser() { localStorage.removeItem("user"); }
 //   ["/api/wet-checks/issue-types"]
 
 function seedCache(qc: QueryClient, role: RoleName) {
-  // ── wet check detail (number key — ManagerWetCheckDetailPage + WetCheckWizard)
+  // ── wet check detail (number key — CombinedReviewPage)
   qc.setQueryData(["/api/wet-checks", 1],   FIXTURE_WET_CHECK_DETAIL);
   // string key retained for any surface that reads params without parseInt
   qc.setQueryData(["/api/wet-checks", "1"], FIXTURE_WET_CHECK_DETAIL);
@@ -310,23 +282,9 @@ function seedCache(qc: QueryClient, role: RoleName) {
   qc.setQueryData(["/api/customers", { active: true }], []);
   qc.setQueryData(["/api/companies"], []);
 
-  // ── ManagerWorkspace — default URL with all params at their initial values.
-  // QueueResponse uses `items` (not `rows`); ManagerQueueItem.id is a string.
-  // The seeded item id "wc-1" → testid "queue-row-wc-1".
-  const QUEUE_URL = "/api/manager-workspace/queue?sort=age_desc&page=1&pageSize=50";
-  qc.setQueryData([QUEUE_URL], {
-    items: [FIXTURE_QUEUE_ITEM],
-    total: 1,
-    page: 1,
-    pageSize: 50,
-  });
-  qc.setQueryData(["/api/manager-workspace/status-strip"], {
-    indicators: {
-      wcsPendingReview: 2,
-      wosAwaitingApproval: 0,
-      approvedThisWeek: 3,
-    },
-  });
+  // ── ManagerWorkspace approvals and status strip
+  qc.setQueryData(["/api/manager-workspace/needs-approval"], FIXTURE_NEEDS_APPROVAL);
+  qc.setQueryData(["/api/manager-workspace/status-strip"], FETCH_FIXTURE_MAP["/api/manager-workspace/status-strip"]);
 
   // ── shared
   qc.setQueryData(["/api/customers"], []);
@@ -337,11 +295,9 @@ function seedCache(qc: QueryClient, role: RoleName) {
 // ─── Page imports ─────────────────────────────────────────────────────────────
 // Exact components used by App.tsx / company-admin-app.tsx per route.
 
-// /wet-checks — all roles use WetChecksListPage (barrel re-export)
-import WetChecksListPage from "../pages/wet-checks";
-// /wet-checks/:id/review — irrigation_manager + company_admin (ManagerWetCheckDetailPage)
-import ManagerWetCheckDetailPage from "../pages/wet-checks/ManagerWetCheckDetailPage";
-// /wet-checks/:id/review — billing_manager + super_admin (CombinedReviewPage)
+// /wet-checks -- WetChecksListPage
+import WetChecksListPage from "../pages/wet-checks/WetChecksListPage";
+// /wet-checks/:id/review — all four manager roles use CombinedReviewPage
 import CombinedReviewPage from "../pages/wet-checks/CombinedReviewPage";
 // /manager-workspace — irrigation_manager only
 import ManagerWorkspace from "../pages/manager-workspace";
@@ -360,7 +316,7 @@ function renderWithProviders(
         retry: false,
         staleTime: Infinity,
         // defaultQueryFn uses the global fetch mock so component queries that
-        // have no inline queryFn (e.g. ManagerWorkspace queue/strip, WetCheckWizard
+        // have no inline queryFn (e.g. ManagerWorkspace approvals/strip, WetCheckWizard
         // parts/issue-types) resolve via the mock instead of erroring.
         queryFn: async ({ queryKey }) => {
           const url = typeof queryKey[0] === "string"
@@ -383,7 +339,7 @@ function renderWithProviders(
     <TooltipProvider>
       <QueryClientProvider client={qc}>
         <Router hook={useMemoryLocation as Parameters<typeof Router>[0]["hook"]}>
-          {ui}
+          <AuthProvider>{ui}</AuthProvider>
         </Router>
       </QueryClientProvider>
     </TooltipProvider>,
@@ -393,6 +349,8 @@ function renderWithProviders(
 // ─── Write helper ─────────────────────────────────────────────────────────────
 
 function writeFixture(surface: string, role: RoleName, html: string) {
+  // Validation checks the renders without rewriting the reviewed fixtures.
+  if (process.env.WC_AUDIT_CAPTURE_WRITE === "0") return;
   mkdirSync(FIXTURES_DIR, { recursive: true });
   const header =
     `<!-- AUDIT FIXTURE: ${surface} × ${role} -->\n` +
@@ -443,38 +401,13 @@ describe("capture: wc-list", () => {
 
 // ── Surface 2: wc-detail (/wet-checks/1/review) ───────────────────────────────
 //
-// irrigation_manager (App.tsx L346) + company_admin (company-admin-app.tsx L199):
-//   → ManagerWetCheckDetailPage
-//   Cache seed: ["/api/wet-checks", 1] (number) → data available synchronously.
-//   Sentinel: mgr-findings-summary (rendered inside the loaded ManagerWetCheckDetailView)
-//
-// billing_manager (App.tsx L394) + super_admin (App.tsx L444):
-//   → WetCheckReviewPage at /wet-checks/:id/review
-//   → WetCheckReviewPage internally matches useRoute("/wet-checks/:id/review")
-//   → dispatches to the REAL WetCheckWizard(id=1) — not mocked
-//   Cache seeds: ["/api/wet-checks", 1], ["/api/customers", 1], ["/api/parts"],
-//                ["/api/wet-checks/issue-types"]  → all resolve synchronously.
-//   Sentinel: wizard-two-panel (WetCheckWizard main panel outer div)
-//   Delta D1: billing/super get wizard shell; mgr/admin get ManagerWetCheckDetailPage.
+// All four manager roles → CombinedReviewPage.
+// Cache seed: ["/api/wet-checks", 1] (number) → data available synchronously.
+// Sentinel: crs-triage-complete (the fixture's findings are already resolved).
 
 describe("capture: wc-detail", () => {
-  for (const role of ["irrigation_manager", "company_admin"] as RoleName[]) {
-    it(`${role} — ManagerWetCheckDetailPage (App.tsx routing)`, async () => {
-      setUser(role);
-      const { container, unmount } = renderWithProviders(
-        <Route path="/wet-checks/:id/review">
-          <ManagerWetCheckDetailPage />
-        </Route>,
-        { memoryPath: "/wet-checks/1/review", role },
-      );
-      await waitFor(() => screen.getByTestId("mgr-findings-summary"), { timeout: 5000 });
-      writeFixture("wc-detail", role, container.innerHTML);
-      unmount();
-    });
-  }
-
-  for (const role of ["billing_manager", "super_admin"] as RoleName[]) {
-    it(`${role} — CombinedReviewPage (same route as irrigation_manager / company_admin)`, async () => {
+  for (const role of ROLES) {
+    it(`${role} — CombinedReviewPage`, async () => {
       setUser(role);
       const { container, unmount } = renderWithProviders(
         <Route path="/wet-checks/:id/review">
@@ -482,7 +415,7 @@ describe("capture: wc-detail", () => {
         </Route>,
         { memoryPath: "/wet-checks/1/review", role },
       );
-      await waitFor(() => screen.getByTestId("mgr-findings-summary"), { timeout: 5000 });
+      await waitFor(() => screen.getByTestId("crs-triage-complete"), { timeout: 5000 });
       writeFixture("wc-detail", role, container.innerHTML);
       unmount();
     });
@@ -492,10 +425,8 @@ describe("capture: wc-detail", () => {
 // ── Surface 4: wc-dashboard (/manager-workspace) ─────────────────────────────
 //
 // irrigation_manager (App.tsx L313) → ManagerWorkspace
-//   defaultQueryFn resolves queue and strip via fetch mock (both return fixture data).
-//   Sentinel: queue-row-1 — only renders after the queue query resolves (data-testid
-//   applied to each rendered queue row). This guarantees the fixture captures the
-//   fully-loaded pipeline view, not the initial skeleton/loading state.
+//   Approval rows and the status strip are seeded with fixture data.
+//   Sentinel: approval-row-1 (a loaded Needs Approval row, not a loading skeleton).
 //
 // billing_manager / super_admin / company_admin → NotFound  (Delta D6)
 //   No /manager-workspace route in their Switch blocks; falls to catch-all.
@@ -508,9 +439,7 @@ describe("capture: wc-dashboard", () => {
       memoryPath: "/manager-workspace",
       role: "irrigation_manager",
     });
-    // Wait for the queue row to render — proves queue data resolved (not loading state).
-    // FIXTURE_QUEUE_ITEM.id = "wc-1" → testid "queue-row-wc-1"
-    await waitFor(() => screen.getByTestId("queue-row-wc-1"), { timeout: 5000 });
+    await waitFor(() => screen.getByTestId("approval-row-1"), { timeout: 5000 });
     writeFixture("wc-dashboard", "irrigation_manager", container.innerHTML);
     unmount();
   });

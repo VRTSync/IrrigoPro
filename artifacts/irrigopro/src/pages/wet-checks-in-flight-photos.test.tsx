@@ -73,7 +73,7 @@ vi.mock("@/components/offline/sync-ui", () => ({
 }));
 
 // Static import AFTER all vi.mock() declarations are hoisted.
-import { ZoneScreen } from "./wet-checks";
+import { ZoneScreen } from "./wet-checks/ZoneScreen";
 
 // ─── Fixture builders ─────────────────────────────────────────────────────────
 

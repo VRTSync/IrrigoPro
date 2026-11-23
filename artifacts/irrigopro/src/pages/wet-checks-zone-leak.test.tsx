@@ -59,7 +59,7 @@ vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/utils/safeStorage", () => ({ safeGet: () => null }));
 vi.mock("@/components/offline/sync-ui", () => ({ OfflineStrip: () => null, OfflineSyncUI: () => null }));
 
-import { ZoneScreen } from "./wet-checks";
+import { ZoneScreen } from "./wet-checks/ZoneScreen";
 
 function makeZoneRecord(overrides: Partial<any> = {}): any {
   return {

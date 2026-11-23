@@ -21,6 +21,7 @@ import { render, renderHook, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import fs from "node:fs";
 import path from "node:path";
+import { AuthProvider } from "@/lib/auth-context";
 
 vi.mock("@/lib/offline/engine", () => ({ isOfflineQueueEnabled: () => false }));
 vi.mock("@/lib/offline/api", () => ({
@@ -119,9 +120,9 @@ describe("Task #540 — null-safe array reads", () => {
     expect(result.current.data).toEqual(rows);
   });
 
-  it("wet-checks.tsx no longer reads .length / .map / .filter directly on potentially-null nested arrays", () => {
+  it("WetCheckDetail does not read .length / .map / .filter directly on potentially-null nested arrays", () => {
     const file = fs.readFileSync(
-      path.resolve(__dirname, "wet-checks.tsx"),
+      path.resolve(__dirname, "wet-checks/WetCheckDetail.tsx"),
       "utf8",
     );
     // Static guard: any direct `wc.zoneRecords.<arrayMethod>` or
@@ -157,12 +158,7 @@ describe("Task #540 — null-safe array reads", () => {
   });
 
   it("WetCheckDetail mounts with `wc.zoneRecords = null` without throwing (the original incident payload)", async () => {
-    const mod: any = await import("./wet-checks");
-    const WetCheckDetail = mod.WetCheckDetail ?? mod.__test__WetCheckDetail;
-    // WetCheckDetail isn't exported; the default export `WetChecksPage`
-    // routes to it. We seed the cache so the queryFn isn't fired and
-    // mount the page through the default export.
-    const Page = mod.default;
+    const { default: Page } = await import("./wet-checks/WetChecksPage");
     expect(typeof Page).toBe("function");
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -192,9 +188,11 @@ describe("Task #540 — null-safe array reads", () => {
       render(
         <QueryClientProvider client={qc}>
           <Router hook={hook}>
-            <Switch>
-              <Route path="/wet-checks/:id" component={Page as any} />
-            </Switch>
+            <AuthProvider>
+              <Switch>
+                <Route path="/wet-checks/:id" component={Page} />
+              </Switch>
+            </AuthProvider>
           </Router>
         </QueryClientProvider>,
       );
@@ -209,8 +207,7 @@ describe("Task #540 — null-safe array reads", () => {
   // (markUnauthenticatedRead) flips the empty state into a "session
   // expired — sign in" affordance instead.
   it("WetCheckList shows the re-login affordance, not 'No wet checks yet.', when reads are 401-ing", async () => {
-    const mod: any = await import("./wet-checks");
-    const Page = mod.default;
+    const { WetCheckList } = await import("./wet-checks/WetCheckList");
     const qc = new QueryClient({
       defaultOptions: {
         queries: {
@@ -230,7 +227,7 @@ describe("Task #540 — null-safe array reads", () => {
         <QueryClientProvider client={qc}>
           <Router hook={hook}>
             <Switch>
-              <Route path="/wet-checks" component={Page as any} />
+              <Route path="/wet-checks" component={WetCheckList} />
             </Switch>
           </Router>
         </QueryClientProvider>,
@@ -246,8 +243,7 @@ describe("Task #540 — null-safe array reads", () => {
   });
 
   it("WetCheckList still shows 'No wet checks yet.' for a genuinely-empty (200 []) response", async () => {
-    const mod: any = await import("./wet-checks");
-    const Page = mod.default;
+    const { WetCheckList } = await import("./wet-checks/WetCheckList");
     const qc = new QueryClient({
       defaultOptions: {
         queries: {
@@ -266,7 +262,7 @@ describe("Task #540 — null-safe array reads", () => {
       <QueryClientProvider client={qc}>
         <Router hook={hook}>
           <Switch>
-            <Route path="/wet-checks" component={Page as any} />
+            <Route path="/wet-checks" component={WetCheckList} />
           </Switch>
         </Router>
       </QueryClientProvider>,
@@ -323,8 +319,7 @@ describe("Task #540 — null-safe array reads", () => {
   });
 
   it("ZoneScreen renders cleanly with `zoneRecord.findings = null` (the production crash payload)", async () => {
-    const mod: any = await import("./wet-checks");
-    expect(typeof mod.ZoneScreen).toBe("function");
+    const { ZoneScreen } = await import("./wet-checks/ZoneScreen");
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
     });
@@ -342,7 +337,6 @@ describe("Task #540 — null-safe array reads", () => {
       // Deliberately null — the regression payload.
       findings: null,
     };
-    const ZoneScreen = mod.ZoneScreen;
     const { container } = render(
       <QueryClientProvider client={qc}>
         <ZoneScreen

@@ -1009,20 +1009,6 @@ export function registerManagerWorkspaceRoutes(
     },
   );
 
-  // -------------------------------------------------------------------
-  // POST /api/manager-workspace/findings/bulk-route
-  //
-  // REMOVED in Slice 1 (Manager Workspace Simplification).
-  // Returns 404 so any stale client references surface a clear error.
-  // -------------------------------------------------------------------
-  app.post(
-    "/api/manager-workspace/findings/bulk-route",
-    requireAuthentication,
-    (_req: any, res) => {
-      res.status(404).json({ message: "This endpoint has been removed. Use the wet-check review screen to route findings." });
-    },
-  );
-
   // GET /api/action-board — read-only dispatch board, sharing budget semantics
   // with /api/budget/status. Findings are intentionally not read here.
   app.get(

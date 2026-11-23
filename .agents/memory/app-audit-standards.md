@@ -20,3 +20,9 @@ Opening a page must not write data. The throttled invoice payment-status refresh
 **Why:** Rewriting the browser's stored role changes the visible shell but not the identity the server uses, so the screens and data can disagree.
 
 **How to apply:** Keep the “Switch User” label and use the normal logout flow, never a local identity picker. Exercise the actual role routers in tests: a shared menu can link to a page that a role-specific router does not mount.
+
+Treat a dead-code ticket's proof greps as a minimum, not the complete consumer search.
+
+**Why:** A barrel can have no live route imports yet still be loaded by colocated tests or read as text by a source guard. Searches for aliases or parent-relative imports alone miss sibling imports, and a barrel's current default can differ from the page older tests originally meant to mount.
+
+**How to apply:** Before removing a barrel, scan by basename across the workspace, including static imports, dynamic imports, file reads, and fixtures. Run the affected suites against their intended concrete modules.

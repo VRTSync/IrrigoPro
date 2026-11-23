@@ -3,10 +3,9 @@
  *   (a) Estimate detail shows the "From Wet Check #X" banner when originWetCheckId is set.
  *   (b) Converting a wet-check-origin estimate to a WO copies originWetCheckId.
  *   (c) WO detail shows the "From Wet Check #X" banner when originWetCheckId is set.
- *   (d) Wet-check manager detail surfaces its originated estimate/WO.
  *
  * These are unit-level / static-source tests that run without a live server.
- * They assert UI rendering (a, c, d) and source-code dual-write invariants (b).
+ * They assert UI rendering (a, c) and source-code dual-write invariants (b).
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -315,23 +314,5 @@ describe("(c) Work-order detail — From Wet Check banner", () => {
       />,
     );
     expect(screen.queryByTestId("wo-from-wet-check-banner")).toBeNull();
-  });
-});
-
-// ─── (d) Wet-check manager detail surfaces the originated estimate/WO ─────────
-
-describe("(d) ManagerWetCheckDetailPage lineage source-guard", () => {
-  it("ManagerWetCheckDetailPage renders the lineage panel data-testid", async () => {
-    const { readFileSync } = await import("fs");
-    const source = readFileSync(
-      resolve(import.meta.dirname, "./ManagerWetCheckDetailPage.tsx"),
-      "utf-8",
-    );
-    // The panel must have the data-testid anchor.
-    expect(source).toContain('data-testid="wc-lineage-panel"');
-    // It must branch on originatedEstimateId.
-    expect(source).toContain("originatedEstimateId");
-    // It must branch on originatedWorkOrderId.
-    expect(source).toContain("originatedWorkOrderId");
   });
 });

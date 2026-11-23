@@ -22,7 +22,6 @@ import EstimateApproval from "@/pages/estimate-approval";
 const lazyPage = <T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) =>
   lazy(loader);
 
-const Dashboard = lazyPage(() => import("@/pages/dashboard"));
 const Estimates = lazyPage(() => import("@/pages/estimates"));
 const PartsCatalog = lazyPage(() => import("@/pages/parts-catalog"));
 const Customers = lazyPage(() => import("@/pages/customers"));
@@ -48,8 +47,6 @@ const QuickBooksPage = lazyPage(() => import("@/pages/quickbooks"));
 const CustomerReviewPage = lazyPage(() => import("@/pages/customer-review"));
 const AdminControllers = lazyPage(() => import("@/pages/admin-controllers"));
 const SystemUserManagement = lazyPage(() => import("@/pages/system-user-management"));
-const CompanyUserManagement = lazyPage(() => import("@/pages/company-user-management"));
-const CompanyProfile = lazyPage(() => import("@/pages/company-profile"));
 const UserProfile = lazyPage(() => import("@/pages/user-profile"));
 const LicenseAgreement = lazyPage(() => import("@/pages/license-agreement"));
 const PrivacyPolicy = lazyPage(() => import("@/pages/privacy-policy"));
@@ -59,10 +56,7 @@ const PartsSettings = lazyPage(() => import("@/pages/parts-settings"));
 const MarkupSchedulePage = lazyPage(() => import("@/pages/markup-schedule"));
 const PartsPendingApproval = lazyPage(() => import("@/pages/parts-pending-approval"));
 const EstimatesPendingApproval = lazyPage(() => import("@/pages/estimates-pending-approval"));
-const EstimateCommandCenter = lazyPage(() => import("@/pages/estimate-command-center"));
-const RedirectPendingApprovalToCC = lazy(() => import("@/components/estimates/redirect-to-command-center"));
 const InvoicesPage = lazyPage(() => import("@/pages/invoices"));
-const WetChecksListPage = lazyPage(() => import("@/pages/wet-checks"));
 const WetCheckSystemPage = lazyPage(() => import("@/pages/wet-checks/WetCheckSystemPage"));
 const WetChecksRoutingPage = lazyPage(() => import("@/pages/wet-checks/WetChecksPage"));
 const WetCustomerPickerPage = lazyPage(() => import("@/pages/wet-checks/CustomerPickerPage"));
@@ -72,7 +66,6 @@ const WetCheckBillingsPage = lazyPage(() => import("@/pages/wet-check-billings")
 const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confirm").then((m) => ({ default: m.WetCheckConfirm })));
 const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
 const WetCheckInspectionSummaryPage = lazyPage(() => import("@/pages/wet-checks/WetCheckInspectionSummaryPage"));
-const ManagerWetCheckDetailPage = lazyPage(() => import("@/pages/wet-checks/ManagerWetCheckDetailPage"));
 const CombinedReviewPage = lazyPage(() => import("@/pages/wet-checks/CombinedReviewPage"));
 
 const BudgetStatusPage = lazyPage(() => import("@/pages/budget-status"));
@@ -281,7 +274,7 @@ export function AppRoutes() {
                   <Route path="/wet-checks" component={WetCustomerPickerPage} />
                   <Route path="/wet-checks/c/:customerId/new" component={NewWetCheckPage} />
                   <Route path="/wet-checks/c/:clientId" component={WetChecksRoutingPage} />
-                  {/* Both /review and /summary intentionally load the same component for field techs — diverges from manager blocks where /review uses ManagerWetCheckDetailPage */}
+                  {/* Both /review and /summary load the same component for field techs. Manager roles use CombinedReviewPage at /review. */}
                   <Route path="/wet-checks/:id/review" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id/summary" component={WetCheckInspectionSummaryPage} />
                   <Route path="/wet-checks/:id" component={WetChecksRoutingPage} />

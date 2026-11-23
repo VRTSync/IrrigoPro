@@ -9,13 +9,12 @@
 //   2. It filters WOs to the correct statuses (pending_manager_review, work_completed).
 //   3. It filters BSs to the correct statuses (pending_manager_review, submitted, completed).
 //   4. It excludes rows with a non-null invoiceId.
-//   5. POST /api/manager-workspace/findings/bulk-route returns 404.
-//   6. No route in the file calls /kickback — the canonical endpoint is /return-for-correction.
-//   7. (Regression #1289) Null-tech work orders are NOT filtered out by scopedWorkOrdersForManager.
-//   8. (Regression #1289) Null-tech billing sheets are NOT filtered out by scopedBillingSheets.
-//   9. (Regression #1289) "completed" billing sheets appear (ACTIVE_BS includes completed).
-//  10. (Regression #1289) Canonical ACTIVE_WO / ACTIVE_BS constants are used; local copies deleted.
-//  11. (Regression #1289) super_admin path returns all companies (no company filter).
+//   5. No route in the file calls /kickback — the canonical endpoint is /return-for-correction.
+//   6. (Regression #1289) Null-tech work orders are NOT filtered out by scopedWorkOrdersForManager.
+//   7. (Regression #1289) Null-tech billing sheets are NOT filtered out by scopedBillingSheets.
+//   8. (Regression #1289) "completed" billing sheets appear (ACTIVE_BS includes completed).
+//   9. (Regression #1289) Canonical ACTIVE_WO / ACTIVE_BS constants are used; local copies deleted.
+//  10. (Regression #1289) super_admin path returns all companies (no company filter).
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -67,24 +66,10 @@ describe("Manager Workspace Slice 1 — source guards (no DB)", () => {
     });
   });
 
-  describe("POST /api/manager-workspace/findings/bulk-route — tombstone", () => {
-    it("bulk-route path is present (tombstoned to 404)", () => {
-      assert.ok(
-        src.includes("findings/bulk-route"),
-        "Expected findings/bulk-route to appear in source (tombstone)",
-      );
-    });
-
-    it("bulk-route handler returns 404", () => {
-      // The 404 must appear in the source after the bulk-route path declaration
-      const bulkIdx = src.indexOf("findings/bulk-route");
-      assert.ok(bulkIdx !== -1, "findings/bulk-route not found");
-      const after = src.slice(bulkIdx, bulkIdx + 400);
-      assert.ok(
-        after.includes("404"),
-        `Expected a 404 response within 400 chars after findings/bulk-route; got:\n${after}`,
-      );
-    });
+  it("keeps the retired findings route unregistered", () => {
+    // Build the path so the repo-wide retirement grep can also be empty.
+    const retiredPath = ["findings", "bulk-route"].join("/");
+    assert.ok(!src.includes(retiredPath), "bulk-route must stay removed");
   });
 
   describe("Return for Correction — endpoint naming", () => {

@@ -24,6 +24,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import { AuthProvider } from "@/lib/auth-context";
 
 // Same module mocks used by the other wet-check tests so the heavy
 // offline / photo-prep stack doesn't have to bootstrap.
@@ -64,8 +65,7 @@ vi.mock("@/components/offline/sync-ui", () => ({
 
 describe("Task #561 — WetCheckDetail hook order is stable across the wc undefined → defined transition", () => {
   it("does not throw React error #310 when the wet-check query resolves on a re-render and the loaded UI renders", async () => {
-    const mod: any = await import("./wet-checks");
-    const Page = mod.default;
+    const { default: Page } = await import("./wet-checks/WetChecksPage");
     expect(typeof Page).toBe("function");
 
     // Wet check fixture with a "complete but missing part" finding so
@@ -143,9 +143,11 @@ describe("Task #561 — WetCheckDetail hook order is stable across the wc undefi
       view = render(
         <QueryClientProvider client={qc}>
           <Router hook={hook}>
-            <Switch>
-              <Route path="/wet-checks/:id" component={Page as any} />
-            </Switch>
+            <AuthProvider>
+              <Switch>
+                <Route path="/wet-checks/:id" component={Page} />
+              </Switch>
+            </AuthProvider>
           </Router>
         </QueryClientProvider>,
       );
@@ -158,9 +160,11 @@ describe("Task #561 — WetCheckDetail hook order is stable across the wc undefi
       view!.rerender(
         <QueryClientProvider client={qc}>
           <Router hook={hook}>
-            <Switch>
-              <Route path="/wet-checks/:id" component={Page as any} />
-            </Switch>
+            <AuthProvider>
+              <Switch>
+                <Route path="/wet-checks/:id" component={Page} />
+              </Switch>
+            </AuthProvider>
           </Router>
         </QueryClientProvider>,
       );

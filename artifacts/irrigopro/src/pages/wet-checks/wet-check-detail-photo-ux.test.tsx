@@ -12,6 +12,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AuthProvider } from "@/lib/auth-context";
 
 // vi.hoisted ensures this runs before the vi.mock factory below, so the
 // factory can close over the stable reference even after hoisting.
@@ -42,8 +43,7 @@ vi.mock("@/components/offline/sync-ui", async (importOriginal) => {
 
 describe("Task #597 — WetCheckDetail photo-visibility", () => {
   it("shows header total, per-controller badge, and loose-photos banner", async () => {
-    const mod: any = await import("../wet-checks");
-    const Page = mod.default;
+    const { default: Page } = await import("./WetChecksPage");
     expect(typeof Page).toBe("function");
 
     // The page calls useQuery without a queryFn, so we install a default
@@ -118,9 +118,11 @@ describe("Task #597 — WetCheckDetail photo-visibility", () => {
     render(
       <QueryClientProvider client={qc}>
         <Router hook={hook}>
-          <Switch>
-            <Route path="/wet-checks/:id" component={Page as any} />
-          </Switch>
+          <AuthProvider>
+            <Switch>
+              <Route path="/wet-checks/:id" component={Page} />
+            </Switch>
+          </AuthProvider>
         </Router>
       </QueryClientProvider>,
     );

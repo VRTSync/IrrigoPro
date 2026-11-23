@@ -59,7 +59,6 @@ const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confir
 const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
 import AdminIssueTypesPage from "@/pages/admin-issue-types";
 import WetCheckInspectionSummaryPage from "@/pages/wet-checks/WetCheckInspectionSummaryPage";
-import ManagerWetCheckDetailPage from "@/pages/wet-checks/ManagerWetCheckDetailPage";
 import CombinedReviewPage from "@/pages/wet-checks/CombinedReviewPage";
 import BillingZeroPriceAuditPage from "@/pages/billing-zero-price-audit";
 import LaborRateAuditPage from "@/pages/labor-rate-audit";
