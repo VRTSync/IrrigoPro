@@ -38,7 +38,6 @@ import { AppRoutes } from "@/App";
 import { AuthProvider } from "@/lib/auth-context";
 import { apiRequest, clearSessionAndLogout, queryClient } from "@/lib/queryClient";
 import { isApiAllowedForRole } from "@workspace/shared";
-import SwitchUser from "@/pages/switch-user";
 import { downloadAllDocSites } from "@/lib/offline/doc-download";
 import { openOfflineDB } from "@/lib/offline/db";
 
@@ -391,18 +390,6 @@ describe("System Documenter app (Slice 7)", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Signing out to switch accounts");
     await waitFor(() => expect(fetchCalls).toEqual([["POST", "/api/auth/logout"]]));
     expect(clearSessionAndLogout).toHaveBeenCalledTimes(1);
-  });
-
-  it("8d. existing staff Switch User still loads its original selector", async () => {
-    localStorage.setItem("user", JSON.stringify({ id: 32, role: "field_tech", name: "Staff" }));
-    fetchStub.mockImplementationOnce(async (input) => {
-      fetchCalls.push(["GET", String(input)]);
-      return json([]);
-    });
-    render(<AuthProvider><SwitchUser /></AuthProvider>);
-    expect(await screen.findByRole("heading", { name: "Select User Profile" })).toBeInTheDocument();
-    expect(fetchCalls).toEqual([["GET", "/api/users"]]);
-    expect(clearSessionAndLogout).not.toHaveBeenCalled();
   });
 
   it("static: the shell imports no staff navigation, notification or footer components", () => {

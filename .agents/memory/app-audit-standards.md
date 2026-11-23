@@ -14,3 +14,9 @@ Opening a page must not write data. The throttled invoice payment-status refresh
 **Why:** Viewing a record is not consent to change it, and the separate billing view is part of the office workflow.
 
 **How to apply:** Keep inspection estimate creation behind its explicit manager action. Follow the assigned slice and its embedded Design Context, preserving newer Bookkeeper layout and role-visibility fixes. Command Center and site maps remain out of scope.
+
+**Rule:** Web account switching signs out for every role. Only the super-admin App Health flow is real impersonation.
+
+**Why:** Rewriting the browser's stored role changes the visible shell but not the identity the server uses, so the screens and data can disagree.
+
+**How to apply:** Keep the “Switch User” label and use the normal logout flow, never a local identity picker. Exercise the actual role routers in tests: a shared menu can link to a page that a role-specific router does not mount.

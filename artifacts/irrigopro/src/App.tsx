@@ -407,6 +407,7 @@ export function AppRoutes() {
                   <Route path="/customers/:id/profile" component={CustomerProfile} />
                   <Route path="/quickbooks" component={QuickBooksPage} />
                   <Route path="/customer-review" component={CustomerReviewPage} />
+                  <Route path="/switch-user" component={SwitchUser} />
                   <Route path="/user-profile" component={UserProfile} />
                   <Route path="/license-agreement" component={LicenseAgreement} />
                   <Route path="/privacy-policy" component={PrivacyPolicy} />

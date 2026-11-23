@@ -14,7 +14,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getSyncEngine } from "@/lib/offline/engine";
 import { getGetDocumentationSitesQueryKey } from "@workspace/api-client-react";
 
-// SwitchUser signs restricted accounts out before mounting its staff user list.
 const SwitchUser = lazy(() => import("@/pages/switch-user"));
 
 export interface DocumenterAppProps {
