@@ -14,3 +14,5 @@ Jump To is pages-only in this release. Record search, a "Needs you" summary, and
 **Why:** This release reorganizes navigation without taking on record-search permissions, new deep links, or a new pin data model.
 
 **How to apply:** Do not pull the broader record-search proposal into Jump To or bring the retired dashboard widgets into another section. Super admin, field tech, and system documenter do not get the new role dashboard.
+
+The later [Access Hardening policy](access-hardening-policy.md) supersedes the Navigation Redesign overview only where it retains Switch User. Do not restore that entry after retirement, including in the account menus, section list, breadcrumbs, or Jump To.
