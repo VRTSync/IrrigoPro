@@ -1,10 +1,35 @@
-// Assembly routes — extracted from routes.ts as part of Task #446. Behavior
-// is byte-for-byte identical to the previous inline definitions.
-
-import type { Express, RequestHandler } from "express";
+import type { Express, Request, RequestHandler, Response } from "express";
 import { z } from "zod/v4";
-import { insertAssemblySchema, insertAssemblyPartSchema } from "@workspace/db";
+import { insertAssemblySchema, insertAssemblyPartSchema, type InsertAssemblyPart } from "@workspace/db";
 import { storage } from "../storage";
+
+// Match the write roles for the parts catalog.
+const ASSEMBLY_WRITE_ROLES = new Set(["company_admin", "super_admin", "billing_manager", "irrigation_manager"]);
+
+function scopeOf(req: Request): number | null {
+  // requireAuthentication rejects company-less tenant users.
+  return req.authenticatedUserRole === "super_admin" ? null : req.authenticatedUserCompanyId!;
+}
+
+function canWrite(req: Request): boolean {
+  return ASSEMBLY_WRITE_ROLES.has(req.authenticatedUserRole!);
+}
+
+async function loadOwned(req: Request, res: Response, id: number) {
+  const scope = scopeOf(req);
+  const assembly = await storage.getAssembly(id);
+  if (!assembly || (scope !== null && assembly.companyId !== scope)) {
+    res.status(404).json({ message: "Assembly not found" });
+    return;
+  }
+  return assembly;
+}
+
+async function assertPartsInCompany(partsData: InsertAssemblyPart[], companyId: number): Promise<boolean> {
+  if (partsData.length === 0) return true;
+  const allowedIds = new Set((await storage.getParts(companyId)).map((part) => part.id));
+  return partsData.every((part) => allowedIds.has(part.partId));
+}
 
 export interface RegisterAssemblyRoutesDeps {
   requireAuthentication: RequestHandler;
@@ -16,7 +41,19 @@ export function registerAssemblyRoutes(
 ): void {
   app.get("/api/assemblies", requireAuthentication, async (req, res) => {
     try {
-      const companyId = req.authenticatedUserCompanyId || 1;
+      let companyId = scopeOf(req);
+      if (companyId === null) {
+        const requestedCompanyId = req.query.companyId;
+        if (requestedCompanyId === undefined) {
+          res.json([]);
+          return;
+        }
+        companyId = typeof requestedCompanyId === "string" ? Number(requestedCompanyId) : NaN;
+        if (!Number.isSafeInteger(companyId) || companyId <= 0) {
+          res.status(400).json({ message: "Invalid company ID" });
+          return;
+        }
+      }
       const assemblies = await storage.getAssemblies(companyId);
       res.json(assemblies);
     } catch (error) {
@@ -32,11 +69,8 @@ export function registerAssemblyRoutes(
         res.status(400).json({ message: "Invalid assembly ID" });
         return;
       }
-      const assembly = await storage.getAssembly(id);
-      if (!assembly) {
-        res.status(404).json({ message: "Assembly not found" });
-        return;
-      }
+      const assembly = await loadOwned(req, res, id);
+      if (!assembly) return;
       res.json(assembly);
     } catch (error) {
       console.error("Error fetching assembly:", error instanceof Error ? error.message : error);
@@ -45,14 +79,29 @@ export function registerAssemblyRoutes(
   });
 
   app.post("/api/assemblies", requireAuthentication, async (req, res) => {
+    if (!canWrite(req)) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
     try {
       const { assembly, parts } = req.body;
+      const companyId = req.authenticatedUserRole === "super_admin"
+        ? assembly?.companyId
+        : req.authenticatedUserCompanyId;
+      if (companyId == null) {
+        res.status(400).json({ message: "Select a company" });
+        return;
+      }
       const assemblyData = insertAssemblySchema.parse({
         ...assembly,
-        companyId: req.authenticatedUserCompanyId || assembly.companyId || 1,
-        createdBy: req.authenticatedUserId || assembly.createdBy || 1,
+        companyId,
+        createdBy: req.authenticatedUserId,
       });
-      const partsData = (parts as unknown[]).map((p) => insertAssemblyPartSchema.parse(p));
+      const partsData = z.array(insertAssemblyPartSchema).parse(parts);
+      if (!await assertPartsInCompany(partsData, assemblyData.companyId)) {
+        res.status(400).json({ message: "Every part must belong to this company" });
+        return;
+      }
       const createdAssembly = await storage.createAssembly(assemblyData, partsData);
       res.status(201).json(createdAssembly);
     } catch (error) {
@@ -66,15 +115,25 @@ export function registerAssemblyRoutes(
   });
 
   app.put("/api/assemblies/:id", requireAuthentication, async (req, res) => {
+    if (!canWrite(req)) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
     try {
       const id = parseInt(String(req.params.id));
       if (isNaN(id) || id <= 0) {
         res.status(400).json({ message: "Invalid assembly ID" });
         return;
       }
+      const existing = await loadOwned(req, res, id);
+      if (!existing) return;
       const { assembly, parts } = req.body;
-      const assemblyData = insertAssemblySchema.partial().parse(assembly);
-      const partsData = parts ? (parts as unknown[]).map((p) => insertAssemblyPartSchema.parse(p)) : undefined;
+      const assemblyData = insertAssemblySchema.partial().omit({ companyId: true, createdBy: true }).parse(assembly);
+      const partsData = z.array(insertAssemblyPartSchema).optional().parse(parts);
+      if (partsData && !await assertPartsInCompany(partsData, existing.companyId)) {
+        res.status(400).json({ message: "Every part must belong to this company" });
+        return;
+      }
       const updatedAssembly = await storage.updateAssembly(id, assemblyData, partsData);
       if (!updatedAssembly) {
         res.status(404).json({ message: "Assembly not found" });
@@ -92,12 +151,18 @@ export function registerAssemblyRoutes(
   });
 
   app.delete("/api/assemblies/:id", requireAuthentication, async (req, res) => {
+    if (!canWrite(req)) {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
     try {
       const id = parseInt(String(req.params.id));
       if (isNaN(id) || id <= 0) {
         res.status(400).json({ message: "Invalid assembly ID" });
         return;
       }
+      const existing = await loadOwned(req, res, id);
+      if (!existing) return;
       const success = await storage.deleteAssembly(id);
       if (!success) {
         res.status(404).json({ message: "Assembly not found" });
@@ -113,8 +178,13 @@ export function registerAssemblyRoutes(
   app.post("/api/assemblies/:id/track-usage", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id));
-      const companyId = req.authenticatedUserCompanyId || 1;
-      await storage.trackAssemblyUsage(companyId, id);
+      if (isNaN(id) || id <= 0) {
+        res.status(400).json({ message: "Invalid assembly ID" });
+        return;
+      }
+      const existing = await loadOwned(req, res, id);
+      if (!existing) return;
+      await storage.trackAssemblyUsage(existing.companyId, id);
       res.json({ message: "Assembly usage tracked successfully" });
     } catch (error) {
       console.error("Error tracking assembly usage:", error instanceof Error ? error.message : error);

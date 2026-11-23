@@ -299,11 +299,8 @@ import {
   // insertPropertyZoneSchema, insertZoneSchema, insertFieldWorkSessionSchema, insertFieldWorkItemSchema removed by Task #1857.
   insertWorkOrderSchema,
   insertWorkOrderItemSchema,
-  insertNotificationSchema,
   insertSiteMapSchema,
   insertCompanySchema,
-  insertAssemblySchema,
-  insertAssemblyPartSchema,
   type InsertEstimate,
   type InsertEstimateItem,
   type BillingSheetItem,
@@ -11966,8 +11963,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoiceId?: number | null;
       };
       const results: Outcome[] = [];
+      const scopeCompanyId = req.authenticatedUserRole === 'super_admin' ? null : req.authenticatedUserCompanyId!;
       for (const id of validIds) {
         try {
+          const owned = await storage.getBillingSheetById(id, scopeCompanyId);
+          if (!owned) {
+            results.push({ id, status: 'not_found' });
+            continue;
+          }
           const ok = await storage.deleteBillingSheet(id);
           results.push({ id, status: ok ? 'deleted' : 'not_found' });
         } catch (e: any) {
@@ -13093,14 +13096,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       let deleted = 0;
       const skipped: number[] = [];
+      const notFound: number[] = [];
+      const scopeCompanyId = req.authenticatedUserRole === 'super_admin' ? null : req.authenticatedUserCompanyId!;
       for (const id of validIds) {
+        const woBefore = await storage.getWorkOrder(id, scopeCompanyId);
+        if (!woBefore) {
+          notFound.push(id);
+          continue;
+        }
         const invoiced = await storage.hasInvoiceItems(id);
         if (invoiced) {
           skipped.push(id);
           continue;
         }
-        const bulkDelCompanyId = (req as any).authenticatedUserRole === 'super_admin' ? null : ((req as any).authenticatedUserCompanyId ?? null);
-        const woBefore = await storage.getWorkOrder(id, bulkDelCompanyId);
         await storage.deleteWorkOrderItems(id);
         const success = await storage.deleteWorkOrder(id);
         if (success) {
@@ -13115,14 +13123,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
-      if (skipped.length > 0 && deleted === 0) {
+      if (deleted === 0 && skipped.length > 0 && notFound.length === 0) {
         res.status(409).json({ message: "These work orders are linked to invoices and cannot be deleted. Remove them from their invoices first." });
         return;
       }
       const skipMessage = skipped.length > 0
         ? `${skipped.length} work order(s) could not be deleted because they are linked to invoices. Remove them from their invoices first.`
         : undefined;
-      res.json({ deleted, skipped, skipMessage });
+      res.json({ deleted, skipped, notFound, skipMessage });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to bulk delete work orders" });
@@ -14527,28 +14535,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/upload/attachment", requireAuthentication, async (req, res) => {
-    try {
-      if (!req.files || !req.files.attachment) {
-        res.status(400).json({ message: "No attachment file provided" });
-        return;
-      }
-
-      const attachment = Array.isArray(req.files.attachment) ? req.files.attachment[0] : req.files.attachment;
-      const fileName = `attachment_${Date.now()}_${attachment.name.replace(/\s+/g, '_')}`;
-      const uploadPath = `./uploads/${fileName}`;
-
-      await attachment.mv(uploadPath);
-      res.json({ url: `/api/attachments/${fileName}`, fileName, originalName: attachment.name });
-    } catch (error) {
-      console.error("Attachment upload error:", error);
-      res.status(500).json({ message: "Failed to upload attachment" });
-    }
-  });
-
-  // Authenticated attachment serving route — serves attachments from local disk
-  // Also handles legacy /uploads/ URLs stored in DB before migration
+  // Legacy local attachments have no company owner, so only super admins may read them.
   app.get("/api/attachments/{*fileName}", requireAuthentication, async (req, res) => {
+    if (req.authenticatedUserRole !== 'super_admin') {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
     try {
       const pathMod = await import("path");
       const fs = await import("fs");
@@ -14607,21 +14599,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/notifications", requireAuthentication, async (req, res) => {
-    try {
-      const validatedData = insertNotificationSchema.parse(req.body);
-      const notification = await storage.createNotification(validatedData);
-      res.status(201).json(notification);
-    } catch (error) {
-      console.error("Error creating notification:", error);
-      res.status(500).json({ message: "Failed to create notification" });
-    }
-  });
-
   app.put("/api/notifications/:id/read", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const success = await storage.markNotificationAsRead(id);
+      const success = await storage.markNotificationAsRead(id, req.authenticatedUserId!);
       if (success) {
         res.json({ message: "Notification marked as read" });
       } else {
@@ -14633,7 +14614,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/notifications/:userId/read-all", requireAuthentication, async (req, res) => {
+  app.put("/api/notifications/:userId/read-all", requireAuthentication, requireNotificationAccess, async (req, res) => {
     try {
       const userId = parseInt(req.params.userId);
       const success = await storage.markAllNotificationsAsRead(userId);

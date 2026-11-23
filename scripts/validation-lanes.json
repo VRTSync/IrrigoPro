@@ -53,6 +53,10 @@
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/auth-middleware-coverage.test.ts"
     },
     {
+      "name": "tenant-scoped-writes",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/routes/tenant-scoped-writes-coverage.test.ts src/storage-notification-ownership.test.ts"
+    },
+    {
       "name": "company-id-backfill-migration",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx/esm --test --test-reporter=spec src/migrations/0004-company-id-backfill.test.ts"
     },
