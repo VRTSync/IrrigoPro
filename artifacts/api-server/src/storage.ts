@@ -577,10 +577,6 @@ export interface IStorage {
   updateApiKeyLastUsed(id: number): Promise<void>;
   getIrrigationManagerForCompany(companyId: number): Promise<User | undefined>;
 
-  // Customer Integrations
-  syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }>;
-  getGoogleSheetsCustomerStatus(): Promise<{ isConnected: boolean; lastSync?: string; sheetUrl?: string; customerCount?: number }>;
-
   // Parts Assemblies
   getAssemblies(companyId: number): Promise<AssemblyWithParts[]>;
   getAssembly(id: number): Promise<AssemblyWithParts | undefined>;
@@ -590,8 +586,6 @@ export interface IStorage {
   trackAssemblyUsage(companyId: number, assemblyId: number): Promise<void>;
   getQuickBooksCustomerStatus(): Promise<{ isConnected: boolean; companyName?: string; lastSync?: string; customerCount?: number; connectionStatus?: string; reconnectRequiredReason?: string | null; companyId?: string | null; realmId?: string | null }>;
   getQuickBooksAllIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]>;
-  connectGoogleSheetsCustomers(sheetUrl: string): Promise<void>;
-  disconnectGoogleSheetsCustomers(): Promise<void>;
   markQuickBooksReconnectRequired(realmId: string, reason: string): Promise<void>;
   getAllActiveQuickBooksIntegrations(): Promise<(typeof quickbooksIntegration.$inferSelect)[]>;
 
@@ -631,7 +625,6 @@ export interface IStorage {
   getPart(id: number): Promise<Part | undefined>;
   createPart(part: InsertPart): Promise<Part>;
   updatePart(id: number, part: Partial<InsertPart>): Promise<Part | undefined>;
-  syncPartsFromGoogleDocs(docUrl: string): Promise<void>;
 
   // Estimates
   getEstimates(opts: { companyId: number | null; includeDeleted?: boolean }): Promise<Estimate[]>;
@@ -3006,11 +2999,6 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async syncPartsFromGoogleDocs(docUrl: string): Promise<void> {
-    // Implementation for Google Docs sync would go here
-    console.log(`Syncing parts from Google Docs URL: ${docUrl}`);
-  }
-
   // Estimates
   async getEstimates(opts: { companyId: number | null; includeDeleted?: boolean }): Promise<Estimate[]> {
     // Task #634 — exclude soft-deleted rows unless the caller (super_admin
@@ -3613,44 +3601,6 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  // Customer Integration Methods
-  async syncCustomersFromGoogleSheets(sheetsUrl: string): Promise<{ customersAdded: number }> {
-    // Mock implementation - in real app, would use Google Sheets API
-    console.log(`Syncing customers from Google Sheets: ${sheetsUrl}`);
-    
-    // Simulate adding customers from Google Sheets
-    const mockCustomers = [
-      { name: "John Smith", email: "john@example.com", phone: "555-0101", address: "123 Main St, Anytown, USA" },
-      { name: "Jane Doe", email: "jane@example.com", phone: "555-0102", address: "456 Oak Ave, Somewhere, USA" }
-    ];
-
-    let customersAdded = 0;
-    for (const customerData of mockCustomers) {
-      try {
-        const existing = await db.select().from(customers).where(eq(customers.email, customerData.email));
-        if (existing.length === 0) {
-          await db.insert(customers).values({ ...customerData, companyId: 1 });
-          customersAdded++;
-        }
-      } catch (error) {
-        console.error(`Failed to add customer ${customerData.name}:`, error);
-      }
-    }
-
-    return { customersAdded };
-  }
-
-  async getGoogleSheetsCustomerStatus(): Promise<{ isConnected: boolean; lastSync?: string; sheetUrl?: string; customerCount?: number }> {
-    // Mock implementation - in real app, would store connection status in database
-    const allCustomers = await db.select().from(customers);
-    return {
-      isConnected: false, // Mock: not connected by default
-      lastSync: undefined,
-      sheetUrl: undefined,
-      customerCount: allCustomers.length
-    };
-  }
-
   async saveQuickBooksIntegration(data: {
     companyId: string;
     accessToken: string;
@@ -3892,17 +3842,6 @@ export class DatabaseStorage implements IStorage {
 
   async disconnectQuickBooks(companyId: string): Promise<void> {
     await db.delete(quickbooksIntegration).where(eq(quickbooksIntegration.companyId, companyId));
-  }
-
-  async connectGoogleSheetsCustomers(sheetUrl: string): Promise<void> {
-    // Mock implementation - in real app, would validate and store connection
-    console.log(`Connecting to Google Sheets: ${sheetUrl}`);
-    // Would store connection info in database
-  }
-
-  async disconnectGoogleSheetsCustomers(): Promise<void> {
-    // Mock implementation - in real app, would remove connection info
-    console.log("Disconnecting Google Sheets");
   }
 
   // Work Orders - Enhanced

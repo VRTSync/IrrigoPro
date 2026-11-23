@@ -13,8 +13,8 @@
 //
 // All routes sit behind requireSameCompanyAsWorkOrder, which scopes the work
 // order to the caller's company and stashes it on req.tenantScopedWorkOrder.
-// Field techs are additionally restricted to work orders assigned to them;
-// manager-tier roles (already company-scoped) may edit any ticket in scope.
+// Writes are limited to staff who can edit work orders, with field techs
+// additionally restricted to work orders assigned to them.
 
 import type { Express, RequestHandler } from "express";
 import { z } from "zod";
@@ -47,11 +47,16 @@ export interface RegisterWorkOrderZoneRouteDeps {
   requireSameCompanyAsWorkOrder: RequestHandler;
 }
 
-// Field techs may only act on work orders assigned to them; other roles that
-// passed the company-scope guard are allowed. Returns false (and writes a 403)
-// when a field tech is not the assignee.
+// Matches the full-access roles in requireWorkOrderUpdateAccess, plus field
+// techs who are assigned to the work order.
+const ZONE_EDIT_ROLES = new Set(["company_admin", "super_admin", "billing_manager", "irrigation_manager", "field_tech"]);
+
 function ensureWorkOrderEditable(req: any, res: any): boolean {
   const role = req.authenticatedUserRole as string | undefined;
+  if (!role || !ZONE_EDIT_ROLES.has(role)) {
+    res.status(403).json({ message: "Your role cannot update work order items." });
+    return false;
+  }
   if (role !== "field_tech") return true;
   const wo = req.tenantScopedWorkOrder as { assignedTechnicianId?: number | null } | undefined;
   const userId = req.authenticatedUserId;

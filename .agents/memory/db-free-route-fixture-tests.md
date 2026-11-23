@@ -37,3 +37,9 @@ those boot reads before the dynamic import (existing users and completed
 migration markers), then restore the startup stubs before installing the
 request fixtures. **Why:** otherwise a database-write spy can catch a late
 bootstrap query and falsely attribute it to a read-only request.
+
+**When a test doesn't need real storage at all:** mock the storage module
+before dynamically importing the route, rather than patching methods on a
+statically imported singleton. Use `node:test` module mocks with the matching
+Node flag. This avoids boot-time connections that can keep the test process
+alive even when every request-time storage method is stubbed.

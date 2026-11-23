@@ -32,7 +32,7 @@ function makeAuth(role: string, companyId: number | null = 1): RequestHandler {
 }
 
 // requireAuthentication stub that honours x-user-* test headers, matching the
-// contract used in work-order-list-tenant-isolation.test.ts and similar suites.
+// contract used in billing-sheet-tenant-guard.test.ts and similar suites.
 const requireAuthentication: RequestHandler = (req: any, res, next) => {
   const userId = req.headers["x-user-id"];
   const role   = req.headers["x-user-role"];

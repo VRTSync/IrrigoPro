@@ -1,7 +1,7 @@
 // Integration tests: GET /api/parts/export-csv
 //
 // Uses registerPartsExportRoute (the production extracted handler) with a
-// stub storage — the same pattern as work-order-list-tenant-isolation.test.ts.
+// stub storage — the same pattern as billing-sheet-tenant-guard.test.ts.
 // This guarantees the tests exercise the real handler code, not a duplicate.
 //
 // Covers:

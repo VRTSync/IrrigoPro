@@ -2,7 +2,6 @@
 // Provides automated security monitoring and vulnerability assessment
 
 import { logger } from './logger';
-import crypto from 'crypto';
 
 export interface SecurityAssessment {
   timestamp: string;
@@ -29,8 +28,6 @@ export interface SecurityReport {
 }
 
 class SecurityManager {
-  private assessments: SecurityAssessment[] = [];
-
   // Automated security checks
   async performSecurityAssessment(): Promise<SecurityReport> {
     const vulnerabilities: SecurityAssessment[] = [];
@@ -316,57 +313,6 @@ class SecurityManager {
     ];
 
     return [...highPriorityRecommendations, ...generalRecommendations];
-  }
-
-  // Get security status for monitoring
-  getSecurityStatus(): {
-    lastAssessment: string | null;
-    openVulnerabilities: number;
-    criticalIssues: number;
-    overallRisk: string;
-  } {
-    const openVulns = this.assessments.filter(a => a.status === 'open');
-    const criticalIssues = openVulns.filter(a => a.vulnerabilityLevel === 'critical').length;
-    
-    return {
-      lastAssessment: this.assessments.length > 0 ? 
-        Math.max(...this.assessments.map(a => new Date(a.timestamp).getTime())).toString() : null,
-      openVulnerabilities: openVulns.length,
-      criticalIssues,
-      overallRisk: this.calculateOverallRisk(this.assessments)
-    };
-  }
-
-  // Security incident reporting
-  reportSecurityIncident(incident: {
-    type: string;
-    severity: 'low' | 'medium' | 'high' | 'critical';
-    description: string;
-    affectedSystems: string[];
-    userId?: number;
-  }): void {
-    logger.error(
-      `Security incident: ${incident.type}`,
-      new Error(incident.description),
-      'Security Incident',
-      {
-        severity: incident.severity,
-        affectedSystems: incident.affectedSystems,
-        userId: incident.userId,
-        timestamp: new Date().toISOString()
-      }
-    );
-
-    // Add to assessments for tracking
-    this.assessments.push({
-      timestamp: new Date().toISOString(),
-      vulnerabilityLevel: incident.severity,
-      category: 'Security Incident',
-      description: `${incident.type}: ${incident.description}`,
-      recommendation: 'Investigate and remediate security incident',
-      priority: incident.severity === 'critical' ? 5 : incident.severity === 'high' ? 4 : 3,
-      status: 'open'
-    });
   }
 }
 

@@ -4482,8 +4482,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Company routes
   app.get("/api/companies", requireAuthentication, async (req, res) => {
     try {
-      const companies = await storage.getCompanies();
-      res.json(companies);
+      if (req.authenticatedUserRole === "super_admin") {
+        res.json(await storage.getCompanies());
+        return;
+      }
+      const companyId = req.authenticatedUserCompanyId;
+      const own = companyId == null ? undefined : await storage.getCompany(companyId);
+      res.json(own ? [own] : []);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch companies" });
@@ -6031,7 +6036,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Task #532 — opt-in pagination via ?limit=&offset=. When omitted
       // the response is unchanged (full list) for backwards compatibility.
       const page = paginate(req, res, customers, { limit: 200, max: 1000 });
-      res.json(applyBillingNotesVisibility(req, page));
+      res.json(applyPricingVisibility(req, applyBillingNotesVisibility(req, page)));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch customers" });
@@ -6052,7 +6057,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get individual customer by ID
   app.get("/api/customers/:id", requireAuthentication, requireCustomerInTenant, async (req, res) => {
     try {
-      res.json(applyBillingNotesVisibility(req, req.tenantScopedCustomer!));
+      res.json(applyPricingVisibility(req, applyBillingNotesVisibility(req, req.tenantScopedCustomer!)));
     } catch (error) {
       console.error("Error fetching customer:", error);
       res.status(500).json({ message: "Failed to fetch customer" });
@@ -7798,138 +7803,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Assembly routes — extracted to ./assembly-routes.ts
   registerAssemblyRoutes(app, { requireAuthentication });
 
-  app.post("/api/parts/import/google-sheets", requireAuthentication, async (req, res) => {
-    try {
-      const { sheetsUrl } = req.body;
-      if (!sheetsUrl) {
-        res.status(400).json({ message: "Google Sheets URL is required" });
-        return;
-      }
-
-      // Convert Google Sheets URL to CSV export URL
-      const sheetId = sheetsUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1];
-      if (!sheetId) {
-        res.status(400).json({ message: "Invalid Google Sheets URL format" });
-        return;
-      }
-
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
-      
-      // Fetch CSV data
-      const response = await fetch(csvUrl);
-      if (!response.ok) {
-        res.status(400).json({ 
-          message: "Failed to access Google Sheets. Make sure the sheet is publicly viewable (Anyone with the link can view)" 
-        });
-        return;
-      }
-
-      const csvData = await response.text();
-      const lines = csvData.split('\n').filter(line => line.trim());
-      
-      if (lines.length < 2) {
-        res.status(400).json({ message: "Sheet appears to be empty or missing data" });
-        return;
-      }
-
-      // Parse CSV headers
-      const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-      
-      // Create header mapping - more flexible approach
-      const headerMap: Record<string, string> = {};
-      headers.forEach((header, index) => {
-        headerMap[header] = headers[index];
-      });
-
-      // Find the actual header names in the sheet
-      const nameField = headers.find(h => h.includes('name') || h.includes('product') || h.includes('item'));
-      const priceField = headers.find(h => h.includes('price') || h.includes('cost') || h.includes('amount'));
-      const skuField = headers.find(h => h.includes('sku') || h.includes('code') || h.includes('part'));
-      const laborField = headers.find(h => h.includes('labor') || h.includes('hour') || h.includes('time'));
-      const descField = headers.find(h => h.includes('desc') || h.includes('detail'));
-      const categoryField = headers.find(h => h.includes('category') || h.includes('type') || h.includes('group'));
-
-      console.log('Available headers:', headers);
-      console.log('Mapped fields:', { nameField, priceField, skuField, laborField });
-
-      if (!nameField || !priceField) {
-        res.status(400).json({ 
-          message: `Could not find required columns in sheet. Available headers: ${headers.join(', ')}. Need at least: name/product and price/cost` 
-        });
-        return;
-      }
-
-      // Parse and import parts
-      let partsAdded = 0;
-      const errors = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        try {
-          const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
-          const rowData: any = {};
-          
-          headers.forEach((header, index) => {
-            rowData[header] = values[index] || '';
-          });
-
-          // Use flexible field mapping
-          const name = (nameField ? rowData[nameField] : rowData.name) || '';
-          const price = (priceField ? rowData[priceField] : rowData.price) || '';
-          const sku = (skuField ? rowData[skuField] : rowData.sku) || `AUTO-${Date.now()}-${i}`;
-          const description = (descField ? rowData[descField] : rowData.description) || '';
-          const category = (categoryField ? rowData[categoryField] : rowData.category) || 'General';
-
-          // Validate required fields
-          if (!name || !price) {
-            errors.push(`Row ${i + 1}: Missing required fields (name: "${name}", price: "${price}")`);
-            continue;
-          }
-
-          // Create part object
-          const partData = {
-            name: name.trim(),
-            description: description.trim(),
-            price: price.toString(),
-            sku: sku.trim(),
-            category: category.trim(),
-            companyId: req.authenticatedUserCompanyId || 1,
-          };
-
-          await storage.createPart(partData);
-          partsAdded++;
-        } catch (error) {
-          console.error(error);
-          errors.push(`Row ${i + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      }
-
-      res.json({ 
-        partsAdded, 
-        errors: errors.length > 0 ? errors : undefined,
-        message: `Successfully imported ${partsAdded} parts` + (errors.length > 0 ? ` with ${errors.length} errors` : '')
-      });
-    } catch (error) {
-      console.error("Error importing from Google Sheets:", error);
-      res.status(500).json({ message: "Failed to import parts from Google Sheets" });
-    }
-  });
-
-  // Google Docs sync
-  app.post("/api/parts/sync-google-docs", requireAuthentication, async (req, res) => {
-    try {
-      const { docUrl } = req.body;
-      if (!docUrl) {
-        res.status(400).json({ message: "Google Docs URL is required" });
-        return;
-      }
-      await storage.syncPartsFromGoogleDocs(docUrl);
-      res.json({ message: "Parts synced from Google Docs successfully" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to sync parts from Google Docs" });
-    }
-  });
-
   // Duplicate assembly routes removed - consolidated above in Assembly routes section
 
 
@@ -9252,54 +9125,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Approve estimate via token (customer clicks link)
 
-  // Customer Integration API Routes
-  
-  // Google Sheets Customer Integration
-  app.get("/api/integrations/google-sheets/customers/status", requireAuthentication, async (req, res) => {
-    try {
-      const status = await storage.getGoogleSheetsCustomerStatus();
-      res.json(status);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to get Google Sheets status" });
-    }
-  });
-
-  app.post("/api/integrations/google-sheets/customers/connect", requireAuthentication, async (req, res) => {
-    try {
-      const { sheetUrl } = req.body;
-      if (!sheetUrl) {
-        res.status(400).json({ message: "Sheet URL is required" });
-        return;
-      }
-      await storage.connectGoogleSheetsCustomers(sheetUrl);
-      res.json({ message: "Connected to Google Sheets successfully" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to connect to Google Sheets" });
-    }
-  });
-
-  app.post("/api/integrations/google-sheets/customers/sync", requireAuthentication, async (req, res) => {
-    try {
-      const result = await storage.syncCustomersFromGoogleSheets("placeholder-url");
-      res.json(result);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to sync customers from Google Sheets" });
-    }
-  });
-
-  app.post("/api/integrations/google-sheets/customers/disconnect", requireAuthentication, async (req, res) => {
-    try {
-      await storage.disconnectGoogleSheetsCustomers();
-      res.json({ message: "Disconnected from Google Sheets successfully" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to disconnect from Google Sheets" });
-    }
-  });
-
   // Work order completion route
   app.post("/api/work-orders/complete", requireAuthentication, async (req, res) => {
     try {
@@ -9976,28 +9801,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Task #1889 — A/R note count + preview leave the payload entirely for a
     // role without CAN_READ_AR_NOTES.
     applyArNoteVisibility,
-  });
-
-  app.post("/api/work-orders/:id/create-invoice", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      // This would need to be implemented in storage
-      res.json({ message: "Invoice creation endpoint ready for implementation" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to create invoice from work order" });
-    }
-  });
-
-  app.post("/api/work-orders/:id/sync-quickbooks", requireAuthentication, requireSameCompanyAsWorkOrder, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      // This would need to be implemented for QuickBooks sync
-      res.json({ message: "QuickBooks sync endpoint ready for implementation" });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to sync to QuickBooks" });
-    }
   });
 
   // ── Wet Check Billings (Slice 4) ─────────────────────────────────────────
@@ -14626,23 +14429,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
-  // PDF Generation Route for Sample Invoice
-  app.get("/api/sample-invoice-pdf", requireAuthentication, async (req, res) => {
-    try {
-      const { PDFGenerator } = await import('../pdf-generator');
-      const invoiceUrl = `http://localhost:5000/invoice-preview.html`;
-      
-      const pdfBuffer = await PDFGenerator.generateInvoicePDFFromUrl(invoiceUrl);
-      
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'attachment; filename="Sample-Invoice-INV-202508-0014.pdf"');
-      res.send(pdfBuffer);
-    } catch (error) {
-      console.error('PDF generation error:', error);
-      res.status(500).json({ message: "Failed to generate PDF" });
-    }
-  });
-
   // QuickBooks Developer Portal Required URLs
   
   // Multi-Factor Authentication API endpoints
@@ -14879,105 +14665,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error performing security assessment:", error);
       res.status(500).json({ message: "Failed to perform security assessment" });
-    }
-  });
-
-  app.get("/api/security/status", requireAuthentication, async (req, res) => {
-    try {
-      const { securityManager } = await import('../security');
-      const status = securityManager.getSecurityStatus();
-      res.json(status);
-    } catch (error) {
-      console.error("Error getting security status:", error);
-      res.status(500).json({ message: "Failed to get security status" });
-    }
-  });
-
-  app.post("/api/security/incident", requireAuthentication, async (req, res) => {
-    try {
-      const { securityManager } = await import('../security');
-      const { type, severity, description, affectedSystems, userId } = req.body;
-      
-      securityManager.reportSecurityIncident({
-        type,
-        severity,
-        description,
-        affectedSystems,
-        userId
-      });
-      
-      res.json({ message: "Security incident reported successfully" });
-    } catch (error) {
-      console.error("Error reporting security incident:", error);
-      res.status(500).json({ message: "Failed to report security incident" });
-    }
-  });
-
-  // Logging and troubleshooting API endpoints
-  app.get("/api/logs", requireAuthentication, async (req, res) => {
-    try {
-      const { level, context, userId, since, limit } = req.query;
-      
-      const filters: any = {};
-      if (level) filters.level = level as string;
-      if (context) filters.context = context as string;
-      if (userId) filters.userId = parseInt(userId as string);
-      if (since) filters.since = new Date(since as string);
-      if (limit) filters.limit = parseInt(limit as string) || 100;
-
-      // For now, return empty logs as the logger integration is being set up
-      const logs: any[] = [];
-      res.json({ logs, total: logs.length, message: "Enhanced logging system available" });
-    } catch (error) {
-      console.error("Error fetching logs:", error);
-      res.status(500).json({ message: "Failed to fetch logs" });
-    }
-  });
-
-  app.get("/api/logs/export", requireAuthentication, async (req, res) => {
-    try {
-      const exportData = {
-        exportedAt: new Date().toISOString(),
-        logs: [],
-        message: "Enhanced logging system ready for troubleshooting"
-      };
-      
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', `attachment; filename="irrigopro-logs-${new Date().toISOString().split('T')[0]}.json"`);
-      res.send(JSON.stringify(exportData, null, 2));
-
-      void recordAuditEvent(req, {
-        actorUserId: null,
-        actorLabel: null,
-        actorRole: null,
-        actorCompanyId: null,
-        actionType: 'data',
-        action: 'logs_exported',
-        severity: 'info',
-        targetType: 'logs',
-        targetId: null,
-        summary: 'Exported application logs',
-      });
-    } catch (error) {
-      console.error("Error exporting logs:", error);
-      res.status(500).json({ message: "Failed to export logs" });
-    }
-  });
-
-  app.get("/api/logs/summary", async (req, res) => {
-    try {
-      const summary = {
-        totalErrors: 0,
-        quickbooksErrors: 0,
-        recentErrors: [],
-        errorsByContext: {},
-        loggingSystemStatus: "Enhanced logging system operational"
-      };
-      
-      res.json(summary);
-    } catch (error) {
-      console.error("Error getting log summary:", error);
-      res.status(500).json({ message: "Failed to get log summary" });
     }
   });
 

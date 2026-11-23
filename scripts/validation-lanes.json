@@ -9,6 +9,10 @@
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-force-exit --test-concurrency=1 --test-reporter=spec src/routes/estimate-read-tenant.test.ts src/routes/parts-read-coverage.test.ts"
     },
     {
+      "name": "role-gates-dead-endpoints",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/role-gates-coverage.test.ts src/routes/work-order-zone-roles.test.ts"
+    },
+    {
       "name": "qb-customer-pull",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-concurrency=1 --test-reporter=spec src/lib/qb-customer-pull.test.ts"
     },

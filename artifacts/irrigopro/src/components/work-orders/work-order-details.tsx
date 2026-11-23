@@ -358,39 +358,6 @@ export function WorkOrderDetails({ workOrder, onClose, onUpdate, showAddDetailsB
     },
   });
 
-  const handleCreateInvoice = async () => {
-    try {
-      await apiRequest(`/api/work-orders/${workOrder.id}/create-invoice`, "POST");
-      toast({
-        title: "Success",
-        description: "Invoice created successfully",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to create invoice",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleSyncToQuickBooks = async () => {
-    try {
-      await apiRequest(`/api/work-orders/${workOrder.id}/sync-quickbooks`, "POST");
-      toast({
-        title: "Success",
-        description: "Synced to QuickBooks successfully",
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to sync to QuickBooks",
-        variant: "destructive",
-      });
-    }
-  };
-
   const updateWorkOrderStatus = useMutation({
     mutationFn: async (status: string) => {
       const updateData: any = { status };
