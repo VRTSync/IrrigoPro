@@ -14,13 +14,14 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
-import { ChevronRight, PanelLeft, X } from "lucide-react";
+import { ChevronRight, PanelLeft, Search, X } from "lucide-react";
 import { PhoneNav } from "@/components/layout/phone-nav";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import { safeGet, safeSet } from "@/utils/safeStorage";
 import { useAuth } from "@/lib/auth-context";
 import { resolveRouteMeta } from "./route-meta";
+import { JumpToProvider, useJumpTo } from "./jump-to";
 import { ImpersonationBanner } from "@/components/app-health/impersonation-banner";
 import {
   findActivePage,
@@ -266,39 +267,41 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
   );
 
   return (
-    <div data-testid="desktop-shell" className="flex min-h-screen">
+    <JumpToProvider role={userRole}>
       <PageActionsContext.Provider value={actionsContextValue}>
-        <div className="hidden shrink-0 lg:flex">
-          <NavRail
-            sections={sections}
-            badges={badges}
-            user={user}
-            activePage={activePage}
-            brandThemed={brandThemed}
-            onSelectSection={selectSection}
-          />
-          {panelVisible && (
-            <PagesPanel key={panelSection.id} section={panelSection} activePage={activePage} badges={badges} pins={pins} />
-          )}
-        </div>
-        {/* Let the main column shrink instead of letting a wide table set its width. */}
-        <main className="flex min-w-0 flex-1 flex-col bg-background max-lg:pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
-          <div className="sticky top-0 z-30 lg:hidden">
-            <PhoneNav sections={sections} activePage={activePage} badges={badges} user={user} brandThemed={brandThemed} />
+        <div data-testid="desktop-shell" className="flex min-h-screen">
+          <div className="hidden shrink-0 lg:flex">
+            <NavRail
+              sections={sections}
+              badges={badges}
+              user={user}
+              activePage={activePage}
+              brandThemed={brandThemed}
+              onSelectSection={selectSection}
+            />
+            {panelVisible && (
+              <PagesPanel key={panelSection.id} section={panelSection} activePage={activePage} badges={badges} pins={pins} />
+            )}
           </div>
-          <ImpersonationBanner />
-          <TopStrip
-            sections={sections}
-            user={user}
-            actionsRef={setActionsTarget}
-            panelOpen={panel.open}
-            togglePanel={togglePanel}
-          />
-          <div className="flex-1 min-w-0 bg-gray-50">{children}</div>
-          <PoweredByFooter />
-        </main>
+          {/* Let the main column shrink instead of letting a wide table set its width. */}
+          <main className="flex min-w-0 flex-1 flex-col bg-background max-lg:pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
+            <div className="sticky top-0 z-30 lg:hidden">
+              <PhoneNav sections={sections} activePage={activePage} badges={badges} user={user} brandThemed={brandThemed} />
+            </div>
+            <ImpersonationBanner />
+            <TopStrip
+              sections={sections}
+              user={user}
+              actionsRef={setActionsTarget}
+              panelOpen={panel.open}
+              togglePanel={togglePanel}
+            />
+            <div className="flex-1 min-w-0 bg-gray-50">{children}</div>
+            <PoweredByFooter />
+          </main>
+        </div>
       </PageActionsContext.Provider>
-    </div>
+    </JumpToProvider>
   );
 }
 
@@ -315,6 +318,8 @@ function TopStrip({
   panelOpen: boolean;
   togglePanel: () => void;
 }) {
+  const { open: openJumpTo, isOpen: jumpToOpen } = useJumpTo();
+  const isApple = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
   const [location] = useLocation();
   const search = useSearch();
   const meta = useMemo(
@@ -374,6 +379,23 @@ function TopStrip({
       </nav>
       <div className="ml-auto flex items-center gap-2">
         <div ref={actionsRef} className="flex items-center gap-2" />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 gap-2 text-slate-600"
+          aria-haspopup="dialog"
+          aria-expanded={jumpToOpen}
+          aria-keyshortcuts={isApple ? "Meta+K" : "Control+K"}
+          data-testid="button-desktop-jump-to"
+          onClick={openJumpTo}
+        >
+          <Search aria-hidden="true" />
+          Jump to...
+          <kbd aria-hidden="true" className="whitespace-nowrap rounded border bg-slate-50 px-1.5 text-xs">
+            {isApple ? "Cmd K" : "Ctrl K"}
+          </kbd>
+        </Button>
         {typeof user.id === "number" && (
           <NotificationSystem userId={user.id} />
         )}

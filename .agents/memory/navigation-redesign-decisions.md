@@ -21,6 +21,12 @@ Jump To is pages-only in this release. Record search, a "Needs you" summary, and
 
 **How to apply:** Do not pull the broader record-search proposal into Jump To or bring the retired dashboard widgets into another section. Super admin, field tech, and system documenter do not get the new role dashboard.
 
+The shared shell owns Ctrl+K and Cmd+K, even while a page field has focus. Search results keep navigation order rather than being ranked by relevance.
+
+**Why:** cmdk claims Ctrl+K for its own previous-item shortcut by default and moves matched groups in the DOM when ranking results. These defaults conflict with toggling Jump To and selecting the first page in navigation order.
+
+**How to apply:** Keep cmdk's Vim bindings disabled and test both result order and arrow-key selection when changing the palette.
+
 Gate portalled navigation overlays at the responsive breakpoint, not just their triggers.
 
 **Why:** A desktop sidebar hidden with CSS can still open its portalled sheet from a keyboard shortcut, and a phone sheet can outlive its hidden tab bar after a resize.

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Ellipsis, LogOut, User as UserIcon, type LucideIcon } from "lucide-react";
+import { Ellipsis, LogOut, Search, User as UserIcon, type LucideIcon } from "lucide-react";
 import { Link, useLocation, useSearch } from "wouter";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -14,6 +14,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { clearSessionAndLogout } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import irrigoProMark from "@assets/IrrigoPro_2026-05_1778193170303.png";
+import { useJumpTo } from "./jump-to";
 import type { NavBadgeMap, ResolvedNavPage, ResolvedNavSection } from "./nav-config";
 
 export const PHONE_TAB_COUNT = 4;
@@ -72,6 +73,7 @@ function TabLabel({ icon: Icon, label, count }: { icon: LucideIcon; label: strin
 const tabClass = "flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1.5 text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary aria-[current=page]:bg-primary/5 aria-[current=page]:text-primary";
 
 export function PhoneNav({ sections, activePage, badges, user, brandThemed }: PhoneNavProps) {
+  const { open: openJumpTo, isOpen: jumpToOpen } = useJumpTo();
   const [location] = useLocation();
   const search = useSearch();
   const sheetId = useId();
@@ -159,6 +161,17 @@ export function PhoneNav({ sections, activePage, badges, user, brandThemed }: Ph
         <span className="min-w-0 flex-1 truncate text-sm font-semibold" data-testid="text-phone-page">
           {activePage?.label ?? "IrrigoPro"}
         </span>
+        <button
+          type="button"
+          className="grid size-11 shrink-0 place-items-center rounded-md hover:bg-black/10"
+          aria-label="Jump to a page"
+          aria-haspopup="dialog"
+          aria-expanded={jumpToOpen}
+          data-testid="button-phone-jump-to"
+          onClick={openJumpTo}
+        >
+          <Search className="size-5" aria-hidden="true" />
+        </button>
         {typeof user.id === "number" && <NotificationSystem userId={user.id} phone />}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

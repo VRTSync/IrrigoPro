@@ -7,6 +7,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { queryClient } from "@/lib/queryClient";
 import { findActivePage, navForRole, type NavBadgeMap, type NavRole } from "./nav-config";
 import { PhoneNav, splitPhoneTabs } from "./phone-nav";
+import { JumpToProvider } from "./jump-to";
 
 vi.mock("@/pages/login", () => ({ default: () => null }));
 vi.mock("@/pages/estimate-approval", () => ({ default: () => null }));
@@ -81,7 +82,9 @@ function renderPhone(path: string, badges: NavBadgeMap = {}) {
   const location = memoryLocation({ path, record: true });
   render(
     <Router hook={location.hook} searchHook={location.searchHook}>
-      <PhoneNav sections={sections} activePage={findActivePage(sections, path)} badges={badges} user={{}} brandThemed />
+      <JumpToProvider role="company_admin">
+        <PhoneNav sections={sections} activePage={findActivePage(sections, path)} badges={badges} user={{}} brandThemed />
+      </JumpToProvider>
     </Router>,
   );
   return location;
