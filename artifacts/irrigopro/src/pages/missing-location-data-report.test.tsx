@@ -6,6 +6,11 @@ import { memoryLocation } from "wouter/memory-location";
 import { getQueryFn } from "@/lib/queryClient";
 import MissingLocationDataReportPage from "./missing-location-data-report";
 
+const proto = Element.prototype;
+proto.hasPointerCapture ??= () => false;
+proto.setPointerCapture ??= () => {};
+proto.releasePointerCapture ??= () => {};
+
 const authState = { role: "super_admin" as string };
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => ({ user: { id: 7, companyId: 3, role: authState.role } }),
@@ -71,6 +76,13 @@ function renderReport() {
   );
 }
 
+function expectStackedReport(cells: HTMLElement[], labels: string[]) {
+  const table = screen.getByRole("table");
+  expect(table).toHaveClass("table-stack", "table-fixed");
+  expect(table.parentElement).toHaveClass("table-stack-container");
+  expect(cells.map(cell => cell.getAttribute("data-label"))).toEqual(labels);
+}
+
 describe("Missing Location Data report page", () => {
   it("renders company identity, readable violation badges, confidence, and canonical deep link", async () => {
     renderReport();
@@ -80,6 +92,9 @@ describe("Missing Location Data report page", () => {
     expect(screen.getByText("Irrigo North")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Company" })).toBeInTheDocument();
     expect(screen.getAllByRole("columnheader")).toHaveLength(7);
+    expectStackedReport(within(screen.getByTestId("row-ticket-42")).getAllByRole("cell"), [
+      "Ticket", "Customer", "Company", "Date", "Technician", "Violations", "Status",
+    ]);
     expect(screen.getByText("Controller missing")).toBeInTheDocument();
     expect(screen.getByText("Zone missing")).toBeInTheDocument();
     expect(screen.getByText("Low")).toBeInTheDocument();
@@ -100,7 +115,7 @@ describe("Missing Location Data report page", () => {
     expect(screen.getAllByRole("columnheader")).toHaveLength(6);
 
     const cells = within(screen.getByTestId("row-ticket-42")).getAllByRole("cell");
-    expect(cells).toHaveLength(6);
+    expectStackedReport(cells, ["Ticket", "Customer", "Date", "Technician", "Violations", "Status"]);
     expect(cells[0]).toContainElement(ticketLink);
     expect(within(cells[0]).getByText("WO")).toBeInTheDocument();
     expect(within(cells[5]).getByText("billed")).toBeInTheDocument();

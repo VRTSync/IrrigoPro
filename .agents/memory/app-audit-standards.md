@@ -17,6 +17,10 @@ For a wrapper-only audit slice, repeat any failing measurement on the same rende
 
 **How to apply:** Report original and changed measurements together. Use synthetic browser fixtures for geometry when live records are unnecessary, and identify them as fixtures rather than authenticated production evidence.
 
+Measure populated stacked tables in their inline edit and expanded states, not just on first open. Include roles that add columns or page actions.
+
+**Why:** A view can fit until an input's intrinsic width competes with a card label, or an extra role-specific button pushes the page past the viewport.
+
 Opening a page must not write data. The throttled invoice payment-status refresh is the explicit exception. Estimate pages stay separate; Customers becomes one page with distinct Billable and All views.
 
 **Why:** Viewing a record is not consent to change it, and the separate billing view is part of the office workflow.

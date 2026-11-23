@@ -269,8 +269,8 @@ export default function MissingLocationDataReportPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full table-fixed text-sm text-left">
+              <div className="relative w-full overflow-auto table-stack-container">
+                <table className="w-full table-fixed text-sm text-left table-stack">
                   <thead className="bg-white border-b border-slate-200">
                     <tr>
                       <th className="w-32 p-3 font-semibold text-slate-600">Ticket</th>
@@ -285,37 +285,41 @@ export default function MissingLocationDataReportPage() {
                   <tbody className="divide-y divide-slate-100">
                     {rows.map((r) => (
                       <tr key={`${r.ticketType}-${r.ticketId}`} className="hover:bg-slate-50/70 transition-colors group" data-testid={`row-ticket-${r.ticketId}`}>
-                        <td className="p-3 align-top">
-                          <Badge variant="secondary" className="font-mono text-[10px] uppercase tracking-wider bg-slate-100 text-slate-600 hover:bg-slate-200 border-none shadow-none mt-0.5">
-                            {sourceLabel(r.ticketType)}
-                          </Badge>
-                          <div className="mt-1">
-                            <Link
-                              href={r.canonicalPath}
-                              className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                              data-testid={`link-ticket-${r.ticketId}`}
-                            >
-                              {r.ticketNumber}
-                            </Link>
+                        <td data-label="Ticket" className="p-3 align-top break-words">
+                          <div>
+                            <Badge variant="secondary" className="font-mono text-[10px] uppercase tracking-wider bg-slate-100 text-slate-600 hover:bg-slate-200 border-none shadow-none mt-0.5">
+                              {sourceLabel(r.ticketType)}
+                            </Badge>
+                            <div className="mt-1">
+                              <Link
+                                href={r.canonicalPath}
+                                className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                data-testid={`link-ticket-${r.ticketId}`}
+                              >
+                                {r.ticketNumber}
+                              </Link>
+                            </div>
                           </div>
                         </td>
-                        <td className="p-3 align-top">
-                          <div className="font-medium text-slate-900 truncate" title={r.customerName}>{r.customerName}</div>
-                          {r.branchName && <div className="text-xs text-slate-500 truncate" title={r.branchName}>{r.branchName}</div>}
+                        <td data-label="Customer" className="p-3 align-top break-words">
+                          <div>
+                            <div className="font-medium text-slate-900" title={r.customerName}>{r.customerName}</div>
+                            {r.branchName && <div className="text-xs text-slate-500" title={r.branchName}>{r.branchName}</div>}
+                          </div>
                         </td>
                         {showCompany && (
-                          <td className="p-3 align-top text-slate-600 truncate" title={r.companyName ?? undefined}>
+                          <td data-label="Company" className="p-3 align-top text-slate-600 break-words" title={r.companyName ?? undefined}>
                             {r.companyName ?? "—"}
                           </td>
                         )}
-                        <td className="p-3 text-slate-600 whitespace-nowrap align-top pt-3.5">{fmtDate(r.workDate)}</td>
-                        <td className="p-3 text-slate-900 align-top pt-3.5">
-                          <div className="truncate" title={r.technicianName}>
-                            {r.technicianName}
+                        <td data-label="Date" className="p-3 text-slate-600 align-top pt-3.5">{fmtDate(r.workDate)}</td>
+                        <td data-label="Technician" className="p-3 text-slate-900 align-top pt-3.5 break-words">
+                          <div>
+                            <div title={r.technicianName}>{r.technicianName}</div>
+                            {r.technicianId && <div className="text-xs text-slate-400 font-mono">#{r.technicianId}</div>}
                           </div>
-                          {r.technicianId && <div className="text-xs text-slate-400 font-mono">#{r.technicianId}</div>}
                         </td>
-                        <td className="p-3 align-top">
+                        <td data-label="Violations" className="p-3 align-top break-words">
                           <div className="flex flex-wrap gap-1 mt-0.5">
                             {r.violations.map(v => (
                               <Badge key={v} variant="outline" className="text-[10px] text-red-700 border-red-200 bg-red-50 font-normal py-0">
@@ -325,12 +329,14 @@ export default function MissingLocationDataReportPage() {
                             {r.violations.length === 0 && <span className="text-slate-300 text-xs">—</span>}
                           </div>
                         </td>
-                        <td className="p-3 align-top pt-3.5">
-                          <Badge variant="outline" className="capitalize text-slate-600 font-normal">
-                            {r.status.replace(/_/g, ' ')}
-                          </Badge>
-                          <div className="mt-1">
-                            <ConfidenceBadge level={r.confidence} />
+                        <td data-label="Status" className="p-3 align-top pt-3.5 break-words">
+                          <div>
+                            <Badge variant="outline" className="capitalize text-slate-600 font-normal">
+                              {r.status.replace(/_/g, ' ')}
+                            </Badge>
+                            <div className="mt-1">
+                              <ConfidenceBadge level={r.confidence} />
+                            </div>
                           </div>
                         </td>
                       </tr>

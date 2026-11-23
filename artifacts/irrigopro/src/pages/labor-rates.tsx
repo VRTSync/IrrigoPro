@@ -76,7 +76,7 @@ export default function LaborRates() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <Table>
+            <Table stack>
               <TableHeader>
                 <TableRow>
                   <TableHead>Customer</TableHead>
@@ -101,15 +101,17 @@ export default function LaborRates() {
                 ) : (
                   sorted.map((customer) => (
                     <TableRow key={customer.id}>
-                      <TableCell>
-                        <div className="font-medium text-gray-900">
-                          {customer.irrigoName || customer.name}
+                      <TableCell label="Customer">
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            {customer.irrigoName || customer.name}
+                          </div>
+                          {customer.irrigoName && customer.irrigoName !== customer.name && (
+                            <div className="text-xs text-gray-400">{customer.name}</div>
+                          )}
                         </div>
-                        {customer.irrigoName && customer.irrigoName !== customer.name && (
-                          <div className="text-xs text-gray-400">{customer.name}</div>
-                        )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell label="Standard Rate ($/hr)">
                         {editingId === customer.id ? (
                           <Input
                             type="number"
@@ -126,7 +128,7 @@ export default function LaborRates() {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell label="Emergency Rate ($/hr)">
                         {editingId === customer.id ? (
                           <Input
                             type="number"

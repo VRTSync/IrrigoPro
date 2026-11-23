@@ -262,7 +262,7 @@ export default function AdminControllers() {
         ) : (
           <Card>
             <CardContent className="p-0">
-              <Table>
+              <Table stack>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
@@ -301,16 +301,18 @@ export default function AdminControllers() {
                               )}
                             </button>
                           </TableCell>
-                          <TableCell>
-                            <div className="font-medium text-slate-900">
-                              {customer.irrigoName || customer.name}
+                          <TableCell label="Customer">
+                            <div>
+                              <div className="font-medium text-slate-900">
+                                {customer.irrigoName || customer.name}
+                              </div>
+                              {customer.irrigoName &&
+                                customer.irrigoName !== customer.name && (
+                                  <div className="text-xs text-slate-500">{customer.name}</div>
+                                )}
                             </div>
-                            {customer.irrigoName &&
-                              customer.irrigoName !== customer.name && (
-                                <div className="text-xs text-slate-500">{customer.name}</div>
-                              )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell label="Controllers">
                             <div className="text-sm text-slate-600">
                               {controllers.length} controller
                               {controllers.length !== 1 ? "s" : ""},{" "}
@@ -344,10 +346,10 @@ export default function AdminControllers() {
                                   {controllers.map((ctrl) => (
                                     <div
                                       key={ctrl.id}
-                                      className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
+                                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
                                     >
                                       <div className="flex items-center gap-2 min-w-0">
-                                        <Badge variant="secondary" className="shrink-0">
+                                        <Badge variant="secondary" className="max-w-full shrink-0">
                                           {ctrl.name}
                                         </Badge>
                                         {ctrl.branchName ? (

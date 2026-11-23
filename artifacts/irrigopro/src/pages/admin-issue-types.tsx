@@ -235,7 +235,7 @@ export default function AdminIssueTypesPage() {
           <Wrench className="h-6 w-6 text-blue-600" />
           <h1 className="text-2xl font-semibold">Wet Check Issue Types</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {reorderDirty && (
             <>
               <Button
@@ -330,7 +330,7 @@ export default function AdminIssueTypesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table stack>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-24">Order</TableHead>
@@ -349,7 +349,7 @@ export default function AdminIssueTypesPage() {
                     const isEditing = !!edit;
                     return (
                       <TableRow key={row.id} data-testid={`row-issue-type-${row.id}`}>
-                        <TableCell>
+                        <TableCell label="Order">
                           <div className="flex items-center gap-1">
                             <Button
                               size="icon"
@@ -375,7 +375,7 @@ export default function AdminIssueTypesPage() {
                             </Button>
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell label="Label">
                           {isEditing ? (
                             <Input
                               value={edit.displayLabel}
@@ -386,10 +386,10 @@ export default function AdminIssueTypesPage() {
                             <span className="font-medium">{row.displayLabel}</span>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell label="Key">
                           <code className="text-xs text-gray-500">{row.issueType}</code>
                         </TableCell>
-                        <TableCell>
+                        <TableCell label="Group">
                           {isEditing ? (
                             <Select
                               value={edit.issueGroup}
@@ -408,7 +408,7 @@ export default function AdminIssueTypesPage() {
                             <Badge variant="outline">{groupLabel(row.issueGroup)}</Badge>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell label="Labor hrs">
                           {isEditing ? (
                             <Input
                               type="number"
@@ -422,7 +422,7 @@ export default function AdminIssueTypesPage() {
                             <span data-testid={`text-hours-${row.id}`}>{row.defaultLaborHours}</span>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell label="Part filter">
                           {isEditing ? (
                             <Input
                               value={edit.partCategoryFilter}
@@ -434,7 +434,7 @@ export default function AdminIssueTypesPage() {
                             <span className="text-sm text-gray-700">{row.partCategoryFilter || <span className="text-gray-400">—</span>}</span>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell label="Active">
                           <Switch
                             checked={row.isActive}
                             onCheckedChange={(checked) =>
