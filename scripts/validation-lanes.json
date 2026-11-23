@@ -309,6 +309,10 @@
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/admin-client-errors.test.tsx"
     },
     {
+      "name": "shell-overflow",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/layout/shell-overflow.test.ts"
+    },
+    {
       "name": "invoice-draft-editor-line-items",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/invoices-draft-editor-line-items.test.tsx"
     },

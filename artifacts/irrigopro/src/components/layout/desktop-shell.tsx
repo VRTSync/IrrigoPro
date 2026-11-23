@@ -319,7 +319,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
             actionsRef={setActionsTarget}
             showShellHint={showShellHint}
           />
-          <div className="flex-1 bg-gray-50">{children}</div>
+          <div className="flex-1 min-w-0 bg-gray-50">{children}</div>
           <PoweredByFooter />
         </SidebarInset>
       </SidebarProvider>
