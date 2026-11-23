@@ -17,7 +17,7 @@
 // annotated unconditionally, exactly as isOverdue/effectiveDueDate already were.
 
 import type { Express, RequestHandler } from "express";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { customers } from "@workspace/db/schema";
 import { db as dbModule } from "../db";
 import { storage as storageModule } from "../storage";
@@ -507,6 +507,11 @@ export function isOpenAr(inv: InvoiceRowLike): boolean {
   return (inv.paymentStatus ?? "unpaid") !== "paid";
 }
 
+/** The positive balance that contributes to the aging summary, or zero. */
+export function agingBalanceDue(row: AnnotatedInvoice): number {
+  return isOpenAr(row) ? Math.max(0, parseFloat(row.balanceDue) || 0) : 0;
+}
+
 /** Invoice number or customer name, case-insensitive substring. */
 function matchesSearch(row: AnnotatedInvoice, search: string | null): boolean {
   if (search == null) return true;
@@ -701,7 +706,6 @@ export function summarizeAging(rows: AnnotatedInvoice[]): AgingSummary {
   );
 
   for (const row of rows) {
-    if (!isOpenAr(row)) continue;
     const slot = totals.get(row.agingBucket);
     if (!slot) continue;
     // Task #2013 — a bucket's count must describe exactly the rows its dollars
@@ -709,7 +713,7 @@ export function summarizeAging(rows: AnnotatedInvoice[]): AgingSummary {
     // which applies the same rule. A row that owes nothing (a zero balance, or
     // a credit-memo overpayment) is not money to chase, so it belongs in
     // neither half of the card.
-    const balance = parseFloat(row.balanceDue) || 0;
+    const balance = agingBalanceDue(row);
     if (balance <= 0) continue;
     slot.balance += balance;
     slot.count += 1;
@@ -772,13 +776,38 @@ export interface RegisterInvoiceListRoutesDeps {
 
 async function loadPaymentTermsFromDb(
   customerIds: number[],
+  companyId: number | null = null,
 ): Promise<Map<number, string | null>> {
   if (customerIds.length === 0) return new Map();
+  const ids = inArray(customers.id, customerIds);
   const rows = await dbModule
     .select({ id: customers.id, paymentTerms: customers.paymentTerms })
     .from(customers)
-    .where(inArray(customers.id, customerIds));
+    .where(companyId == null ? ids : and(ids, eq(customers.companyId, companyId)));
   return new Map(rows.map((c) => [c.id, c.paymentTerms]));
+}
+
+/** Read-only invoice population used by the aging summary and dashboard. */
+export async function loadAnnotatedInvoices(
+  scopeCompanyId: number | null,
+  now: Date | (() => Date),
+  {
+    storage = storageModule,
+    loadPaymentTerms = (ids) => loadPaymentTermsFromDb(ids, scopeCompanyId),
+  }: {
+    storage?: NonNullable<RegisterInvoiceListRoutesDeps["_storageApi"]>;
+    loadPaymentTerms?: typeof loadPaymentTermsFromDb;
+  } = {},
+): Promise<AnnotatedInvoice[]> {
+  const all = (await storage.getInvoices(scopeCompanyId)) as InvoiceRowLike[];
+  const uniqueCustomerIds = [...new Set(all.map((inv) => inv.customerId))];
+  const termsMap = await loadPaymentTerms(uniqueCustomerIds);
+  const reminderMap = (await storage.getInvoiceReminderSummaries?.(scopeCompanyId)) ?? new Map();
+  const at = typeof now === "function" ? now() : now;
+  // Aggregates don't load A/R notes or trigger any payment refresh.
+  return all.map((inv) =>
+    annotateInvoiceForAr(inv, termsMap.get(inv.customerId), at, reminderMap.get(inv.id)),
+  );
 }
 
 export function registerInvoiceListRoutes(
@@ -913,27 +942,21 @@ export function registerInvoiceListRoutes(
         // `aging: "all"` is forced, not read: see the note above.
         const q: ArListQuery = { ...parseArListQuery(req.query ?? {}), aging: "all" };
 
-        const all = (await storage.getInvoices(scopeCompanyId)) as InvoiceRowLike[];
-        const uniqueCustomerIds = [...new Set(all.map((inv) => inv.customerId))];
-        const termsMap = await loadPaymentTerms(uniqueCustomerIds);
-        const reminderMap: Map<number, ReminderSummary> =
-          (await storage.getInvoiceReminderSummaries?.(scopeCompanyId)) ?? new Map();
-
-        const now = nowFn();
-        // Notes are never loaded here — an aggregate has no note fields, so
-        // there is nothing for a caller without CAN_READ_AR_NOTES to leak.
-        const annotated = all.map((inv) =>
-          annotateInvoiceForAr(inv, termsMap.get(inv.customerId), now, reminderMap.get(inv.id)),
-        );
+        // Preserve the invoice page's existing terms lookup and take its
+        // aging timestamp after the reads, as before.
+        let capturedNow: Date | undefined;
+        const requestTime = () => (capturedNow ??= nowFn());
+        const annotated = await loadAnnotatedInvoices(scopeCompanyId, requestTime, { storage, loadPaymentTerms });
+        const now = requestTime();
         const filtered = annotated.filter((row) => matchesArFilters(row, q, now));
 
-        // `lastPaymentSyncAt` is deliberately computed over `all` — every
+        // `lastPaymentSyncAt` is deliberately computed over `annotated` — every
         // invoice in the company, before any filter — because it is a
         // statement about the company's payment read, not about the rows on
         // screen. Derived from the filtered set, a search or a month filter
         // that happened to exclude the most recently synced invoice would
         // report a fresh read as stale.
-        const lastPaymentSyncAt = latestPaymentSyncAt(all);
+        const lastPaymentSyncAt = latestPaymentSyncAt(annotated);
 
         // Task #2027 — the header pill used to turn this one timestamp into a
         // verdict on QuickBooks ("QuickBooks: out of date") while two other

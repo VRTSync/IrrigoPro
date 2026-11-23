@@ -26,8 +26,8 @@ import { loadQuickBooksHealth } from "./quickbooks-health";
 import {
   scopedWetCheckBillings,
   ACTIVE_WCB,
-  ACTIVE_WO,
-  ACTIVE_BS,
+  isAwaitingApprovalWo,
+  isAwaitingApprovalBs,
   APPROVED_WCB,
   APPROVED_BS,
   APPROVED_WO,
@@ -74,6 +74,15 @@ const ALL_WO_STAGES = new Set([
 // Action Board dispatchable work: pending answers "is work waiting?",
 // assigned answers "has a crew?", in_progress answers "is it underway?".
 export const ACTION_BOARD_OPEN_WO_STATUSES = new Set(["pending", "assigned", "in_progress"]);
+
+export function isPassedToBilling(row: {
+  status: string;
+  invoiceId?: number | null;
+  returnedForCorrectionAt?: Date | string | null;
+}): boolean {
+  return row.status === "approved_passed_to_billing" && !row.invoiceId && !row.returnedForCorrectionAt;
+}
+
 export const ACTION_BOARD_COMPLETED_WC_STATUSES = new Set([
   "submitted", "approved", "partially_converted", "converted",
 ]);
@@ -918,14 +927,11 @@ export function registerManagerWorkspaceRoutes(
   //
   // Returns Work Orders and Billing Sheets awaiting manager approval:
   //   workOrders   — status in pending_manager_review | work_completed, no invoiceId
-  //   billingSheets — status in pending_manager_review | submitted, no invoiceId
+  //   billingSheets — status in pending_manager_review | submitted | completed, no invoiceId
   //
   // Both arrays are sorted oldest-first (createdAt asc).
   // -------------------------------------------------------------------
-  // ACTIVE_WO and ACTIVE_BS are imported from billing-workspace-routes.ts.
-  // Using the canonical constants (rather than local copies) ensures the
-  // needs-approval list stays in sync with the billing workspace queue,
-  // including the "completed" status that was previously missing.
+  // The predicates in billing-workspace-routes.ts keep the list and badge in sync.
 
   app.get(
     "/api/manager-workspace/needs-approval",
@@ -943,7 +949,7 @@ export function registerManagerWorkspaceRoutes(
         ]);
 
         const workOrders = wos
-          .filter((w: any) => ACTIVE_WO.has(w.status) && !w.invoiceId)
+          .filter(isAwaitingApprovalWo)
           .sort((a: any, b: any) => {
             const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -951,7 +957,7 @@ export function registerManagerWorkspaceRoutes(
           });
 
         const billingSheets = bss
-          .filter((s: any) => ACTIVE_BS.has(s.status) && !s.invoiceId)
+          .filter(isAwaitingApprovalBs)
           .sort((a: any, b: any) => {
             const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -990,12 +996,8 @@ export function registerManagerWorkspaceRoutes(
           scopedBillingSheets(req),
         ]);
 
-        const workOrderCount = wos.filter(
-          (w: any) => ACTIVE_WO.has(w.status) && !w.invoiceId,
-        ).length;
-        const billingSheetCount = bss.filter(
-          (s: any) => ACTIVE_BS.has(s.status) && !s.invoiceId,
-        ).length;
+        const workOrderCount = wos.filter(isAwaitingApprovalWo).length;
+        const billingSheetCount = bss.filter(isAwaitingApprovalBs).length;
 
         res.json({
           workOrderCount,
@@ -1249,15 +1251,11 @@ export function registerManagerWorkspaceRoutes(
         for (const w of wos) {
           if (w.returnedForCorrectionAt) {
             waitingOnTech++;
-          } else if (w.status === "billed") {
+          } else if (isPassedToBilling(w)) {
+            passedToBilling++;
+          } else if (w.status === "billed" || w.status === "approved_passed_to_billing") {
             const billedTs = tsOf(w.billedAt ?? w.updatedAt);
             if (Number.isFinite(billedTs) && now - billedTs <= SEVEN_DAYS_MS) billed7d++;
-          } else if (w.status === "approved_passed_to_billing") {
-            if (!w.invoiceId) passedToBilling++;
-            else {
-              const billedTs = tsOf(w.billedAt ?? w.updatedAt);
-              if (Number.isFinite(billedTs) && now - billedTs <= SEVEN_DAYS_MS) billed7d++;
-            }
           } else {
             needsReview++; // catch-all — same as assignStage
           }
@@ -1267,15 +1265,11 @@ export function registerManagerWorkspaceRoutes(
         for (const s of bss) {
           if (s.returnedForCorrectionAt) {
             waitingOnTech++;
-          } else if (s.status === "billed") {
+          } else if (isPassedToBilling(s)) {
+            passedToBilling++;
+          } else if (s.status === "billed" || s.status === "approved_passed_to_billing") {
             const billedTs = tsOf(s.billedAt ?? s.updatedAt);
             if (Number.isFinite(billedTs) && now - billedTs <= SEVEN_DAYS_MS) billed7d++;
-          } else if (s.status === "approved_passed_to_billing") {
-            if (!s.invoiceId) passedToBilling++;
-            else {
-              const billedTs = tsOf(s.billedAt ?? s.updatedAt);
-              if (Number.isFinite(billedTs) && now - billedTs <= SEVEN_DAYS_MS) billed7d++;
-            }
           } else if (s.status === "draft" && !s.returnedForCorrectionAt) {
             // draft without kickback — not shown in queue, skip
           } else {
@@ -1285,15 +1279,11 @@ export function registerManagerWorkspaceRoutes(
 
         // WCBs — mirror assignStage catch-all
         for (const w of wcbs) {
-          if (w.status === "billed") {
+          if (isPassedToBilling(w)) {
+            passedToBilling++;
+          } else if (w.status === "billed" || w.status === "approved_passed_to_billing") {
             const billedTs = tsOf(w.updatedAt ?? w.createdAt);
             if (Number.isFinite(billedTs) && now - billedTs <= SEVEN_DAYS_MS) billed7d++;
-          } else if (w.status === "approved_passed_to_billing") {
-            if (!w.invoiceId) passedToBilling++;
-            else {
-              const billedTs = tsOf(w.updatedAt ?? w.createdAt);
-              if (Number.isFinite(billedTs) && now - billedTs <= SEVEN_DAYS_MS) billed7d++;
-            }
           } else {
             needsReview++; // submitted, pending_manager_review, etc.
           }

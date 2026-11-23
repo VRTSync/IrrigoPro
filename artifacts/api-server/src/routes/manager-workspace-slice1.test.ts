@@ -27,6 +27,7 @@ const __dirname = dirname(__filename);
 
 const ROUTES_FILE = resolve(__dirname, "manager-workspace-routes.ts");
 const src = readFileSync(ROUTES_FILE, "utf8");
+const billingWorkspace = readFileSync(resolve(__dirname, "billing-workspace-routes.ts"), "utf8");
 
 describe("Manager Workspace Slice 1 — source guards (no DB)", () => {
   describe("GET /api/manager-workspace/needs-approval endpoint", () => {
@@ -146,43 +147,20 @@ describe("Manager Workspace Slice 1 — source guards (no DB)", () => {
       );
     });
 
-    it("null-tech WO in pending_manager_review will appear: ACTIVE_WO.has(w.status) is used in filter", () => {
-      // ACTIVE_WO (imported from billing-workspace-routes) includes
-      // pending_manager_review and work_completed. A null-tech WO with
-      // status=pending_manager_review must pass the status filter.
-      // Verify the filter expression is present in the file.
-      assert.ok(
-        src.includes("ACTIVE_WO.has(w.status)"),
-        "needs-approval handler must use ACTIVE_WO.has(w.status) to filter work orders",
-      );
+    it("the needs-approval list and count both use the shared work-order predicate", () => {
+      assert.equal(src.match(/\.filter\(isAwaitingApprovalWo\)/g)?.length, 2);
+      assert.match(billingWorkspace, /function isAwaitingApprovalWo\([^)]*\): boolean \{\s*return ACTIVE_WO\.has\(row\.status\) && !row\.invoiceId;/);
     });
 
-    it("submitted BS still appears: ACTIVE_BS.has(s.status) is used in filter", () => {
-      // ACTIVE_BS = {pending_manager_review, submitted, completed} so a
-      // submitted BS must still pass. Verify the filter expression is present.
-      assert.ok(
-        src.includes("ACTIVE_BS.has(s.status)"),
-        "needs-approval handler must use ACTIVE_BS.has(s.status) to filter billing sheets",
-      );
+    it("the needs-approval list and count both use the shared billing-sheet predicate", () => {
+      assert.equal(src.match(/\.filter\(isAwaitingApprovalBs\)/g)?.length, 2);
+      assert.match(billingWorkspace, /function isAwaitingApprovalBs\([^)]*\): boolean \{\s*return ACTIVE_BS\.has\(row\.status\) && !row\.invoiceId;/);
     });
 
-    // ------- Bug 2: completed BS status now included ----------------------
-
-    it("completed BS status appears in needs-approval: ACTIVE_BS includes completed", () => {
-      // The canonical ACTIVE_BS from billing-workspace-routes.ts is
-      // {pending_manager_review, submitted, completed}. The old local
-      // NEEDS_APPROVAL_BS was missing "completed".
-      // Verify that the import of ACTIVE_BS at the top of the file is
-      // present (guaranteeing the canonical set is in scope).
-      const importBlock = src.slice(0, src.indexOf("export interface RegisterManagerWorkspaceRoutesDeps"));
-      assert.ok(
-        importBlock.includes("ACTIVE_BS"),
-        "ACTIVE_BS is not imported from billing-workspace-routes — completed BSs will be hidden",
-      );
-      assert.ok(
-        importBlock.includes("ACTIVE_WO"),
-        "ACTIVE_WO is not imported from billing-workspace-routes — some WO statuses may be hidden",
-      );
+    it("the canonical billing-sheet set still includes submitted and completed", () => {
+      const statuses = billingWorkspace.match(/export const ACTIVE_BS = new Set\(\[([^\]]*)\]\)/)?.[1] ?? "";
+      assert.match(statuses, /"submitted"/);
+      assert.match(statuses, /"completed"/);
     });
 
     it("local NEEDS_APPROVAL_WO and NEEDS_APPROVAL_BS constants are removed", () => {
@@ -195,20 +173,6 @@ describe("Manager Workspace Slice 1 — source guards (no DB)", () => {
       assert.ok(
         !src.includes("NEEDS_APPROVAL_BS"),
         "NEEDS_APPROVAL_BS local constant still present — delete it and use imported ACTIVE_BS",
-      );
-    });
-
-    it("WO with invoiceId set is excluded: !w.invoiceId guard is present", () => {
-      // Already-billed tickets must never appear. The !w.invoiceId guard
-      // in the workOrders filter and !s.invoiceId in the billingSheets filter
-      // must both remain in the source.
-      assert.ok(
-        src.includes("!w.invoiceId"),
-        "WO invoiceId exclusion guard (!w.invoiceId) is missing from needs-approval handler",
-      );
-      assert.ok(
-        src.includes("!s.invoiceId"),
-        "BS invoiceId exclusion guard (!s.invoiceId) is missing from needs-approval handler",
       );
     });
 

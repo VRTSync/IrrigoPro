@@ -241,6 +241,10 @@
     {
       "name": "manager-workspace-route-guards",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/manager-workspace-slice1.test.ts"
+    },
+    {
+      "name": "dashboard-sections",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/routes/dashboard-sections-routes.test.ts"
     }
   ],
   "web": [

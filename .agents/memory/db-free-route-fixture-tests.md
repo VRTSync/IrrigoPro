@@ -31,6 +31,9 @@ timers that HTTP depends on alone. Reset it in `after()`.
 **Order matters:** patch `db.select` before `await import()`ing the route module,
 or the module closes over the real one.
 
-**Caveat:** importing a route module can pull in storage bootstrap code that
-talks to the real database and logs a duplicate-key error. It is noise from the
-shared dev DB, not a test failure — do not chase it.
+**Bootstrap is separate from requests.** Importing a route module can construct
+storage and kick off asynchronous user seeding and startup migrations. Stub
+those boot reads before the dynamic import (existing users and completed
+migration markers), then restore the startup stubs before installing the
+request fixtures. **Why:** otherwise a database-write spy can catch a late
+bootstrap query and falsely attribute it to a read-only request.

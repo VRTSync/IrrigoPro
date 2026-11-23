@@ -1055,6 +1055,7 @@ export interface IStorage {
   ): Promise<{ customer: Customer; controllers: IrrigationController[]; removedLetters: string[] }>;
 
   listWetChecks(companyId: number, opts?: { status?: string; technicianId?: number; customerId?: number; branchName?: string }): Promise<Array<WetCheck & { zoneCount: number; processedCount: number; failedCount: number; workOrderIds: number[] }>>;
+  getInProgressWetCheckCounts(companyId: number): Promise<Array<{ technicianId: number; count: number }>>;
   // Admin-only company-wide list with per-row aggregate counts (zone
   // records, findings, photos). Used by the company-admin Wet Checks
   // management page.
@@ -8620,6 +8621,16 @@ export class DatabaseStorage implements IStorage {
         workOrderIds: woMap.get(wc.id) ?? [],
       };
     });
+  }
+
+  async getInProgressWetCheckCounts(companyId: number): Promise<Array<{ technicianId: number; count: number }>> {
+    // Unlike the field list, activity totals must cover the whole company.
+    return db.select({
+      technicianId: wetChecks.technicianId,
+      count: sql<number>`count(*)::int`,
+    }).from(wetChecks)
+      .where(and(eq(wetChecks.companyId, companyId), eq(wetChecks.status, "in_progress")))
+      .groupBy(wetChecks.technicianId);
   }
 
   async listWetChecksForAdmin(

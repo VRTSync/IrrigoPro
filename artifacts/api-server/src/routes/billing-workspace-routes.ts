@@ -41,6 +41,17 @@ export const ACTIVE_WO = new Set([
   "pending_manager_review",
   "work_completed",
 ]);
+
+type ApprovalRow = { status: string; invoiceId?: number | null };
+
+export function isAwaitingApprovalWo(row: ApprovalRow): boolean {
+  return ACTIVE_WO.has(row.status) && !row.invoiceId;
+}
+
+export function isAwaitingApprovalBs(row: ApprovalRow): boolean {
+  return ACTIVE_BS.has(row.status) && !row.invoiceId;
+}
+
 export const ACTIVE_WCB = new Set([
   "submitted",
   "pending_manager_review",

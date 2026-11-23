@@ -342,6 +342,7 @@ import { registerExternalPartsRoute } from "./external-parts-route";
 import { registerBillingWorkspaceRoutes, ACTIVE_WCB, PENDING_REVIEW_WCB } from "./billing-workspace-routes";
 import { registerBillingWorkspaceBulkApproveRoutes } from "./billing-workspace-bulk-approve";
 import { registerManagerWorkspaceRoutes, ACTIVE_WC, APPROVED_WC } from "./manager-workspace-routes";
+import { registerDashboardSectionsRoutes } from "./dashboard-sections-routes";
 import { registerAssemblyRoutes } from "./assembly-routes";
 import { registerCustomerRoutes } from "./customer-routes";
 import { registerCustomerRecordsRoutes, resolveExternalCustomer } from "./customer-records-routes";
@@ -7795,6 +7796,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Task #1005 — Manager Workspace endpoints.
   registerManagerWorkspaceRoutes(app, { requireAuthentication });
+  registerDashboardSectionsRoutes(app, { requireAuthentication });
 
   // Assembly routes — extracted to ./assembly-routes.ts
   registerAssemblyRoutes(app, { requireAuthentication });
