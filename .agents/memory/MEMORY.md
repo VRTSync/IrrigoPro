@@ -74,6 +74,7 @@
 - [Invoice selection scope](invoice-selection-query-scope.md) — reset on the filter query, never retained rows or placeholder state; preserve same-filter pagination.
 - [Operational board roles](operational-board-role-policy.md) — dispatch access is separate from financial budget access; bookkeeper location audit remains read-only.
 - [Bookkeeper screen fit](bookkeeper-screen-fit.md) — 1024 px minimum with sidebar expanded; prove narrow layouts with real browser measurements, not hidden overflow.
+- [App audit standards](app-audit-standards.md) — six-width fit checks, full-width office pages, container-based table cards, and read-only page opens.
 - [Shared QuickBooks billing](shared-quickbooks-billing.md) — High Plains CRM shares the QB company; keep ownership safety separate from staged numbering changes.
 - [Customer records saved plan](customer-record-ownership-plan.md) — Overview of the Customer Records slices; the slice ticket in hand is always authoritative.
 - [Document System build context](document-system-build-context.md) — Seven ordered slices; web-only scope and confirmed verification/capture decisions.
