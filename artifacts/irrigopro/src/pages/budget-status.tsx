@@ -286,7 +286,7 @@ export default function BudgetStatusPage() {
 
   if (needsCompanyScope) {
     return (
-      <div className="max-w-5xl mx-auto py-4 px-4" data-testid="budget-status-page">
+      <div className="w-full py-4 px-4 lg:px-6" data-testid="budget-status-page">
         <h1 className="text-2xl font-bold text-gray-900">Budget Status</h1>
         <p className="mt-3 text-sm text-gray-600">
           Select a company before opening Budget Status.
@@ -296,7 +296,7 @@ export default function BudgetStatusPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-4 px-4 space-y-4" data-testid="budget-status-page">
+    <div className="w-full py-4 px-4 lg:px-6 space-y-4" data-testid="budget-status-page">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Budget Status</h1>

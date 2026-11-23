@@ -964,7 +964,7 @@ export function CombinedReviewSurface({ wetCheckId }: CombinedReviewSurfaceProps
 
   if (wcLoading) {
     return (
-      <div className="max-w-4xl mx-auto py-6 px-4 space-y-4" data-testid="crs-loading">
+      <div className="w-full py-6 px-4 lg:px-6 space-y-4" data-testid="crs-loading">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-5 w-72" />
         <Skeleton className="h-64 w-full" />
@@ -975,14 +975,14 @@ export function CombinedReviewSurface({ wetCheckId }: CombinedReviewSurfaceProps
 
   if (!wc) {
     return (
-      <div className="max-w-4xl mx-auto py-6 px-4" data-testid="crs-not-found">
+      <div className="w-full py-6 px-4 lg:px-6" data-testid="crs-not-found">
         <p className="text-sm text-red-600">Wet check not found.</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto py-6 px-4 space-y-6" data-testid="crs-surface">
+    <div className="w-full py-6 px-4 lg:px-6 space-y-6" data-testid="crs-surface">
       {/* ── Page header ────────────────────────────────────────────────────── */}
       <div className="space-y-1">
         <button

@@ -80,7 +80,7 @@ export default function EstimatesPendingApproval() {
   const total = pending.length;
 
   return (
-    <div className="space-y-6 p-6 max-w-6xl mx-auto">
+    <div className="space-y-6 p-6 w-full">
       <div className="flex items-center gap-3">
         <div className="p-2.5 bg-orange-100 rounded-xl">
           <ShieldCheck className="w-5 h-5 text-orange-600" />

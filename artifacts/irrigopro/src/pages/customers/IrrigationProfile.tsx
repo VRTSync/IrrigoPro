@@ -329,7 +329,7 @@ export default function IrrigationProfile() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto p-4 max-w-4xl space-y-4">
+      <div className="w-full p-4 lg:px-6 space-y-4">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-32 w-full" />
@@ -339,7 +339,7 @@ export default function IrrigationProfile() {
   }
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl space-y-4">
+    <div className="w-full p-4 lg:px-6 space-y-4">
       {showReletter && <ReletterDialog customerId={Number(customerId)} branchName={branchName}
         controllers={activeLocationControllers} onClose={() => setShowReletter(false)} />}
       {/* Back button */}

@@ -182,7 +182,7 @@ export default function Operations() {
   const filteredItems = getFilteredItems();
 
   return (
-    <div className="max-w-7xl mx-auto -mt-2">
+    <div className="w-full -mt-2">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 pt-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Operations</h1>

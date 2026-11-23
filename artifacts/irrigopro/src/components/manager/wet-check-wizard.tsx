@@ -801,7 +801,7 @@ export function WetCheckWizard({ id }: { id: number }) {
 
   if (editMode && !editTarget) {
     return (
-      <div className="max-w-3xl mx-auto py-4 space-y-4">
+      <div className="w-full py-4 px-4 lg:px-6 space-y-4">
         <Card>
           <CardContent className="py-8 text-center space-y-4">
             <div className="text-lg font-semibold">That finding can't be edited</div>
@@ -826,7 +826,7 @@ export function WetCheckWizard({ id }: { id: number }) {
   // ── Edit mode: single-column like before ──────────────────────────────
   if (editMode) {
     return (
-      <div className="max-w-3xl mx-auto py-4 space-y-4 px-4 sm:px-0">
+      <div className="w-full py-4 space-y-4 px-4 lg:px-6">
         <Link href={`/manager/wet-checks/${id}/confirm`}>
           <Button variant="ghost" data-testid="wizard-back-to-confirm">
             <ChevronLeft className="w-4 h-4 mr-1" aria-hidden="true" /> Back to confirm

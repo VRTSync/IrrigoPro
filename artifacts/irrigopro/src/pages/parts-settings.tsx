@@ -309,7 +309,7 @@ export default function PartsSettings() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-6 px-4">
+    <div className="w-full py-6 px-4 lg:px-6">
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Parts Settings</h1>

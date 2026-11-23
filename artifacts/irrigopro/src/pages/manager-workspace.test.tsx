@@ -10,7 +10,7 @@
 //   6. Status-strip URL uses /api/manager-workspace/status-strip.
 //   7. Header uses bg-gradient-brand.
 //   8. FinancialPulseWidget billing-header variant is rendered.
-//   9. Outer wrapper uses max-w-5xl mx-auto py-4 px-4 space-y-4.
+//   9. Outer wrapper is full width with responsive padding.
 //  10. Task #1777 — Pending Estimates removal assertions (intact).
 
 import { describe, it, expect } from "vitest";
@@ -63,8 +63,8 @@ describe("manager-workspace.tsx — source-level assertions", () => {
     expect(MW_SRC.includes('variant="billing-header"')).toBe(true);
   });
 
-  it("outer wrapper uses max-w-5xl mx-auto py-4 px-4 space-y-4", () => {
-    expect(MW_SRC.includes("max-w-5xl mx-auto py-4 px-4 space-y-4")).toBe(true);
+  it("uses a full-width wrapper with responsive padding", () => {
+    expect(MW_SRC).toContain('className="w-full py-4 px-4 lg:px-6 space-y-4"');
   });
 
   it("approval-row testId pattern is present for list items", () => {

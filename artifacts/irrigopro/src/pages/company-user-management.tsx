@@ -446,7 +446,7 @@ export default function CompanyUserManagement() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
+    <div className="w-full p-6 space-y-8">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>

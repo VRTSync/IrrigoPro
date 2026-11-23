@@ -410,7 +410,7 @@ export default function EstimateCommandCenter() {
   }, [summary, buildHref, buildLifecycleHref, buildAttentionHref]);
 
   return (
-    <div className="py-6 max-w-[1400px] mx-auto space-y-6" data-testid="estimate-command-center">
+    <div className="py-6 w-full space-y-6" data-testid="estimate-command-center">
       <header className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Estimates</h1>

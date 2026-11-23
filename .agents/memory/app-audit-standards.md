@@ -11,6 +11,12 @@ Pages must fit without horizontal window or inner scrolling at browser widths of
 
 Pass independent actions to a wrapping header as siblings. A nested non-wrapping flex row makes the parent treat the whole group as one item; the group can move below the title and still overflow. Check real narrow viewports with all actions present, and include intentional horizontal scrollers such as filter strips when measuring inner overflow.
 
+For a wrapper-only audit slice, repeat any failing measurement on the same rendered view with the original wrapper classes restored. Keep the record, shell and viewport identical.
+
+**Why:** Existing child controls can still overflow even after a page wrapper correctly fills its parent. A same-view comparison distinguishes existing fit problems from regressions without bundling separate slices.
+
+**How to apply:** Report original and changed measurements together. Use synthetic browser fixtures for geometry when live records are unnecessary, and identify them as fixtures rather than authenticated production evidence.
+
 Opening a page must not write data. The throttled invoice payment-status refresh is the explicit exception. Estimate pages stay separate; Customers becomes one page with distinct Billable and All views.
 
 **Why:** Viewing a record is not consent to change it, and the separate billing view is part of the office workflow.

@@ -367,7 +367,7 @@ export default function AdminDashboard() {
     invoicesQ.isLoading || workOrdersQ.isLoading || billingSheetsQ.isLoading || estimatesQ.isLoading;
 
   return (
-    <div className="max-w-7xl mx-auto pt-4 pb-8 px-2 sm:px-4 space-y-5">
+    <div className="w-full pt-4 pb-8 px-2 sm:px-4 lg:px-6 space-y-5">
       <HeaderStrip
         name={user?.name}
         health={health}

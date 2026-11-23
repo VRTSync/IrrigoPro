@@ -140,7 +140,7 @@ export function WetCheckDone({ id, returnTo = "/manager" }: { id: number; return
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-0 px-4 sm:px-0" data-testid="wet-check-done">
+    <div className="w-full py-4 space-y-0 px-4 lg:px-6" data-testid="wet-check-done">
       <style>{`
         @keyframes wetCheckHeroScale {
           0% { transform: scale(0.6); opacity: 0; }

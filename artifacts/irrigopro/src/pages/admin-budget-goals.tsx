@@ -221,7 +221,7 @@ export default function AdminBudgetGoals() {
         subtitle="Import and review annual goals from a spreadsheet"
       />
 
-      <PageContent className="space-y-6 max-w-5xl mx-auto">
+      <PageContent className="space-y-6 w-full">
         {!preview && !results && (
           <Card className="glass-card">
             <CardHeader>

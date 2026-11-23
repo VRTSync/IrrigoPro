@@ -59,7 +59,7 @@ export default function LaborRates() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto py-6 px-4">
+    <div className="w-full py-6 px-4 lg:px-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Labor Rates</h1>
         <p className="text-gray-500 mt-1">

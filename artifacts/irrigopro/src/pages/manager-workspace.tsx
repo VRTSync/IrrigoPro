@@ -303,7 +303,7 @@ export default function ManagerWorkspacePage() {
 
   return (
     <div
-      className="max-w-5xl mx-auto py-4 px-4 space-y-4"
+      className="w-full py-4 px-4 lg:px-6 space-y-4"
       data-testid="manager-workspace"
     >
       {/* ── Header ────────────────────────────────────────────────────────── */}

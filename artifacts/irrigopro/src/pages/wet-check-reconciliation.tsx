@@ -433,7 +433,7 @@ export default function WetCheckReconciliationPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-6 px-4 space-y-6">
+    <div className="w-full py-6 px-4 lg:px-6 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 flex items-center gap-2">

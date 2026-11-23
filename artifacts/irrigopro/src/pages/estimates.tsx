@@ -111,7 +111,7 @@ export default function Estimates() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
       {/* Slice 10c — Always-visible Board/List view toggle. */}
       <div className="flex justify-end items-center gap-3 mb-3">
         {isSuperAdmin && (

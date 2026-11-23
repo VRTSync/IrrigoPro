@@ -1565,3 +1565,17 @@ mtime_ms = 1795382600920
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/b79d2caf-efd4-48b7-9132-568986eb92e9/9af0b76b-f1a0-411e-b004-c69f97566748"
 storage_version_token = "1795382610313495"
 content_type = "image/png"
+
+[[outputs]]
+id = "QV8d7Np_f7v4u1ST7X4-a"
+uri = "file://generated-artifacts/office-width/office-page-width-evidence.html"
+type = "html"
+title = "Office page width: screenshots and fit checks"
+description = "33 screenshots at 1920 px, six-width Chromium measurements, and before-and-after comparisons of remaining horizontal scrolling."
+logical_id = "914d9f65-634b-48c2-b895-c884cf5813cf"
+content_hash = "sha256:6c3063341666ee60fb2ddf6109b32f2b8ce73a628e582439472cc1dbbc5c42d5"
+size = 3484743
+mtime_ms = 1795399704922
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/914d9f65-634b-48c2-b895-c884cf5813cf/b8070805-f641-4cea-bb7e-4429f1d1bf69"
+storage_version_token = "1795399714703650"
+content_type = "text/html"

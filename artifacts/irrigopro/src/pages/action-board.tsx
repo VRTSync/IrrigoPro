@@ -118,7 +118,7 @@ function CompanyActionBoard() {
   });
   return (
     <>
-      <div className="max-w-7xl mx-auto px-4 pt-6">
+      <div className="w-full px-4 lg:px-6 pt-6">
         <label htmlFor="action-board-company">Company</label>
         <select id="action-board-company" className="ml-3 rounded border p-2" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
           <option value="">Select a company</option>
@@ -179,7 +179,7 @@ function ActionBoardContent({ companyId }: { companyId?: number }) {
     return { value: `${date.getFullYear()}-${date.getMonth() + 1}`, label: `${months[date.getMonth() + 1]} ${date.getFullYear()}` };
   });
   return (
-    <main className="max-w-7xl mx-auto py-6 px-4 space-y-6" data-testid="action-board-page">
+    <main className="w-full py-6 px-4 lg:px-6 space-y-6" data-testid="action-board-page">
       <section className="rounded-2xl p-6 text-white bg-gradient-to-br from-slate-900 via-blue-900 to-cyan-700">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div><p className="text-sm text-blue-100">Action Board</p><h1 className="text-3xl font-bold mt-1">{months[month]} allocation</h1><p className="text-blue-100 mt-2">Where crews go today, and why.</p></div>

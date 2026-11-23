@@ -229,7 +229,7 @@ export default function AdminIssueTypesPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-6 space-y-4" data-testid="page-admin-issue-types">
+    <div className="w-full py-6 space-y-4" data-testid="page-admin-issue-types">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <Wrench className="h-6 w-6 text-blue-600" />

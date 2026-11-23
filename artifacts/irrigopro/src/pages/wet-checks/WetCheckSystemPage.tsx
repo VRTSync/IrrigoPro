@@ -581,7 +581,7 @@ export default function WetCheckSystemPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-6 px-4" data-testid="page-wet-check-system">
+    <div className="w-full py-6 px-4 lg:px-6" data-testid="page-wet-check-system">
       <div className="flex items-center gap-2 mb-4">
         <Droplets className="h-6 w-6 text-blue-600" />
         <h1 className="text-2xl font-semibold">Wet Checks</h1>

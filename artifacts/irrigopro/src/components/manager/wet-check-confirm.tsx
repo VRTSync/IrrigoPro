@@ -169,7 +169,7 @@ export function WetCheckConfirm({ id }: { id: number }) {
     groups.documented.length > 0 || groups.repaired.length > 0;
 
   return (
-    <div className="max-w-3xl mx-auto py-4 space-y-0 px-4 sm:px-0" data-testid="wet-check-confirm">
+    <div className="w-full py-4 space-y-0 px-4 lg:px-6" data-testid="wet-check-confirm">
       {/* Gradient header */}
       <div className="rounded-t-xl overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 px-5 py-5 text-white">
         <Link href={`/manager/wet-checks/${id}`}>
