@@ -34,3 +34,9 @@ Gate portalled navigation overlays at the responsive breakpoint, not just their 
 **How to apply:** Unmount surfaces that can open an overlay at the wrong width, or close their overlays when crossing the desktop breakpoint. Keep a real-browser check for a resize with the sheet open.
 
 The later [Access Hardening policy](access-hardening-policy.md) supersedes the Navigation Redesign overview only where it retains Switch User. Do not restore that entry after retirement, including in the account menus, section list, breadcrumbs, or Jump To.
+
+The expandable main nav decision supersedes the original panel toggle. The main nav lists sections only, at both widths. Starting at 1200 px, the toggle switches between the 76 px rail and 216 px full section labels; the pages panel stays visible for sections with multiple pages. Keep the saved choice when the viewport narrows, but show the narrow rail from 1024 to 1199 px and leave the phone shell unchanged.
+
+**Why:** Hiding the only list of pages makes them harder to reach, and the wider rail would leave too little room for page content below 1200 px.
+
+**How to apply:** Keep pages in the panel or Jump To. Measure the actual remaining content width in both rail modes. The Users page switches between cards and table at 860 px of its own container, not at a viewport breakpoint.
