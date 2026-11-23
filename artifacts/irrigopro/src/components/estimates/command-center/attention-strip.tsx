@@ -109,14 +109,14 @@ export function AttentionStrip({ items, isLoading, onOpenEstimate }: AttentionSt
     );
   }
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1" data-testid="attention-strip">
+    <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4" data-testid="attention-strip">
       {visible.map((it) => {
         const meta = REASON_META[it.reason];
         const Icon = meta.icon;
         return (
           <div
             key={`${it.estimateId}-${it.reason}`}
-            className={`shrink-0 w-72 rounded-lg border ${meta.bg} ${meta.border} px-3 pt-2 pb-2 flex flex-col gap-1`}
+            className={`min-w-0 rounded-lg border ${meta.bg} ${meta.border} px-3 pt-2 pb-2 flex flex-col gap-1`}
             data-testid={`attention-item-${it.estimateId}-${it.reason}`}
           >
             <div className="flex items-center gap-2">

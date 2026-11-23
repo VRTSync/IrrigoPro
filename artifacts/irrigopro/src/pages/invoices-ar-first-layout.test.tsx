@@ -252,6 +252,32 @@ it("lays the desktop table out fixed so it can never be wider than its card", as
   expect(screen.getByTestId("button-view-pdf-inline-1").className).toContain("xl:inline-flex");
 });
 
+it("uses invoice cards below xl and keeps the desktop table from xl up", async () => {
+  renderInvoices();
+  const desktop = await screen.findByTestId("invoice-row-1");
+  const card = screen.getByTestId("invoice-row-mobile-1");
+  const desktopWrapper = desktop.closest("table")?.parentElement?.parentElement;
+  const cardList = card.closest(".space-y-3");
+  expect(desktopWrapper).toHaveClass("hidden", "xl:block");
+  expect(desktopWrapper).not.toHaveClass("md:block");
+  expect(desktopWrapper).not.toHaveClass("overflow-x-auto");
+  expect(cardList).toHaveClass("xl:hidden");
+  expect(cardList).not.toHaveClass("md:hidden");
+});
+
+it("labels the cancelled invoice audit cards with every table column", async () => {
+  rowsForResponse = [invoiceRow(), invoiceRow({ id: 2, invoiceNumber: "INV-CANCELLED", status: "cancelled" })];
+  renderInvoices();
+  fireEvent.click(await screen.findByTestId("button-cancelled-drawer-toggle"));
+  const row = screen.getByText("#INV-CANCELLED").closest("tr");
+  const table = row?.closest("table");
+  expect(table).toHaveClass("table-stack");
+  expect(Array.from(table!.querySelectorAll("th"), (header) => header.textContent?.trim()))
+    .toEqual(["Invoice #", "Customer", "Period", "Amount"]);
+  expect(Array.from(row!.cells, (cell) => cell.getAttribute("data-label")))
+    .toEqual(["Invoice #", "Customer", "Period", "Amount"]);
+});
+
 // ── 0. one scope for the list and the aggregate ──────────────────────────────
 
 describe("company scope", () => {

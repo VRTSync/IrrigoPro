@@ -312,8 +312,8 @@ export function EstimateTable({
         )}
       </div>
 
-      <div className="border border-gray-200 rounded-lg bg-white overflow-x-auto">
-        <Table>
+      <div className="border border-gray-200 rounded-lg bg-white">
+        <Table stack>
           <TableHeader>
             <TableRow>
               <TableHead>Estimate #</TableHead>
@@ -375,17 +375,17 @@ export function EstimateTable({
                     onClick={() => onOpenEstimate(e.id)}
                     data-testid={`estimate-row-${e.id}`}
                   >
-                    <TableCell className="font-medium">
+                    <TableCell label="Estimate #" className="font-medium">
                       {formatEstimateNumber(e.estimateNumber)}
                     </TableCell>
-                    <TableCell>{e.customerName ?? "—"}</TableCell>
-                    <TableCell className="text-sm text-gray-600">
+                    <TableCell label="Customer">{e.customerName ?? "—"}</TableCell>
+                    <TableCell label="Project" className="text-sm text-gray-600">
                       {e.projectName ?? "—"}
                     </TableCell>
-                    <TableCell className="text-sm text-gray-600">
+                    <TableCell label="Owner" className="text-sm text-gray-600">
                       {e.createdBy ?? "—"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell label="Lifecycle">
                       <Badge
                         variant="outline"
                         className={`${tint.bg} ${tint.text} ${tint.border} text-[10px]`}
@@ -393,13 +393,14 @@ export function EstimateTable({
                         {tint.label}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell label="Total" className="text-right">
                       {formatCurrency(e.totalAmount)}
                     </TableCell>
-                    <TableCell className="text-right text-gray-500">
+                    <TableCell label="Age" className="text-right text-gray-500">
                       {ageInDays(e.createdAt)}d
                     </TableCell>
                     <TableCell
+                      label="Last update"
                       className="text-sm text-gray-500"
                       title={upd ? format(upd, "PPpp") : ""}
                     >

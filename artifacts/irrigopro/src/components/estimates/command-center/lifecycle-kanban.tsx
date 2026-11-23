@@ -90,7 +90,7 @@ export function LifecycleKanban({
         {open ? "Hide board" : "Show board"}
       </button>
       {open && (
-        <div className="flex gap-3 overflow-x-auto pb-2" data-testid="lifecycle-kanban">
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6" data-testid="lifecycle-kanban">
           {COLUMNS.map((col) => {
             const rows = grouped[col];
             const tint = LIFECYCLE_TINTS[col];
@@ -106,7 +106,7 @@ export function LifecycleKanban({
             return (
               <div
                 key={col}
-                className="w-72 shrink-0 bg-gray-50 rounded-lg border border-gray-200 flex flex-col max-h-[600px]"
+                className="min-w-0 bg-gray-50 rounded-lg border border-gray-200 flex flex-col max-h-[600px]"
                 data-testid={`kanban-column-${col}`}
               >
                 <div className={`px-3 py-2 border-b ${tint.border}`}>

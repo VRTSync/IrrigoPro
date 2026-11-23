@@ -17,6 +17,12 @@ For a wrapper-only audit slice, repeat any failing measurement on the same rende
 
 **How to apply:** Report original and changed measurements together. Use synthetic browser fixtures for geometry when live records are unnecessary, and identify them as fixtures rather than authenticated production evidence.
 
+Keep layout-sensitive browser fixture responses faithful to the real response shape and cardinality.
+
+**Why:** A single-point stand-in for a fixed 13-month trend produced misleading page overflow from an invisible Recharts tooltip after resizing. It did not reproduce with the full series.
+
+**How to apply:** Populate the full trend window, including months with zero activity, before attributing chart overflow to app CSS. Check the actual overflowing descendant and rerun with the contract-shaped data before changing overflow styles.
+
 Measure populated stacked tables in their inline edit and expanded states, not just on first open. Include roles that add columns or page actions.
 
 **Why:** A view can fit until an input's intrinsic width competes with a card label, or an extra role-specific button pushes the page past the viewport.

@@ -851,8 +851,8 @@ function PulseTab({
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="rounded-md overflow-x-auto">
-              <Table>
+            <div className="rounded-md">
+              <Table stack>
                 <TableHeader className="sticky top-0 bg-white">
                   <TableRow>
                     <TableHead>
@@ -914,18 +914,18 @@ function PulseTab({
                         onClick={() => navigate(`/customers/${r.customerId}/profile`)}
                         data-testid={`pulse-customer-row-${r.customerId}`}
                       >
-                        <TableCell className="font-medium">
+                        <TableCell label="Customer" className="font-medium">
                           <span>{r.name}</span>
                         </TableCell>
-                        <TableCell>
+                        <TableCell label="Budget">
                           <StatusPill status={r.budgetStatus} />
                         </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">
+                        <TableCell label="In-Flight" className="text-right tabular-nums font-medium">
                           {r.inFlight > 0
                             ? CURRENCY.format(r.inFlight)
                             : <span className="text-gray-400">—</span>}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell label="YTD" className="text-right tabular-nums">
                           {CURRENCY.format(r.ytd)}
                         </TableCell>
                       </TableRow>
@@ -971,8 +971,8 @@ function PulseTab({
           <CardTitle>In-Flight by Technician</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="rounded-md overflow-x-auto">
-            <Table>
+          <div className="rounded-md">
+            <Table stack>
               <TableHeader className="sticky top-0 bg-white">
                 <TableRow>
                   <TableHead>
@@ -1031,13 +1031,13 @@ function PulseTab({
                       key={r.technicianId}
                       data-testid={`pulse-tech-row-${r.technicianId}`}
                     >
-                      <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell className="text-right tabular-nums font-medium">
+                      <TableCell label="Technician" className="font-medium">{r.name}</TableCell>
+                      <TableCell label="In-Flight" className="text-right tabular-nums font-medium">
                         {r.inFlight > 0
                           ? CURRENCY.format(r.inFlight)
                           : <span className="text-gray-400">—</span>}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell label="YTD" className="text-right tabular-nums">
                         {CURRENCY.format(r.ytd)}
                       </TableCell>
                     </TableRow>
@@ -1153,10 +1153,10 @@ function DrillDownBand({ period }: { period: Period }) {
   const [tab, setTab] = useState<DrillTab>("customers");
   return (
     <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="financial-pulse-drilldown">
-      <CardHeader className="flex flex-row items-center justify-between gap-2">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle>Drill-downs</CardTitle>
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
-          <TabsList>
+        <Tabs className="min-w-0 max-w-full" value={tab} onValueChange={(v) => setTab(v as DrillTab)}>
+          <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="customers" data-testid="drill-tab-customers">
               By Customer
             </TabsTrigger>
@@ -1304,8 +1304,8 @@ function CustomersTab({ period }: { period: Period }) {
           <Download className="w-3.5 h-3.5 mr-1" /> CSV
         </Button>
       </div>
-      <div className="rounded-md border overflow-x-auto">
-        <Table>
+      <div className="rounded-md border">
+        <Table stack>
           <TableHeader className="sticky top-0 bg-white">
             <TableRow>
               <TableHead>
@@ -1390,14 +1390,14 @@ function CustomersTab({ period }: { period: Period }) {
                   onClick={() => navigate(`/customers/${r.customerId}/profile`)}
                   data-testid={`customer-row-${r.customerId}`}
                 >
-                  <TableCell className="font-medium">{r.name}</TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell label="Customer" className="font-medium">{r.name}</TableCell>
+                  <TableCell label="Revenue" className="text-right tabular-nums">
                     {TABLE_CURRENCY.format(r.revenue)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell label="Trend (7m)">
                     <Sparkline data={r.monthlySpark} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell label="Monthly used">
                     {/* Task #2009 — amounts mode. The row carries the real cap
                         and spend for both columns, so the shared component
                         classifies and clamps the same figures every other
@@ -1409,7 +1409,7 @@ function CustomersTab({ period }: { period: Period }) {
                       testId={`customer-monthly-meter-${r.customerId}`}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell label="Annual used">
                     <CustomerBudgetCell
                       cap={r.annualCap}
                       spend={r.annualSpend}
@@ -1417,13 +1417,13 @@ function CustomersTab({ period }: { period: Period }) {
                       testId={`customer-annual-meter-${r.customerId}`}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell label="Status">
                     <StatusPill status={r.monthlyStatus} />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell label="Avg. time to pay" className="text-right tabular-nums">
                     {r.avgDaysToPay == null ? "—" : r.avgDaysToPay.toFixed(1)}
                   </TableCell>
-                  <TableCell className="text-xs text-gray-600">
+                  <TableCell label="Last invoice" className="text-xs text-gray-600">
                     {r.lastInvoiceAt
                       ? new Date(r.lastInvoiceAt).toLocaleDateString()
                       : "—"}
@@ -2198,10 +2198,10 @@ function RevenueMixCard({
 
   return (
     <Card className="shadow-md hover:shadow-lg transition-shadow" data-testid="revenue-mix-card">
-      <CardHeader className="flex flex-row items-center justify-between gap-2">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle>Revenue mix</CardTitle>
-        <Tabs value={tab} onValueChange={(v) => setTab(v as MixTab)}>
-          <TabsList>
+        <Tabs className="min-w-0 max-w-full" value={tab} onValueChange={(v) => setTab(v as MixTab)}>
+          <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="partsLabor" data-testid="mix-tab-parts-labor">
               Parts vs Labor
             </TabsTrigger>

@@ -2304,12 +2304,9 @@ export default function InvoicesPage() {
                   </div>
                 )}
 
-                {/* Invoice Table — desktop (Task #1439: compacted to
-                    fit one view; QuickBooks folded into a status icon,
-                    period shortened, row actions in a ⋯ menu).
-                    Task #1890 added the A/R columns, so the table scrolls
-                    horizontally rather than crushing the existing ones. */}
-                <div className="hidden md:block rounded-lg border border-gray-200 bg-white overflow-x-auto">
+                {/* Desktop table from xl (1280px) up. Below that the invoice cards
+                    render, because the A/R columns need about 800px beside the sidebar. */}
+                <div className="hidden xl:block rounded-lg border border-gray-200 bg-white">
                   <Table className="table-fixed">
                     <TableHeader>
                       <TableRow className="bg-gray-50 hover:bg-gray-50">
@@ -2433,7 +2430,7 @@ export default function InvoicesPage() {
 
                 {/* Invoice cards — mobile fallback (Task #1439) so the
                     list never overflows on narrow screens. */}
-                <div className="md:hidden space-y-3">
+                <div className="xl:hidden space-y-3">
                   {sortedInvoices(activeInvoices).map((invoice) => {
                     const history = predecessorsFor(invoice.id);
                     const isExpanded = expandedHistory.has(invoice.id);
@@ -2667,8 +2664,8 @@ export default function InvoicesPage() {
               <span className="text-xs text-gray-400">Audit view — read only</span>
             </button>
             {cancelledExpanded && (
-              <div className="overflow-x-auto">
-                <Table>
+              <div>
+                <Table stack>
                   <TableHeader>
                     <TableRow className="bg-gray-50 hover:bg-gray-50">
                       <TableHead>Invoice #</TableHead>
@@ -2680,16 +2677,16 @@ export default function InvoicesPage() {
                   <TableBody>
                     {cancelledInvoices.map((invoice) => (
                       <TableRow key={invoice.id} className="text-gray-400 italic">
-                        <TableCell className="whitespace-nowrap text-xs">
+                        <TableCell label="Invoice #" className="whitespace-nowrap text-xs">
                           #{invoice.invoiceNumber}
                         </TableCell>
-                        <TableCell className="text-xs max-w-[200px] truncate">
+                        <TableCell label="Customer" className="text-xs max-w-[200px] truncate">
                           {invoice.customerName}
                         </TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">
+                        <TableCell label="Period" className="text-xs whitespace-nowrap">
                           {periodLabelOf(invoice)}
                         </TableCell>
-                        <TableCell className="text-right text-xs whitespace-nowrap line-through">
+                        <TableCell label="Amount" className="text-right text-xs whitespace-nowrap line-through">
                           {formatCurrency(invoice.totalAmount)}
                         </TableCell>
                       </TableRow>

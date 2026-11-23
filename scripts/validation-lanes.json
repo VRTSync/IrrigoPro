@@ -345,6 +345,10 @@
       "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/ui/table.test.tsx src/pages/admin-stacked-tables.test.tsx src/pages/missing-location-data-report.test.tsx"
     },
     {
+      "name": "audit-finance-page-fit",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/estimates/command-center/responsive-layout.test.tsx src/pages/financial-pulse-responsive-layout.test.tsx"
+    },
+    {
       "name": "invoice-draft-editor-line-items",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/invoices-draft-editor-line-items.test.tsx"
     },
