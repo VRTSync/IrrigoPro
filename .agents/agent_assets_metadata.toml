@@ -1579,3 +1579,31 @@ mtime_ms = 1795399704922
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/914d9f65-634b-48c2-b895-c884cf5813cf/b8070805-f641-4cea-bb7e-4429f1d1bf69"
 storage_version_token = "1795399714703650"
 content_type = "text/html"
+
+[[outputs]]
+id = "T80_NTnBWEG9nPnZ6ti2d"
+uri = "file://generated-artifacts/phone-nav/work-orders-evidence.jpg"
+type = "image"
+title = "Company admin: Work Orders phone navigation"
+description = "Chromium screenshots with sample data at 360, 390, and 820 px, plus the Field Work sheet at 390 px."
+logical_id = "f6453cac-4ab6-440b-b291-841d437323fa"
+content_hash = "sha256:a92771bfa93768f893e581bedd7e01b3867e19796cee9be5aeb273cc0619c451"
+size = 219248
+mtime_ms = 1795406365707
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/f6453cac-4ab6-440b-b291-841d437323fa/215ee698-b825-46cf-a8e2-3b87a3056528"
+storage_version_token = "1795406370764141"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "uexy4bumKBjBGFXEQB5Ef"
+uri = "file://generated-artifacts/phone-nav/invoices-evidence.jpg"
+type = "image"
+title = "Bookkeeper: Invoices phone navigation"
+description = "Chromium screenshots with sample data at 360, 390, and 820 px, plus the More sheet at 390 px."
+logical_id = "3c3a7169-4995-45cb-b8f2-86c800d02a03"
+content_hash = "sha256:ed7404b4ef42a5264694fa304d4acbd90c88d66ff9da51bdde51a7e14d486856"
+size = 203613
+mtime_ms = 1795406365863
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:ae7894b1-12cd-48fe-acc6-f6506c6cf73b/3c3a7169-4995-45cb-b8f2-86c800d02a03/20fc8d68-1f0c-4a54-9f93-0021c8ec16e5"
+storage_version_token = "1795406371265179"
+content_type = "image/jpeg"

@@ -21,4 +21,10 @@ Jump To is pages-only in this release. Record search, a "Needs you" summary, and
 
 **How to apply:** Do not pull the broader record-search proposal into Jump To or bring the retired dashboard widgets into another section. Super admin, field tech, and system documenter do not get the new role dashboard.
 
+Gate portalled navigation overlays at the responsive breakpoint, not just their triggers.
+
+**Why:** A desktop sidebar hidden with CSS can still open its portalled sheet from a keyboard shortcut, and a phone sheet can outlive its hidden tab bar after a resize.
+
+**How to apply:** Unmount surfaces that can open an overlay at the wrong width, or close their overlays when crossing the desktop breakpoint. Keep a real-browser check for a resize with the sheet open.
+
 The later [Access Hardening policy](access-hardening-policy.md) supersedes the Navigation Redesign overview only where it retains Switch User. Do not restore that entry after retirement, including in the account menus, section list, breadcrumbs, or Jump To.

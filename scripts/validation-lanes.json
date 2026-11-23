@@ -338,7 +338,7 @@
     },
     {
       "name": "nav-config-bookkeeper",
-      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/layout/nav-config.test.ts src/components/layout/bookkeeper-nav.test.tsx src/components/layout/app-irrigation-manager-shell.test.tsx src/components/layout/phone-nav.test.tsx src/components/layout/legacy-nav-links.test.ts src/components/layout/active-page.test.ts src/components/layout/nav-route-parity.test.tsx"
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/layout/nav-config.test.ts src/components/layout/bookkeeper-nav.test.tsx src/components/layout/app-irrigation-manager-shell.test.tsx src/components/layout/phone-nav.test.tsx src/components/layout/navigation.test.ts src/components/layout/legacy-nav-links.test.ts src/components/layout/active-page.test.ts src/components/layout/nav-route-parity.test.tsx"
     },
     {
       "name": "admin-client-errors-page",

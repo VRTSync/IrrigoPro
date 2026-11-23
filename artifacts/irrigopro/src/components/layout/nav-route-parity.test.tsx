@@ -76,7 +76,12 @@ beforeEach(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   })));
-  vi.stubGlobal("fetch", vi.fn(async () => Response.json([])));
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === "/api/auth/user") {
+      return Response.json(JSON.parse(localStorage.getItem("user") ?? "null"));
+    }
+    return Response.json([]);
+  }));
 });
 
 afterEach(() => {

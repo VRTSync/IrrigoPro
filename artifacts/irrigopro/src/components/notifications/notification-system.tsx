@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest, adaptiveRefetchInterval } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 
@@ -24,9 +25,10 @@ interface Notification {
 
 interface NotificationSystemProps {
   userId: number;
+  phone?: boolean;
 }
 
-export function NotificationSystem({ userId }: NotificationSystemProps) {
+export function NotificationSystem({ userId, phone = false }: NotificationSystemProps) {
   const [isOpen, setIsOpen] = useState(false);
   const queryClient = useQueryClient();
   
@@ -171,7 +173,12 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="sm" className="relative p-2">
+        <Button
+          aria-label="Notifications"
+          variant="ghost"
+          size="sm"
+          className={cn("relative p-2", phone && "size-11 shrink-0 text-inherit hover:bg-black/10 hover:text-inherit")}
+        >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <Badge 
@@ -184,7 +191,7 @@ export function NotificationSystem({ userId }: NotificationSystemProps) {
         </Button>
       </SheetTrigger>
       
-      <SheetContent side="right" className="w-96">
+      <SheetContent side="right" className={cn("w-96", phone && "max-w-full")}>
         <SheetHeader className="pb-4">
           <div className="flex items-center justify-between">
             <SheetTitle>Notifications</SheetTitle>

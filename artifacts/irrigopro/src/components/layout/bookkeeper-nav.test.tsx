@@ -1,10 +1,7 @@
 /**
  * bookkeeper-nav.test.tsx (Task #1886)
  *
- * There are TWO independent nav surfaces in this app — `nav-config.ts` drives
- * the desktop sidebar and `navigation.tsx` drives the nav rendered inside the
- * same shell. Adding a role to only one leaves it half-navigable, so both are
- * asserted here.
+ * The desktop sidebar and phone tabs are two views of the same role config.
  *
  * Also covers the customer-profile Billing Details tab, which used to be
  * forced visible for every role by a `billing: isBillingRole || true` entry
@@ -12,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -35,9 +32,6 @@ const session = vi.hoisted(() => ({
   role: "bookkeeper" as string,
 }));
 
-vi.mock("@/components/layout/navigation", () => ({
-  default: () => <div data-testid="mock-navigation" />,
-}));
 vi.mock("@/components/layout/powered-by-footer", () => ({
   default: () => <div data-testid="mock-powered-by-footer" />,
 }));
@@ -103,7 +97,6 @@ function makeQueryClient() {
   });
 }
 
-const NAVIGATION_SRC = readFileSync(resolve(import.meta.dirname, "navigation.tsx"), "utf8");
 const PROFILE_SRC = readFileSync(
   resolve(import.meta.dirname, "../../pages/customer-profile.tsx"),
   "utf8",
@@ -131,7 +124,9 @@ describe("bookkeeper desktop sidebar", () => {
 
   it("renders those destinations as plain links and nothing else", () => {
     renderShell();
-    expect(screen.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]))
+    // jsdom does not apply Tailwind's responsive display classes.
+    const sidebar = within(screen.getByTestId("desktop-shell").querySelector<HTMLElement>('[data-sidebar="sidebar"]')!);
+    expect(sidebar.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]))
       .toEqual(expected);
   });
 
@@ -143,22 +138,12 @@ describe("bookkeeper desktop sidebar", () => {
   });
 });
 
-// ── Surface 2: navigation.tsx role switch ────────────────────────────────────
-
-describe("navigation.tsx — the other nav surface", () => {
-  it("has an explicit bookkeeper case", () => {
-    expect(NAVIGATION_SRC).toMatch(/case\s+"bookkeeper":/);
-  });
-
-  it("the bookkeeper case does not fall through to the empty-array default", () => {
-    const start = NAVIGATION_SRC.indexOf('case "bookkeeper":');
-    expect(start).toBeGreaterThan(-1);
-    const body = NAVIGATION_SRC.slice(start, NAVIGATION_SRC.indexOf("default:", start));
-    expect(body).toContain("return [");
-    // The same three surfaces as the sidebar.
-    expect(body).toContain('"/invoices"');
-    expect(body).toContain('"/customers"');
-    expect(body).toContain('"/quickbooks"');
+describe("bookkeeper phone navigation", () => {
+  it("renders Dashboard, Billing, Clients, Insights and More in order", () => {
+    renderShell();
+    const tabs = screen.getByRole("navigation", { name: "Phone navigation" });
+    expect(Array.from(tabs.children, (tab) => tab.textContent))
+      .toEqual(["Dashboard", "Billing", "Clients", "Insights", "More"]);
   });
 });
 

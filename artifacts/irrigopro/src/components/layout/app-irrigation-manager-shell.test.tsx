@@ -4,10 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import { AuthProvider } from "@/lib/auth-context";
-
-vi.mock("@/components/layout/navigation", () => ({
-  default: () => <div data-testid="mock-navigation" />,
-}));
+import { safeGet } from "@/utils/safeStorage";
 
 vi.mock("@/components/layout/powered-by-footer", () => ({
   default: () => <div data-testid="mock-powered-by-footer" />,
@@ -52,7 +49,10 @@ beforeEach(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   })));
-  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ total: 3 })));
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === "/api/auth/user") return Response.json(JSON.parse(safeGet("user") ?? "null"));
+    return Response.json({ total: 3 });
+  }));
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -88,23 +88,25 @@ function mount(path = "/wet-checks") {
 }
 
 describe("irrigation manager sidebar", () => {
+  const sidebar = () => within(screen.getByTestId("desktop-shell").querySelector<HTMLElement>('[data-sidebar="sidebar"]')!);
+
   it("starts with only the active section open and opens the reviews tab on click", () => {
     mount();
-    expect(screen.getByTestId("desktop-shell")).toBeInTheDocument();
-    const field = screen.getByRole("button", { name: "Field Work" });
-    const approvals = screen.getByRole("button", { name: "Approvals" });
-    const parts = screen.getByRole("button", { name: "Parts" });
-    expect(screen.getAllByRole("button", { expanded: true })).toEqual([field]);
-    expect(screen.getByRole("link", { name: "Wet Checks" })).toHaveAttribute("aria-current", "page");
+    const nav = sidebar();
+    const field = nav.getByRole("button", { name: "Field Work" });
+    const approvals = nav.getByRole("button", { name: "Approvals" });
+    const parts = nav.getByRole("button", { name: "Parts" });
+    expect(nav.getAllByRole("button", { expanded: true })).toEqual([field]);
+    expect(nav.getByRole("link", { name: "Wet Checks" })).toHaveAttribute("aria-current", "page");
 
     fireEvent.click(parts);
     fireEvent.click(approvals);
-    const reviews = screen.getByRole("link", { name: "Wet Check Reviews" });
+    const reviews = nav.getByRole("link", { name: "Wet Check Reviews" });
     expect(reviews).toHaveAttribute("href", "/wet-checks?tab=needs-review");
     expect(reviews).not.toHaveAttribute("aria-current");
     fireEvent.click(reviews);
 
-    expect(screen.getAllByRole("button", { expanded: true })).toEqual([approvals]);
+    expect(nav.getAllByRole("button", { expanded: true })).toEqual([approvals]);
     expect(reviews).toHaveAttribute("aria-current", "page");
     const breadcrumb = within(screen.getByRole("navigation", { name: "Breadcrumb" }));
     expect(breadcrumb.getAllByRole("listitem").map((item) => item.textContent))
@@ -113,13 +115,14 @@ describe("irrigation manager sidebar", () => {
 
   it("shows the sum on a collapsed section and individual counts when expanded", async () => {
     mount("/");
-    const row = within(screen.getByRole("button", { name: "Approvals" }).closest("li")!);
+    const nav = sidebar();
+    const row = within(nav.getByRole("button", { name: "Approvals" }).closest("li")!);
     expect(await row.findByText("5")).toBeVisible();
     fireEvent.click(row.getByRole("button", { name: "Approvals" }));
     expect(row.queryByText("5")).not.toBeInTheDocument();
     expect(within(row.getByRole("link", { name: "Manager Workspace" }).closest("li")!).getByText("3")).toBeVisible();
     expect(within(row.getByRole("link", { name: "Wet Check Reviews" }).closest("li")!).getByText("2")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Field Work" }));
-    expect(await within(screen.getByRole("link", { name: "Estimates" }).closest("li")!).findByText("1")).toBeVisible();
+    fireEvent.click(nav.getByRole("button", { name: "Field Work" }));
+    expect(await within(nav.getByRole("link", { name: "Estimates" }).closest("li")!).findByText("1")).toBeVisible();
   });
 });

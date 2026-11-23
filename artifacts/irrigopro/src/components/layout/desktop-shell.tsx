@@ -53,7 +53,7 @@ import {
   User as UserIcon,
   X,
 } from "lucide-react";
-import Navigation from "@/components/layout/navigation";
+import { PhoneNav } from "@/components/layout/phone-nav";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { NotificationSystem } from "@/components/notifications/notification-system";
 import { safeGet, safeSet } from "@/utils/safeStorage";
@@ -230,6 +230,17 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
     [authUser],
   );
   const sections = useMemo(() => navForRole(userRole), [userRole]);
+  const [location] = useLocation();
+  const search = useSearch();
+  const activePage = useMemo(
+    () => findActivePage(sections, location, search),
+    [sections, location, search],
+  );
+  const brandThemed =
+    userRole === "company_admin" ||
+    userRole === "billing_manager" ||
+    userRole === "irrigation_manager" ||
+    userRole === "bookkeeper";
   const enableBadges =
     userRole === "company_admin" ||
     userRole === "billing_manager" ||
@@ -267,13 +278,14 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
             sections={sections}
             badges={badges}
             user={user}
-            userRole={userRole}
+              activePage={activePage}
+              brandThemed={brandThemed}
           />
         </div>
         {/* min-w-0: without it this flex child grows to its widest table and the whole window scrolls sideways. */}
-        <SidebarInset className="min-h-screen min-w-0 pb-20 lg:pb-0">
-          <div className="lg:hidden">
-            <PhoneNav />
+        <SidebarInset className="min-h-screen min-w-0 max-lg:pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
+          <div className="sticky top-0 z-30 lg:hidden">
+            <PhoneNav sections={sections} activePage={activePage} badges={badges} user={user} brandThemed={brandThemed} />
           </div>
           <ImpersonationBanner />
           <TopStrip
@@ -289,11 +301,6 @@ export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
     </PageActionsContext.Provider>
     </div>
   );
-}
-
-function PhoneNav() {
-  const { setOpenMobile } = useSidebar();
-  return <Navigation onOpenMenu={() => setOpenMobile(true)} />;
 }
 
 function TopStrip({
@@ -425,31 +432,22 @@ function DesktopSidebar({
   sections,
   badges,
   user,
-  userRole,
+  activePage,
+  brandThemed,
 }: {
   sections: ResolvedNavSection[];
   badges: NavBadgeMap;
   user: SessionUser;
-  userRole?: string;
+  activePage: ResolvedNavPage | undefined;
+  brandThemed: boolean;
 }) {
   const [location] = useLocation();
   const search = useSearch();
-  const activePage = useMemo(
-    () => findActivePage(sections, location, search),
-    [sections, location, search],
-  );
-  const { isMobile, setOpenMobile, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
+  const { isMobile, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const [sectionOverrides, setSectionOverrides] = useState<Record<string, boolean>>({});
   useEffect(() => setSectionOverrides({}), [location, search, sections]);
-  useEffect(() => {
-    if (isMobile) setOpenMobile(false);
-  }, [location, search, isMobile, setOpenMobile]);
-
-  const brandThemed =
-    userRole === "company_admin" ||
-    userRole === "billing_manager" ||
-    userRole === "irrigation_manager" ||
-    userRole === "bookkeeper";
+  // CSS alone cannot hide the old sidebar's portalled sheet on a tablet.
+  if (isMobile) return null;
   return (
     <Sidebar
       collapsible="icon"
@@ -489,7 +487,7 @@ function DesktopSidebar({
                 activePageId={activePage?.id}
                 open={sectionOverrides[section.id] ?? active}
                 onOpenChange={(next) => {
-                  if (!isMobile && !sidebarOpen) {
+                  if (!sidebarOpen) {
                     setSidebarOpen(true);
                     next = true;
                   }
@@ -509,14 +507,6 @@ function DesktopSidebar({
   );
 }
 
-// A tap on the current page should close the sheet even if the URL doesn't change.
-function useCloseMobileNav() {
-  const { isMobile, setOpenMobile } = useSidebar();
-  return () => {
-    if (isMobile) setOpenMobile(false);
-  };
-}
-
 function SidebarPageLink({
   page,
   active,
@@ -528,11 +518,10 @@ function SidebarPageLink({
   badges: NavBadgeMap;
   nested?: boolean;
 }) {
-  const closeMobileNav = useCloseMobileNav();
   const Icon = page.icon;
   const count = page.badgeKey ? badges[page.badgeKey] ?? 0 : 0;
   const link = (
-    <Link href={page.href} onClick={closeMobileNav} aria-current={active ? "page" : undefined}>
+    <Link href={page.href} aria-current={active ? "page" : undefined}>
       <Icon />
       <span>{page.label}</span>
     </Link>
