@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { clearSessionAndLogout } from "@/lib/queryClient";
 import { getImpersonationToken } from "@/lib/impersonation";
@@ -13,9 +13,6 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -65,51 +62,17 @@ import irrigoProLogo from "@assets/IrrigoPro_2026-03_1778193170303.png";
 import irrigoProMark from "@assets/IrrigoPro_2026-05_1778193170303.png";
 import { resolveRouteMeta } from "./route-meta";
 import { ImpersonationBanner } from "@/components/app-health/impersonation-banner";
-import type {
-  NavConfig,
-  NavItem,
-  NavGroup,
-  NavLeaf,
-  NavBadgeMap,
+import {
+  findActivePage,
+  navForRole,
+  type NavBadgeMap,
+  type ResolvedNavPage,
+  type ResolvedNavSection,
 } from "./nav-config";
 import type { Part, ManualPartReview, Estimate } from "@workspace/db/schema";
 
 const SIDEBAR_STORAGE_KEY = "irrigopro_desktop_sidebar_open";
 const SHELL_HINT_SEEN_KEY = "irrigopro_desktop_shell_seen";
-
-function pathMatches(itemPath: string, location: string): boolean {
-  if (itemPath === "/") return location === "/";
-  return location === itemPath || location.startsWith(itemPath + "/");
-}
-
-function collectLeaves(items: NavItem[]): NavLeaf[] {
-  const out: NavLeaf[] = [];
-  for (const it of items) {
-    if (it.type === "leaf") out.push(it);
-    else out.push(...collectLeaves(it.items));
-  }
-  return out;
-}
-
-function pickActiveLeafPath(
-  config: NavConfig,
-  location: string,
-): string | null {
-  const matches = collectLeaves(config.items).filter((l) =>
-    pathMatches(l.path, location),
-  );
-  if (matches.length === 0) return null;
-  return matches.reduce((a, b) => (b.path.length > a.path.length ? b : a)).path;
-}
-
-function groupHasActive(group: NavGroup, activePath: string | null): boolean {
-  if (!activePath) return false;
-  for (const it of group.items) {
-    if (it.type === "leaf" && it.path === activePath) return true;
-    if (it.type === "group" && groupHasActive(it, activePath)) return true;
-  }
-  return false;
-}
 
 // Task #1914 — the overdue-invoice badge reads its number from the invoice
 // list endpoint's own overdue aging filter (OVERDUE_AGING_FILTER, shared with
@@ -215,7 +178,7 @@ function useNavBadges(enabled: boolean, overdueEnabled: boolean): NavBadgeMap {
     wetCheckReviews: wetCheckPending.length,
     estimatesPendingApproval: pendingEstimates.length,
     awaitingApproval: awaitingApprovalCount,
-    // A failed or not-yet-resolved count is 0, which LeafItem renders as no
+    // A failed or not-yet-resolved count is 0, which the sidebar renders as no
     // badge at all rather than a "0" the bookkeeper would have to interpret.
     overdueInvoices: typeof overdueInvoicesRaw === "number" ? overdueInvoicesRaw : 0,
   };
@@ -241,11 +204,11 @@ interface SessionUser {
 }
 
 interface DesktopShellProps {
-  navConfig: NavConfig;
+  role: string;
   children: React.ReactNode;
 }
 
-export function DesktopShell({ navConfig, children }: DesktopShellProps) {
+export function DesktopShell({ role: userRole, children }: DesktopShellProps) {
   const [open, setOpenState] = useState<boolean>(() => {
     const stored = safeGet(SIDEBAR_STORAGE_KEY);
     if (stored === null) return true;
@@ -266,7 +229,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
     }),
     [authUser],
   );
-  const userRole = authUser?.role;
+  const sections = useMemo(() => navForRole(userRole), [userRole]);
   const enableBadges =
     userRole === "company_admin" ||
     userRole === "billing_manager" ||
@@ -301,7 +264,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
       <SidebarProvider open={open} onOpenChange={setOpen} mobileBreakpoint={1024}>
         <div className="hidden lg:contents">
           <DesktopSidebar
-            navConfig={navConfig}
+            sections={sections}
             badges={badges}
             user={user}
             userRole={userRole}
@@ -314,7 +277,7 @@ export function DesktopShell({ navConfig, children }: DesktopShellProps) {
           </div>
           <ImpersonationBanner />
           <TopStrip
-            navConfig={navConfig}
+            sections={sections}
             user={user}
             actionsRef={setActionsTarget}
             showShellHint={showShellHint}
@@ -334,20 +297,21 @@ function PhoneNav() {
 }
 
 function TopStrip({
-  navConfig,
+  sections,
   user,
   actionsRef,
   showShellHint,
 }: {
-  navConfig: NavConfig;
+  sections: ResolvedNavSection[];
   user: SessionUser;
   actionsRef: (el: HTMLDivElement | null) => void;
   showShellHint: boolean;
 }) {
   const [location] = useLocation();
+  const search = useSearch();
   const meta = useMemo(
-    () => resolveRouteMeta(location, navConfig),
-    [location, navConfig],
+    () => resolveRouteMeta(location, sections, search),
+    [location, sections, search],
   );
   return (
     <header className="hidden lg:flex sticky top-0 z-30 h-14 items-center gap-3 border-b border-gray-200 bg-white px-4">
@@ -458,25 +422,28 @@ function ShellHint({
 }
 
 function DesktopSidebar({
-  navConfig,
+  sections,
   badges,
   user,
   userRole,
 }: {
-  navConfig: NavConfig;
+  sections: ResolvedNavSection[];
   badges: NavBadgeMap;
   user: SessionUser;
   userRole?: string;
 }) {
   const [location] = useLocation();
-  const activePath = useMemo(
-    () => pickActiveLeafPath(navConfig, location),
-    [navConfig, location],
+  const search = useSearch();
+  const activePage = useMemo(
+    () => findActivePage(sections, location, search),
+    [sections, location, search],
   );
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
+  const [sectionOverrides, setSectionOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => setSectionOverrides({}), [location, search, sections]);
   useEffect(() => {
     if (isMobile) setOpenMobile(false);
-  }, [location, isMobile, setOpenMobile]);
+  }, [location, search, isMobile, setOpenMobile]);
 
   const brandThemed =
     userRole === "company_admin" ||
@@ -505,75 +472,40 @@ function DesktopSidebar({
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {navConfig.items.map((item, idx) => (
-          <TopLevelEntry
-            key={`${idx}-${item.label}`}
-            item={item}
-            activePath={activePath}
-            badges={badges}
-          />
-        ))}
+        <SidebarMenu className="px-2 py-1">
+          {sections.map((section) => {
+            const active = activePage?.sectionId === section.id;
+            return section.pages.length === 1 ? (
+              <SidebarPageLink
+                key={section.id}
+                page={section.pages[0]}
+                active={active}
+                badges={badges}
+              />
+            ) : (
+              <SidebarSection
+                key={section.id}
+                section={section}
+                activePageId={activePage?.id}
+                open={sectionOverrides[section.id] ?? active}
+                onOpenChange={(next) => {
+                  if (!isMobile && !sidebarOpen) {
+                    setSidebarOpen(true);
+                    next = true;
+                  }
+                  setSectionOverrides((previous) => ({ ...previous, [section.id]: next }));
+                }}
+                badges={badges}
+              />
+            );
+          })}
+        </SidebarMenu>
       </SidebarContent>
       <SidebarFooter>
         <SidebarUserMenu user={user} brandThemed={brandThemed} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
-  );
-}
-
-function TopLevelEntry({
-  item,
-  activePath,
-  badges,
-}: {
-  item: NavItem;
-  activePath: string | null;
-  badges: NavBadgeMap;
-}) {
-  if (item.type === "leaf") {
-    return (
-      <SidebarGroup>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <LeafItem
-              leaf={item}
-              activePath={activePath}
-              badges={badges}
-            />
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    );
-  }
-  return (
-    <SidebarGroup>
-      <SidebarGroupLabel>{item.label}</SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {item.items.map((sub, idx) => {
-            if (sub.type === "leaf") {
-              return (
-                <LeafItem
-                  key={`${idx}-${sub.path}`}
-                  leaf={sub}
-                  activePath={activePath}
-                  badges={badges}
-                />
-              );
-            }
-            return (
-              <NestedGroupItem
-                key={`${idx}-${sub.label}`}
-                group={sub}
-                activePath={activePath}
-                badges={badges}
-              />
-            );
-          })}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
   );
 }
 
@@ -585,91 +517,101 @@ function useCloseMobileNav() {
   };
 }
 
-function LeafItem({
-  leaf,
-  activePath,
+function SidebarPageLink({
+  page,
+  active,
   badges,
+  nested = false,
 }: {
-  leaf: NavLeaf;
-  activePath: string | null;
+  page: ResolvedNavPage;
+  active: boolean;
   badges: NavBadgeMap;
+  nested?: boolean;
 }) {
   const closeMobileNav = useCloseMobileNav();
-  const Icon = leaf.icon;
-  const active = activePath === leaf.path;
-  const badgeCount = leaf.badgeKey ? badges[leaf.badgeKey] : undefined;
+  const Icon = page.icon;
+  const count = page.badgeKey ? badges[page.badgeKey] ?? 0 : 0;
+  const link = (
+    <Link href={page.href} onClick={closeMobileNav} aria-current={active ? "page" : undefined}>
+      <Icon />
+      <span>{page.label}</span>
+    </Link>
+  );
+  if (nested) {
+    return (
+      <SidebarMenuSubItem className="relative">
+        <SidebarMenuSubButton asChild isActive={active} className={count > 0 ? "pr-9" : undefined}>
+          {link}
+        </SidebarMenuSubButton>
+        <CountBadge count={count} className="top-1" />
+      </SidebarMenuSubItem>
+    );
+  }
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild isActive={active} tooltip={leaf.label}>
-        <Link href={leaf.path} onClick={closeMobileNav}>
-          <Icon />
-          <span>{leaf.label}</span>
-        </Link>
+      <SidebarMenuButton asChild isActive={active} tooltip={page.label}>
+        {link}
       </SidebarMenuButton>
-      {typeof badgeCount === "number" && badgeCount > 0 && (
-        <SidebarMenuBadge className="bg-destructive text-destructive-foreground">
-          {badgeCount > 99 ? "99+" : badgeCount}
-        </SidebarMenuBadge>
-      )}
+      <CountBadge count={count} />
     </SidebarMenuItem>
   );
 }
 
-function NestedGroupItem({
-  group,
-  activePath,
+function CountBadge({ count, className = "" }: { count: number; className?: string }) {
+  if (count <= 0) return null;
+  return (
+    <SidebarMenuBadge className={`bg-destructive text-destructive-foreground ${className}`}>
+      {count > 99 ? "99+" : count}
+    </SidebarMenuBadge>
+  );
+}
+
+function SidebarSection({
+  section,
+  activePageId,
+  open,
+  onOpenChange,
   badges,
 }: {
-  group: NavGroup;
-  activePath: string | null;
+  section: ResolvedNavSection;
+  activePageId?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   badges: NavBadgeMap;
 }) {
-  const closeMobileNav = useCloseMobileNav();
-  const hasActive = groupHasActive(group, activePath);
-  const [open, setOpen] = useState<boolean>(
-    () => hasActive || !!group.defaultOpen,
-  );
-  useEffect(() => {
-    if (hasActive) setOpen(true);
-  }, [hasActive]);
-  const Icon = group.icon;
+  const Icon = section.icon;
+  const sum = !open && section.showBadgeSum
+    ? section.pages.reduce((total, page) => total + (page.badgeKey ? badges[page.badgeKey] ?? 0 : 0), 0)
+    : 0;
   return (
-    <Collapsible open={open} onOpenChange={setOpen} asChild>
+    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
       <SidebarMenuItem>
         <CollapsibleTrigger asChild>
-          <SidebarMenuButton tooltip={group.label}>
-            {Icon && <Icon />}
-            <span>{group.label}</span>
+          <SidebarMenuButton
+            tooltip={section.label}
+            isActive={section.pages.some((page) => page.id === activePageId)}
+          >
+            <Icon />
+            <span>{section.label}</span>
             <ChevronDown
               className={`ml-auto transition-transform ${
                 open ? "rotate-180" : ""
-              }`}
+              } ${sum > 0 ? "invisible" : ""}`}
             />
           </SidebarMenuButton>
         </CollapsibleTrigger>
+        <CountBadge count={sum} />
         <CollapsibleContent>
           <SidebarMenuSub>
-            {group.items.map((sub, idx) => {
-              if (sub.type !== "leaf") return null;
-              const active = activePath === sub.path;
-              const badgeCount = sub.badgeKey
-                ? badges[sub.badgeKey]
-                : undefined;
-              return (
-                <SidebarMenuSubItem key={`${idx}-${sub.path}`}>
-                  <SidebarMenuSubButton asChild isActive={active}>
-                    <Link href={sub.path} onClick={closeMobileNav}>
-                      <span>{sub.label}</span>
-                    </Link>
-                  </SidebarMenuSubButton>
-                  {typeof badgeCount === "number" && badgeCount > 0 && (
-                    <SidebarMenuBadge className="bg-destructive text-destructive-foreground">
-                      {badgeCount > 99 ? "99+" : badgeCount}
-                    </SidebarMenuBadge>
-                  )}
-                </SidebarMenuSubItem>
-              );
-            })}
+            {section.pages.map((page) => (
+              <SidebarPageLink
+                key={page.id}
+                page={page}
+                active={page.id === activePageId}
+                badges={badges}
+                nested
+              />
+            ))}
           </SidebarMenuSub>
         </CollapsibleContent>
       </SidebarMenuItem>

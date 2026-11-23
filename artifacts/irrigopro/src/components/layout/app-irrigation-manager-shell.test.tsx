@@ -1,19 +1,8 @@
-/**
- * app-irrigation-manager-shell.test.tsx (Task #1004 — Slice 5)
- *
- * Smoke test: mounting DesktopShell with managerNav (the same config wired
- * into the irrigation_manager role block in App.tsx) renders a
- * [data-testid="desktop-shell"] element and includes the canonical "Wet Checks"
- * nav entry.
- *
- * We render DesktopShell directly rather than the full App to avoid mounting
- * all lazily-loaded page components, while still exercising the exact shell +
- * navConfig combination that the irrigation_manager role sees.
- */
-
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location";
 import { AuthProvider } from "@/lib/auth-context";
 
 vi.mock("@/components/layout/navigation", () => ({
@@ -54,12 +43,7 @@ vi.mock("@assets/IrrigoPro_2026-05_1778193170303.png", () => ({
   default: "mark.png",
 }));
 
-vi.mock("@/components/layout/route-meta", () => ({
-  resolveRouteMeta: () => ({ breadcrumb: [{ label: "Dashboard" }] }),
-}));
-
 import { DesktopShell } from "./desktop-shell";
-import { managerNav } from "./nav-config";
 
 beforeEach(() => {
   vi.stubGlobal("innerWidth", 1366);
@@ -68,41 +52,74 @@ beforeEach(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   })));
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ total: 3 })));
 });
 
 afterEach(() => vi.unstubAllGlobals());
 
 function makeQueryClient() {
   return new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0, queryFn: async () => null } },
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0,
+        queryFn: async ({ queryKey }) =>
+          queryKey[0] === "/api/wet-checks/pending-review" ? [{ id: 1 }, { id: 2 }]
+            : queryKey[0] === "/api/estimates/pending-approval" ? [{ id: 1 }]
+            : null,
+      },
+    },
   });
 }
 
-function mount() {
+function mount(path = "/wet-checks") {
+  const location = memoryLocation({ path });
   return render(
-    <AuthProvider>
-      <QueryClientProvider client={makeQueryClient()}>
-        <DesktopShell navConfig={managerNav}>
-          <div>content</div>
-        </DesktopShell>
-      </QueryClientProvider>
-    </AuthProvider>,
+    <Router hook={location.hook} searchHook={location.searchHook}>
+      <AuthProvider>
+        <QueryClientProvider client={makeQueryClient()}>
+          <DesktopShell role="irrigation_manager">
+            <div>content</div>
+          </DesktopShell>
+        </QueryClientProvider>
+      </AuthProvider>
+    </Router>,
   );
 }
 
-describe("irrigation_manager DesktopShell smoke test (Task #1004)", () => {
-  it("renders a desktop-shell element when using managerNav", () => {
+describe("irrigation manager sidebar", () => {
+  it("starts with only the active section open and opens the reviews tab on click", () => {
     mount();
-    expect(screen.getByTestId("desktop-shell")).toBeTruthy();
+    expect(screen.getByTestId("desktop-shell")).toBeInTheDocument();
+    const field = screen.getByRole("button", { name: "Field Work" });
+    const approvals = screen.getByRole("button", { name: "Approvals" });
+    const parts = screen.getByRole("button", { name: "Parts" });
+    expect(screen.getAllByRole("button", { expanded: true })).toEqual([field]);
+    expect(screen.getByRole("link", { name: "Wet Checks" })).toHaveAttribute("aria-current", "page");
+
+    fireEvent.click(parts);
+    fireEvent.click(approvals);
+    const reviews = screen.getByRole("link", { name: "Wet Check Reviews" });
+    expect(reviews).toHaveAttribute("href", "/wet-checks?tab=needs-review");
+    expect(reviews).not.toHaveAttribute("aria-current");
+    fireEvent.click(reviews);
+
+    expect(screen.getAllByRole("button", { expanded: true })).toEqual([approvals]);
+    expect(reviews).toHaveAttribute("aria-current", "page");
+    const breadcrumb = within(screen.getByRole("navigation", { name: "Breadcrumb" }));
+    expect(breadcrumb.getAllByRole("listitem").map((item) => item.textContent))
+      .toEqual(["Approvals", "Wet Check Reviews"]);
   });
 
-  it("renders the canonical Wet Checks nav link", () => {
-    mount();
-    expect(screen.getByRole("link", { name: "Wet Checks" })).toHaveAttribute("href", "/wet-checks");
-  });
-
-  it("renders 'Wet Check' group label", () => {
-    mount();
-    expect(screen.getByText("Wet Check")).toBeTruthy();
+  it("shows the sum on a collapsed section and individual counts when expanded", async () => {
+    mount("/");
+    const row = within(screen.getByRole("button", { name: "Approvals" }).closest("li")!);
+    expect(await row.findByText("5")).toBeVisible();
+    fireEvent.click(row.getByRole("button", { name: "Approvals" }));
+    expect(row.queryByText("5")).not.toBeInTheDocument();
+    expect(within(row.getByRole("link", { name: "Manager Workspace" }).closest("li")!).getByText("3")).toBeVisible();
+    expect(within(row.getByRole("link", { name: "Wet Check Reviews" }).closest("li")!).getByText("2")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Field Work" }));
+    expect(await within(screen.getByRole("link", { name: "Estimates" }).closest("li")!).findByText("1")).toBeVisible();
   });
 });

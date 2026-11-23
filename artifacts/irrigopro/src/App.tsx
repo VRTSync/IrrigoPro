@@ -83,7 +83,6 @@ import CompanyAdminApp from "@/components/company-admin-app";
 import DocumenterApp from "@/components/documenter-app";
 import PoweredByFooter from "@/components/layout/powered-by-footer";
 import { DesktopShell } from "@/components/layout/desktop-shell";
-import { billingManagerNav, bookkeeperNav, managerNav, superAdminNav } from "@/components/layout/nav-config";
 import { ServiceWorkerRegistration, ServiceWorkerUpdatePrompt } from "@/components/offline/service-worker-update-prompt";
 import { ConflictToastBridge } from "@/components/offline/conflict-toast-bridge";
 import { SessionExpiredBanner } from "@/components/auth/session-expired-banner";
@@ -313,7 +312,7 @@ export function AppRoutes() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <DesktopShell navConfig={managerNav}>
+          <DesktopShell role={user.role}>
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
@@ -381,7 +380,7 @@ export function AppRoutes() {
 
   // Task #1886 — Bookkeeper: invoice visibility and QuickBooks custody, nothing
   // else. Shares the DesktopShell component with the billing manager but gets
-  // its own nav config and its own (much shorter) route list. Work Orders and
+  // a role-filtered menu and its own (much shorter) route list. Work Orders and
   // Billing Sheets are deep-link targets for the read-only location report;
   // they remain absent from navigation and their mutation controls stay
   // role-gated. Landing route is the invoice list.
@@ -389,7 +388,7 @@ export function AppRoutes() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <DesktopShell navConfig={bookkeeperNav}>
+          <DesktopShell role={user.role}>
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
@@ -427,7 +426,7 @@ export function AppRoutes() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <DesktopShell navConfig={billingManagerNav}>
+          <DesktopShell role={user.role}>
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>
@@ -493,7 +492,7 @@ export function AppRoutes() {
     return (
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
-          <DesktopShell navConfig={superAdminNav}>
+          <DesktopShell role={user.role}>
             <div className="px-4">
               <Suspense fallback={<RouteSuspenseFallback />}>
                 <Switch>

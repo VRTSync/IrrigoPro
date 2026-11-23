@@ -1,418 +1,227 @@
-import { LayoutDashboard } from "lucide-react";
 import {
-  Home,
-  Briefcase,
-  Wrench,
-  ClipboardList,
-  ClipboardCheck,
-  Droplets,
-  ShieldCheck,
-  Users,
-  MapIcon,
-  DollarSign,
-  Receipt,
-  BarChart3,
-  Package,
-  Settings,
-  Calculator,
-  Cpu,
-  Building2,
-  Activity,
-  AlertTriangle,
-  ImageOff,
-  Scale,
-  Repeat,
-  Database,
-  Percent,
-  type LucideIcon,
+  Activity, AlertTriangle, BarChart3, Building2, Calculator, ClipboardCheck,
+  ClipboardList, Cpu, Database, DollarSign, Droplets, Home, ImageOff,
+  LayoutDashboard, MapIcon, Package, Percent, Receipt, Repeat, Scale, Settings,
+  ShieldCheck, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 
-export type NavBadgeKey =
-  | "partsPendingApproval"
-  | "wetCheckReviews"
-  | "estimatesPendingApproval"
-  | "awaitingApproval"
-  // Task #1914 — invoices at or past their due date. Resolved in
-  // desktop-shell's useNavBadges from the invoice list endpoint's own overdue
-  // aging filter, so the number here is the shipped definition in
-  // lib/shared/src/invoice-aging.ts and never a second one. Only ever attached
-  // to a nav whose role holds CAN_READ_INVOICES.
-  | "overdueInvoices";
+export type NavRole =
+  | "company_admin" | "irrigation_manager" | "billing_manager"
+  | "bookkeeper" | "super_admin";
 
+export type NavBadgeKey =
+  | "partsPendingApproval" | "wetCheckReviews" | "estimatesPendingApproval"
+  | "awaitingApproval" | "overdueInvoices";
 export type NavBadgeMap = Partial<Record<NavBadgeKey, number>>;
 
-export interface NavLeaf {
-  type: "leaf";
+export interface NavPage {
+  id: string;
   label: string;
-  path: string;
+  description: string;
   icon: LucideIcon;
+  paths: Partial<Record<NavRole, string>>;
+  search?: string;
   badgeKey?: NavBadgeKey;
 }
 
-export interface NavGroup {
-  type: "group";
+export interface NavPageGroup {
+  label: string | null;
+  pages: NavPage[];
+}
+
+export interface NavSection {
+  id: string;
   label: string;
-  icon?: LucideIcon;
-  defaultOpen?: boolean;
-  items: Array<NavLeaf | NavGroup>;
+  railLabel: string;
+  description: string;
+  icon: LucideIcon;
+  placement: "top" | "bottom";
+  showBadgeSum: boolean;
+  groups: NavPageGroup[];
 }
 
-export type NavItem = NavLeaf | NavGroup;
-
-export interface NavConfig {
-  items: NavItem[];
+export interface ResolvedNavPage extends Omit<NavPage, "paths"> {
+  path: string;
+  href: string;
+  sectionId: string;
 }
 
-const baseReportItems: NavItem[] = [
+export interface ResolvedNavSection extends Omit<NavSection, "groups"> {
+  groups: { label: string | null; pages: ResolvedNavPage[] }[];
+  pages: ResolvedNavPage[];
+}
+
+const c = "company_admin";
+const i = "irrigation_manager";
+const b = "billing_manager";
+const k = "bookkeeper";
+const s = "super_admin";
+
+function samePath(path: string, ...roles: NavRole[]): NavPage["paths"] {
+  return Object.fromEntries(roles.map((role) => [role, path]));
+}
+
+// The locked role table governs destinations; the B2 mockup supplies the descriptions.
+export const NAV_SECTIONS: NavSection[] = [
   {
-    type: "leaf",
-    label: "Missing Photos – Work Orders",
-    path: "/work-orders/missing-photos",
-    icon: ShieldCheck,
+    id: "platform", label: "Platform", railLabel: "Platform",
+    description: "Platform health and companies", icon: Activity, placement: "top", showBadgeSum: true,
+    groups: [{ label: null, pages: [
+      { id: "app-health", label: "App Health", description: "Uptime, errors and background jobs", icon: Activity, paths: samePath("/super-admin/app-health", s) },
+      { id: "companies", label: "Companies", description: "Every company on the platform", icon: Building2, paths: samePath("/super-admin", s) },
+      { id: "client-errors", label: "Client Errors", description: "Errors reported by browsers", icon: AlertTriangle, paths: samePath("/admin/client-errors", s) },
+      { id: "loose-photos", label: "Loose Photos", description: "Photos not attached to a finding", icon: ImageOff, paths: samePath("/super-admin/loose-photos", s) },
+    ] }],
   },
   {
-    type: "leaf",
-    label: "Missing Photos – Billing",
-    path: "/billing-sheets/missing-photos",
-    icon: ShieldCheck,
+    id: "dashboard", label: "Dashboard", railLabel: "Dashboard",
+    description: "A looking glass over the whole app", icon: Home, placement: "top", showBadgeSum: true,
+    groups: [{ label: null, pages: [
+      { id: "dashboard", label: "Dashboard", description: "Built for your role", icon: Home, paths: samePath("/", c, i, b, k) },
+    ] }],
   },
   {
-    type: "leaf",
-    label: "Zero Price Audit",
-    path: "/billing-sheets/zero-price-audit",
-    icon: ShieldCheck,
+    id: "users", label: "Users", railLabel: "Users",
+    description: "People across every company", icon: Users, placement: "top", showBadgeSum: true,
+    groups: [{ label: null, pages: [
+      { id: "all-users", label: "All Users", description: "Every user across companies", icon: Users, paths: samePath("/system-users", s) },
+      { id: "switch-user", label: "Switch User", description: "Sign out to switch accounts", icon: Repeat, paths: samePath("/switch-user", s) },
+    ] }],
   },
   {
-    type: "leaf",
-    label: "Labor Rate Audit",
-    path: "/billing-sheets/labor-rate-audit",
-    icon: ShieldCheck,
+    id: "field", label: "Field Work", railLabel: "Field",
+    description: "Plan the work, then the three ways work gets done", icon: Droplets, placement: "top", showBadgeSum: true,
+    groups: [
+      { label: "Plan", pages: [
+        { id: "action-board", label: "Action Board", description: "Morning dispatch: open work, wet checks due, budget", icon: ClipboardCheck, paths: samePath("/action-board", c, i) },
+        {
+          id: "estimates", label: "Estimates", description: "Quotes, including those from inspection wet checks", icon: LayoutDashboard,
+          paths: { [c]: "/estimates/command-center", [i]: "/estimates", [b]: "/estimates/pending-approval" },
+          badgeKey: "estimatesPendingApproval",
+        },
+      ] },
+      { label: "In the field", pages: [
+        { id: "wet-checks", label: "Wet Checks", description: "Service and inspection walks", icon: Droplets, paths: samePath("/wet-checks", c, i, b, s) },
+        { id: "work-orders", label: "Work Orders", description: "Planned jobs, from estimates or direct", icon: Wrench, paths: samePath("/work-orders", c, i, b) },
+        { id: "billing-sheets", label: "Billing Sheets", description: "On-site work done without a work order", icon: ClipboardList, paths: samePath("/billing-sheets", c, i, b) },
+      ] },
+    ],
   },
   {
-    type: "leaf",
-    label: "Missing Location Data",
-    path: "/reports/missing-location-data",
-    icon: ShieldCheck,
+    id: "approvals", label: "Approvals", railLabel: "Approvals",
+    description: "Field work waiting for sign-off before billing", icon: ClipboardCheck, placement: "top", showBadgeSum: true,
+    groups: [{ label: null, pages: [
+      { id: "manager-workspace", label: "Manager Workspace", description: "Approve work orders and billing sheets", icon: LayoutDashboard, paths: samePath("/manager-workspace", c, i, b), badgeKey: "awaitingApproval" },
+      {
+        id: "wet-check-reviews", label: "Wet Check Reviews", description: "Opens Wet Checks on the Needs Review tab", icon: ClipboardCheck,
+        paths: samePath("/wet-checks", c, i, b), search: "tab=needs-review", badgeKey: "wetCheckReviews",
+      },
+    ] }],
+  },
+  {
+    id: "billing", label: "Billing", railLabel: "Billing",
+    description: "Turn approved work into invoices", icon: DollarSign, placement: "top", showBadgeSum: true,
+    groups: [{ label: null, pages: [
+      { id: "command-center", label: "Command Center", description: "Bill approved work by customer", icon: ClipboardList, paths: samePath("/billing/command-center", c, b) },
+      { id: "invoices", label: "Invoices", description: "QuickBooks invoices and aging", icon: Receipt, paths: samePath("/invoices", c, b, k), badgeKey: "overdueInvoices" },
+    ] }],
+  },
+  {
+    id: "customers", label: "Customers", railLabel: "Clients",
+    description: "Profiles, contacts, irrigation systems and budgets", icon: Users, placement: "top", showBadgeSum: true,
+    groups: [{ label: null, pages: [
+      { id: "customers", label: "Customers", description: "Every customer, with a Visible filter for the master list", icon: Users, paths: samePath("/customers", c, i, b, k) },
+      { id: "maps", label: "Maps", description: "Site maps", icon: MapIcon, paths: samePath("/site-maps", c, i) },
+    ] }],
+  },
+  {
+    id: "insights", label: "Insights", railLabel: "Insights",
+    description: "How the money is tracking, and data-quality audits", icon: BarChart3, placement: "top", showBadgeSum: true,
+    groups: [
+      { label: "Money", pages: [
+        { id: "budget-status", label: "Budget Status", description: "Spend against monthly budgets", icon: BarChart3, paths: samePath("/budget-status", c, i, b) },
+        { id: "financial-pulse", label: "Financial Pulse", description: "Financial overview", icon: Activity, paths: samePath("/financial-pulse", c, i, b, s) },
+      ] },
+      { label: "Audits", pages: [
+        { id: "missing-photos-wo", label: "Missing Photos – Work Orders", description: "Completed work with no photos", icon: ShieldCheck, paths: samePath("/work-orders/missing-photos", c, b) },
+        { id: "missing-photos-bs", label: "Missing Photos – Billing", description: "Billing sheets with no photos", icon: ShieldCheck, paths: samePath("/billing-sheets/missing-photos", c, b) },
+        { id: "zero-price", label: "Zero Price Audit", description: "Lines billed at zero", icon: ShieldCheck, paths: samePath("/billing-sheets/zero-price-audit", c, b) },
+        { id: "labor-rate", label: "Labor Rate Audit", description: "Lines off the customer's rate", icon: ShieldCheck, paths: samePath("/billing-sheets/labor-rate-audit", c, b) },
+        { id: "missing-location", label: "Missing Location Data", description: "Work without controller or zone", icon: ShieldCheck, paths: samePath("/reports/missing-location-data", c, i, b, k, s) },
+        { id: "wc-recon", label: "WC Reconciliation", description: "Wet-check billing reconciliation", icon: Scale, paths: samePath("/admin/wet-check-reconciliation", c, s) },
+      ] },
+    ],
+  },
+  {
+    id: "parts", label: "Parts", railLabel: "Parts",
+    description: "Catalog, approvals and pricing", icon: Package, placement: "top", showBadgeSum: true,
+    groups: [{ label: null, pages: [
+      { id: "parts-catalog", label: "Parts Catalog", description: "Parts, prices and costs", icon: Package, paths: samePath("/parts", c, i, b) },
+      { id: "parts-pending", label: "Pending Approval", description: "Field-added parts waiting for review", icon: ShieldCheck, paths: samePath("/parts-pending-approval", c, b), badgeKey: "partsPendingApproval" },
+      { id: "markup", label: "Material Markup", description: "Tiered markup schedule", icon: Percent, paths: samePath("/admin/markup-schedule", c, s) },
+      { id: "parts-settings", label: "Parts Settings", description: "Catalog defaults", icon: Settings, paths: samePath("/parts-settings", c, i, b) },
+    ] }],
+  },
+  {
+    id: "data", label: "Data", railLabel: "Data",
+    description: "Data repairs and backfills", icon: Database, placement: "bottom", showBadgeSum: false,
+    groups: [{ label: null, pages: [
+      { id: "db-migrations", label: "DB Migrations", description: "Run and review data repairs", icon: Database, paths: samePath("/admin/migrations", s) },
+      { id: "wc-labor-backfill", label: "WC Labor Backfill", description: "Backfill wet-check labor", icon: Droplets, paths: samePath("/admin/wc-labor-backfill", s) },
+    ] }],
+  },
+  {
+    id: "settings", label: "Settings", railLabel: "Settings",
+    description: "Set once, change rarely", icon: Settings, placement: "bottom", showBadgeSum: false,
+    groups: [
+      { label: "Company", pages: [
+        { id: "team", label: "Team", description: "Users and roles", icon: Users, paths: samePath("/users", c) },
+        { id: "company-profile", label: "Company Profile", description: "Name, logo, contact", icon: Building2, paths: samePath("/company-profile", c) },
+        { id: "quickbooks", label: "QuickBooks", description: "Connection and sync", icon: Calculator, paths: samePath("/quickbooks", c, b, k, s) },
+      ] },
+      { label: "Pricing and budgets", pages: [
+        { id: "labor-rates", label: "Labor Rates", description: "Default rates", icon: DollarSign, paths: samePath("/labor-rates", c) },
+        { id: "budget-goals", label: "Budget Goals", description: "Season curve and goals", icon: DollarSign, paths: samePath("/admin/budget-goals", c, s) },
+      ] },
+      { label: "Irrigation", pages: [
+        { id: "controllers", label: "Controllers & Zones", description: "Controller setup", icon: Cpu, paths: samePath("/admin/controllers", c, s) },
+        { id: "issue-types", label: "Wet Check Issue Types", description: "Finding categories", icon: Droplets, paths: samePath("/admin/issue-types", c, b, s) },
+      ] },
+    ],
   },
 ];
 
-export const locationReportGroup: NavGroup = {
-  type: "group",
-  label: "Reports",
-  icon: BarChart3,
-  items: [
-    {
-      type: "leaf",
-      label: "Missing Location Data",
-      path: "/reports/missing-location-data",
-      icon: ShieldCheck,
-    },
-  ],
-};
+export function navForRole(role: string | undefined): ResolvedNavSection[] {
+  if (role !== c && role !== i && role !== b && role !== k && role !== s) return [];
 
-export const reportsGroup: NavGroup = {
-  type: "group",
-  label: "Reports",
-  icon: BarChart3,
-  items: [
-    ...baseReportItems,
-    {
-      type: "leaf",
-      label: "WC Reconciliation",
-      path: "/admin/wet-check-reconciliation",
-      icon: ShieldCheck,
-    },
-  ],
-};
+  return NAV_SECTIONS.flatMap(({ groups, ...section }) => {
+    const resolvedGroups = groups.flatMap(({ label, pages }) => {
+      const resolvedPages = pages.flatMap(({ paths, ...page }) => {
+        const path = paths[role];
+        if (!path) return [];
+        const href = page.search ? `${path}?${page.search}` : path;
+        return [{ ...page, path, href, sectionId: section.id }];
+      });
+      return resolvedPages.length ? [{ label, pages: resolvedPages }] : [];
+    });
+    const pages = resolvedGroups.flatMap((group) => group.pages);
+    return pages.length ? [{ ...section, groups: resolvedGroups, pages }] : [];
+  });
+}
 
-// Billing managers get the same reports except WC Reconciliation
-// (that page is company_admin / super_admin only).
-export const billingManagerReportsGroup: NavGroup = {
-  type: "group",
-  label: "Reports",
-  icon: BarChart3,
-  items: baseReportItems,
-};
-
-export const wetCheckGroup: NavGroup = {
-  type: "group",
-  label: "Wet Check",
-  icon: Droplets,
-  items: [
-    { type: "leaf", label: "Wet Checks", path: "/wet-checks", icon: Droplets },
-  ],
-};
-
-export const billingManagerNav: NavConfig = {
-  items: [
-    { type: "leaf", label: "Dashboard", path: "/", icon: Home },
-    {
-      type: "group",
-      label: "Billing",
-      icon: DollarSign,
-      defaultOpen: true,
-      items: [
-        { type: "leaf", label: "Manager Workspace", path: "/manager-workspace", icon: LayoutDashboard, badgeKey: "awaitingApproval" },
-         { type: "leaf", label: "Budget Status", path: "/budget-status", icon: BarChart3 },
-        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
-        { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
-        { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
-        {
-          type: "leaf",
-          label: "Invoices",
-          path: "/invoices",
-          icon: Receipt,
-          badgeKey: "overdueInvoices",
-        },
-        billingManagerReportsGroup,
-      ],
-    },
-    {
-      type: "group",
-      label: "Operations",
-      icon: Briefcase,
-      items: [
-        { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
-        {
-          type: "leaf",
-          label: "Estimates Pending Approval",
-          path: "/estimates/pending-approval",
-          icon: ShieldCheck,
-          badgeKey: "estimatesPendingApproval",
-        },
-      ],
-    },
-    wetCheckGroup,
-    { type: "leaf", label: "Customers", path: "/customers", icon: Users },
-    {
-      type: "group",
-      label: "Parts",
-      icon: Package,
-      items: [
-        { type: "leaf", label: "Parts Catalog", path: "/parts", icon: Package },
-        {
-          type: "leaf",
-          label: "Parts Pending Approval",
-          path: "/parts-pending-approval",
-          icon: ShieldCheck,
-          badgeKey: "partsPendingApproval",
-        },
-        { type: "leaf", label: "Parts Settings", path: "/parts-settings", icon: Settings },
-      ],
-    },
-    {
-      type: "group",
-      label: "Settings",
-      icon: Settings,
-      items: [
-        { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
-        { type: "leaf", label: "Wet Check Issue Types", path: "/admin/issue-types", icon: Droplets },
-      ],
-    },
-  ],
-};
-
-// Task #1886 — bookkeeper desktop sidebar.
-// Task #1914 — grouped, with the overdue badge on Invoices.
-//
-// Deliberately NOT billingManagerNav: that config carries Financial Pulse,
-// Manager Workspace, Billing Sheets, Wet Checks, Work Orders, and Estimates
-// Pending Approval, all of which are out of scope for this role. The two
-// shells share the DesktopShell *component* and now the same grouping
-// vocabulary — Invoices open by default, Customers, Settings — but not the nav
-// config or the route list. Invoices, Customers, QuickBooks — nothing else.
-//
-// The grouping is presentation only: the reachable route set is exactly the
-// three paths it has always been. (Group with a single same-named leaf follows
-// companyAdminNav's Customers group; the group heading is the section, the
-// leaf is the page that carries the badge.)
-export const bookkeeperNav: NavConfig = {
-  items: [
-    {
-      type: "group",
-      label: "Invoices",
-      icon: DollarSign,
-      defaultOpen: true,
-      items: [
-        {
-          type: "leaf",
-          label: "Invoices",
-          path: "/invoices",
-          icon: Receipt,
-          badgeKey: "overdueInvoices",
-        },
-      ],
-    },
-    { type: "leaf", label: "Customers", path: "/customers", icon: Users },
-    locationReportGroup,
-    {
-      type: "group",
-      label: "Settings",
-      icon: Settings,
-      items: [
-        { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
-      ],
-    },
-  ],
-};
-
-export const managerNav: NavConfig = {
-  items: [
-    { type: "leaf", label: "Manager Workspace", path: "/manager-workspace", icon: ClipboardCheck },
-    { type: "leaf", label: "Action Board", path: "/action-board", icon: ClipboardCheck },
-    { type: "leaf", label: "Budget Status", path: "/budget-status", icon: BarChart3 },
-    locationReportGroup,
-    wetCheckGroup,
-    {
-      type: "group",
-      label: "Operations",
-      icon: Briefcase,
-      defaultOpen: true,
-      items: [
-        { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
-        { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
-        { type: "leaf", label: "Estimates", path: "/estimates", icon: ClipboardList },
-        { type: "leaf", label: "Customers", path: "/customers", icon: Users },
-        { type: "leaf", label: "Site Maps", path: "/site-maps", icon: MapIcon },
-        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
-      ],
-    },
-    {
-      type: "group",
-      label: "Parts",
-      icon: Package,
-      items: [
-        { type: "leaf", label: "Parts Catalog", path: "/parts", icon: Package },
-        { type: "leaf", label: "Parts Settings", path: "/parts-settings", icon: Settings },
-      ],
-    },
-  ],
-};
-
-export const superAdminNav: NavConfig = {
-  items: [
-    { type: "leaf", label: "App Health", path: "/super-admin/app-health", icon: Activity },
-    { type: "leaf", label: "Companies", path: "/super-admin", icon: Building2 },
-    {
-      type: "group",
-      label: "Users",
-      icon: Users,
-      defaultOpen: true,
-      items: [
-        { type: "leaf", label: "All Users", path: "/system-users", icon: Users },
-        { type: "leaf", label: "Switch User", path: "/switch-user", icon: Repeat },
-      ],
-    },
-    wetCheckGroup,
-    locationReportGroup,
-    {
-      type: "group",
-      label: "System",
-      icon: Settings,
-      items: [
-        { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
-        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
-        { type: "leaf", label: "Budget Goals", path: "/admin/budget-goals", icon: DollarSign },
-        { type: "leaf", label: "Material Markup", path: "/admin/markup-schedule", icon: Percent },
-        { type: "leaf", label: "Client Errors", path: "/admin/client-errors", icon: AlertTriangle },
-        { type: "leaf", label: "Loose Photos", path: "/super-admin/loose-photos", icon: ImageOff },
-        { type: "leaf", label: "Wet Check Reconciliation", path: "/admin/wet-check-reconciliation", icon: Scale },
-        { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
-      ],
-    },
-    {
-      type: "group",
-      label: "Data migrations",
-      icon: Database,
-      items: [
-        { type: "leaf", label: "DB Migrations", path: "/admin/migrations", icon: Database },
-        { type: "leaf", label: "WC Labor Backfill", path: "/admin/wc-labor-backfill", icon: Droplets },
-        { type: "leaf", label: "Wet Check Issue Types", path: "/admin/issue-types", icon: Droplets },
-      ],
-    },
-  ],
-};
-
-export const companyAdminNav: NavConfig = {
-  items: [
-    { type: "leaf", label: "Dashboard", path: "/", icon: Home },
-    {
-      type: "group",
-      label: "Operations",
-      icon: Briefcase,
-      defaultOpen: true,
-      items: [
-        { type: "leaf", label: "Work Orders", path: "/work-orders", icon: Wrench },
-        { type: "leaf", label: "Billing Sheets", path: "/billing-sheets", icon: ClipboardList },
-        {
-          type: "leaf",
-          label: "Estimates",
-          path: "/estimates/command-center",
-          icon: LayoutDashboard,
-          badgeKey: "estimatesPendingApproval",
-        },
-      ],
-    },
-    wetCheckGroup,
-    {
-      type: "group",
-      label: "Customers",
-      icon: Users,
-      items: [
-        { type: "leaf", label: "Customers", path: "/customers", icon: Users },
-        { type: "leaf", label: "Maps", path: "/site-maps", icon: MapIcon },
-      ],
-    },
-    {
-      type: "group",
-      label: "Billing",
-      icon: DollarSign,
-      items: [
-        { type: "leaf", label: "Manager Workspace", path: "/manager-workspace", icon: LayoutDashboard, badgeKey: "awaitingApproval" },
-        { type: "leaf", label: "Action Board", path: "/action-board", icon: ClipboardCheck },
-        { type: "leaf", label: "Budget Status", path: "/budget-status", icon: BarChart3 },
-        { type: "leaf", label: "Financial Pulse", path: "/financial-pulse", icon: Activity },
-        { type: "leaf", label: "Command Center", path: "/billing/command-center", icon: ClipboardList },
-        {
-          type: "leaf",
-          label: "Invoices",
-          path: "/invoices",
-          icon: Receipt,
-          badgeKey: "overdueInvoices",
-        },
-        reportsGroup,
-      ],
-    },
-    {
-      type: "group",
-      label: "Parts",
-      icon: Package,
-      items: [
-        { type: "leaf", label: "Parts Catalog", path: "/parts", icon: Package },
-        {
-          type: "leaf",
-          label: "Parts Pending Approval",
-          path: "/parts-pending-approval",
-          icon: ShieldCheck,
-          badgeKey: "partsPendingApproval",
-        },
-        { type: "leaf", label: "Parts Settings", path: "/parts-settings", icon: Settings },
-        { type: "leaf", label: "Material Markup", path: "/admin/markup-schedule", icon: Percent },
-      ],
-    },
-    {
-      type: "group",
-      label: "Settings",
-      icon: Settings,
-      items: [
-        { type: "leaf", label: "Controllers & Zones", path: "/admin/controllers", icon: Cpu },
-        { type: "leaf", label: "Team", path: "/users", icon: Users },
-        { type: "leaf", label: "Company Profile", path: "/company-profile", icon: Building2 },
-        { type: "leaf", label: "QuickBooks", path: "/quickbooks", icon: Calculator },
-        { type: "leaf", label: "Labor Rates", path: "/labor-rates", icon: DollarSign },
-        { type: "leaf", label: "Budget Goals", path: "/admin/budget-goals", icon: DollarSign },
-        { type: "leaf", label: "Wet Check Issue Types", path: "/admin/issue-types", icon: Droplets },
-      ],
-    },
-  ],
-};
+export function findActivePage(
+  sections: ResolvedNavSection[],
+  location: string,
+  search = "",
+): ResolvedNavPage | undefined {
+  const path = location.replace(/\/+$/, "") || "/";
+  const matches = sections.flatMap((section) => section.pages).filter((page) =>
+    page.path === path || (page.path !== "/" && path.startsWith(`${page.path}/`)),
+  );
+  const longest = Math.max(0, ...matches.map((page) => page.path.length));
+  const candidates = matches.filter((page) => page.path.length === longest);
+  const params = new URLSearchParams(search);
+  return candidates.find((page) => page.path === path && page.search &&
+    Array.from(new URLSearchParams(page.search)).every(([key, value]) => params.get(key) === value),
+  ) ?? candidates.find((page) => !page.search);
+}

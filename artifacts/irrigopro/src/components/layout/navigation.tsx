@@ -19,15 +19,6 @@ type NavDropdownItem = {
   badge?: number;
 };
 
-type NavItem = {
-  path: string;
-  label: string;
-  icon: LucideIcon;
-  isCenter?: boolean;
-  isDropdown?: boolean;
-  dropdownItems?: NavDropdownItem[];
-};
-
 export default function Navigation({ onOpenMenu }: { onOpenMenu?: () => void } = {}) {
   const [location] = useLocation();
 

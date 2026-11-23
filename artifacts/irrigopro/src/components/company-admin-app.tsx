@@ -3,7 +3,6 @@ import { safeSet } from "@/utils/safeStorage";
 import { Switch, Route, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { DesktopShell } from "@/components/layout/desktop-shell";
-import { companyAdminNav } from "@/components/layout/nav-config";
 import InvoicesPage from "@/pages/invoices";
 import AdminDashboard from "@/pages/admin-dashboard";
 import Operations from "@/pages/operations";
@@ -173,7 +172,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
 
   // Regular company admin app
   return (
-    <DesktopShell navConfig={companyAdminNav}>
+    <DesktopShell role={user.role}>
       <div className="px-4 bg-gray-50">
         <Switch>
           <Route path="/" component={AdminDashboard} />

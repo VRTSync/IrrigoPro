@@ -9,6 +9,12 @@ Use the locked Navigation Redesign overview and the assigned slice as the build 
 
 **How to apply:** Share the role-filtered navigation across desktop, phone, breadcrumbs, and Jump To. Preserve the existing role routes and the merged audit fixes. Use the locked role table for routes and visibility, and the B2 mockup for the approved wording and visual treatment.
 
+Keep the B2 page IDs stable across navigation slices. Dashboard tiles look up role-specific links by those IDs, and device-local pins can outlive a label or URL change.
+
+**Why:** A rename can silently break a tile lookup or detach saved pins even when the page still mounts at its original route.
+
+**How to apply:** Treat IDs as identity, labels and descriptions as copy, and hrefs as role-specific destinations.
+
 Jump To is pages-only in this release. Record search, a "Needs you" summary, and creating records from Jump To are deferred. The role dashboards replace the old company dashboard content rather than relocating it; pins stay device-local per user.
 
 **Why:** This release reorganizes navigation without taking on record-search permissions, new deep links, or a new pin data model.

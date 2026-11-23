@@ -3,15 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CAN_VIEW_ACTION_BOARD, CAN_VIEW_BUDGETS, hasCapability } from "@workspace/shared";
 
-import {
-  billingManagerNav,
-  bookkeeperNav,
-  companyAdminNav,
-  managerNav,
-  superAdminNav,
-  type NavConfig,
-  type NavItem,
-} from "./nav-config";
+import { navForRole } from "./nav-config";
 
 const appSource = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
 const companyAdminSource = readFileSync(
@@ -19,20 +11,8 @@ const companyAdminSource = readFileSync(
   "utf8",
 );
 
-function hasBudgetLeaf(config: NavConfig): boolean {
-  const visit = (items: NavItem[]): boolean =>
-    items.some((item) =>
-      item.type === "leaf" ? item.path === "/budget-status" : visit(item.items),
-    );
-  return visit(config.items);
-}
-
-function hasActionBoardLeaf(config: NavConfig): boolean {
-  const visit = (items: NavItem[]): boolean =>
-    items.some((item) =>
-      item.type === "leaf" ? item.path === "/action-board" : visit(item.items),
-    );
-  return visit(config.items);
+function hasNavPage(role: string, path: string): boolean {
+  return navForRole(role).some(({ pages }) => pages.some((page) => page.path === path));
 }
 
 function roleBlock(role: string): string {
@@ -44,25 +24,22 @@ function roleBlock(role: string): string {
 }
 
 describe("Budget Status route and navigation parity", () => {
-  it.each([
-    ["billing_manager", billingManagerNav],
-    ["irrigation_manager", managerNav],
-  ] as const)("%s has both the capability, route, and nav leaf", (role, nav) => {
+  it.each(["billing_manager", "irrigation_manager"])("%s has the capability, route, and menu link", (role) => {
     expect(hasCapability(role, CAN_VIEW_BUDGETS)).toBe(true);
     expect(roleBlock(role)).toContain('<Route path="/budget-status"');
-    expect(hasBudgetLeaf(nav)).toBe(true);
+    expect(hasNavPage(role, "/budget-status")).toBe(true);
   });
 
   it("company_admin has both the capability, route, and nav leaf", () => {
     expect(hasCapability("company_admin", CAN_VIEW_BUDGETS)).toBe(true);
     expect(companyAdminSource).toContain('<Route path="/budget-status"');
-    expect(hasBudgetLeaf(companyAdminNav)).toBe(true);
+    expect(hasNavPage("company_admin", "/budget-status")).toBe(true);
   });
 
   it("bookkeeper has neither capability, route, nor nav leaf", () => {
     expect(hasCapability("bookkeeper", CAN_VIEW_BUDGETS)).toBe(false);
     expect(roleBlock("bookkeeper")).not.toContain('<Route path="/budget-status"');
-    expect(hasBudgetLeaf(bookkeeperNav)).toBe(false);
+    expect(hasNavPage("bookkeeper", "/budget-status")).toBe(false);
   });
 
   it("field_tech has neither capability nor route", () => {
@@ -73,36 +50,34 @@ describe("Budget Status route and navigation parity", () => {
   it("records the deliberate super_admin route-without-leaf asymmetry", () => {
     expect(hasCapability("super_admin", CAN_VIEW_BUDGETS)).toBe(true);
     expect(roleBlock("super_admin")).toContain('<Route path="/budget-status"');
-    expect(hasBudgetLeaf(superAdminNav)).toBe(false);
+    expect(hasNavPage("super_admin", "/budget-status")).toBe(false);
   });
 });
 
 describe("Action Board route and navigation parity", () => {
-  it.each([
-    ["irrigation_manager", managerNav],
-  ] as const)("%s has route and nav leaf", (role, nav) => {
-    expect(hasCapability(role, CAN_VIEW_ACTION_BOARD)).toBe(true);
-    expect(roleBlock(role)).toContain('<Route path="/action-board"');
-    expect(hasActionBoardLeaf(nav)).toBe(true);
+  it("irrigation_manager has the capability, route, and menu link", () => {
+    expect(hasCapability("irrigation_manager", CAN_VIEW_ACTION_BOARD)).toBe(true);
+    expect(roleBlock("irrigation_manager")).toContain('<Route path="/action-board"');
+    expect(hasNavPage("irrigation_manager", "/action-board")).toBe(true);
   });
 
   it("company_admin has route and nav leaf", () => {
     expect(hasCapability("company_admin", CAN_VIEW_ACTION_BOARD)).toBe(true);
     expect(companyAdminSource).toContain('<Route path="/action-board"');
-    expect(hasActionBoardLeaf(companyAdminNav)).toBe(true);
+    expect(hasNavPage("company_admin", "/action-board")).toBe(true);
   });
 
   it("super_admin has the route but deliberate route-without-leaf asymmetry", () => {
     expect(hasCapability("super_admin", CAN_VIEW_ACTION_BOARD)).toBe(true);
     expect(roleBlock("super_admin")).toContain('<Route path="/action-board"');
-    expect(hasActionBoardLeaf(superAdminNav)).toBe(false);
+    expect(hasNavPage("super_admin", "/action-board")).toBe(false);
   });
 
   it("bookkeeper and field_tech cannot reach Action Board", () => {
     expect(hasCapability("bookkeeper", CAN_VIEW_ACTION_BOARD)).toBe(false);
     expect(hasCapability("field_tech", CAN_VIEW_ACTION_BOARD)).toBe(false);
     expect(roleBlock("bookkeeper")).not.toContain('<Route path="/action-board"');
-    expect(hasActionBoardLeaf(bookkeeperNav)).toBe(false);
+    expect(hasNavPage("bookkeeper", "/action-board")).toBe(false);
     expect(roleBlock("field_tech")).not.toContain('<Route path="/action-board"');
   });
 
@@ -111,7 +86,7 @@ describe("Action Board route and navigation parity", () => {
     expect(hasCapability("billing_manager", CAN_VIEW_BUDGETS)).toBe(true);
     expect(roleBlock("billing_manager")).not.toContain('<Route path="/action-board"');
     expect(roleBlock("billing_manager")).toContain('<Route path="/financial-pulse"');
-    expect(hasActionBoardLeaf(billingManagerNav)).toBe(false);
+    expect(hasNavPage("billing_manager", "/action-board")).toBe(false);
   });
 
   it.each([undefined, null, "unknown"])("fails closed for role %s", (role) => {

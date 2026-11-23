@@ -62,8 +62,7 @@ vi.mock("@/components/layout/route-meta", () => ({
 }));
 // DesktopShell reads the signed-in user from the auth context. Supplying it
 // directly keeps this test to the nav surface instead of pulling in the whole
-// provider. (Note: app-irrigation-manager-shell.test.tsx does NOT do this and
-// is red on main for exactly that reason — see the task follow-ups.)
+// provider.
 vi.mock("@/lib/auth-context", () => ({
   useAuth: () => ({
     user: {
@@ -80,7 +79,7 @@ vi.mock("@/lib/auth-context", () => ({
 }));
 
 import { DesktopShell } from "./desktop-shell";
-import { bookkeeperNav, billingManagerNav, type NavConfig, type NavItem } from "./nav-config";
+import { navForRole } from "./nav-config";
 
 // jsdom has no matchMedia; DesktopShell's use-mobile hook calls it on mount.
 if (!window.matchMedia) {
@@ -104,19 +103,6 @@ function makeQueryClient() {
   });
 }
 
-function collectLeafPaths(items: NavItem[]): string[] {
-  const paths: string[] = [];
-  for (const item of items) {
-    if (item.type === "leaf") paths.push(item.path);
-    else paths.push(...collectLeafPaths(item.items));
-  }
-  return paths;
-}
-
-function allPaths(config: NavConfig): string[] {
-  return collectLeafPaths(config.items);
-}
-
 const NAVIGATION_SRC = readFileSync(resolve(import.meta.dirname, "navigation.tsx"), "utf8");
 const PROFILE_SRC = readFileSync(
   resolve(import.meta.dirname, "../../pages/customer-profile.tsx"),
@@ -129,65 +115,24 @@ const INVOICES_SRC = readFileSync(
 
 // ── Surface 1: the desktop sidebar (nav-config.ts) ───────────────────────────
 
-describe("bookkeeperNav — desktop sidebar", () => {
-  it("is not empty (an unhandled role gets a blank app)", () => {
-    expect(bookkeeperNav.items.length).toBeGreaterThan(0);
+describe("bookkeeper desktop sidebar", () => {
+  const expected = [
+    ["Dashboard", "/"],
+    ["Invoices", "/invoices"],
+    ["Customers", "/customers"],
+    ["Missing Location Data", "/reports/missing-location-data"],
+    ["QuickBooks", "/quickbooks"],
+  ];
+
+  it("resolves exactly the five bookkeeper destinations", () => {
+    expect(navForRole("bookkeeper").flatMap(({ pages }) => pages.map(({ label, href }) => [label, href])))
+      .toEqual(expected);
   });
 
-  it("contains exactly Invoices, Customers, QuickBooks, and the location audit report", () => {
-    expect(allPaths(bookkeeperNav).sort()).toEqual(["/customers", "/invoices", "/quickbooks", "/reports/missing-location-data"]);
-  });
-
-  it("omits everything the role is not scoped for", () => {
-    const paths = allPaths(bookkeeperNav);
-    for (const forbidden of [
-      "/financial-pulse",
-      "/manager-workspace",
-      "/billing-sheets",
-      "/wet-checks",
-      "/work-orders",
-      "/estimates-pending-approval",
-      "/parts",
-      "/labor-rates",
-    ]) {
-      expect(paths).not.toContain(forbidden);
-    }
-  });
-
-  it("is NOT just a reference to billingManagerNav", () => {
-    // Sharing the shell component is intended; sharing the nav config is the bug.
-    expect(bookkeeperNav).not.toBe(billingManagerNav);
-    expect(allPaths(bookkeeperNav).length).toBeLessThan(allPaths(billingManagerNav).length);
-  });
-
-  it("renders inside DesktopShell with its billing and audit entries visible", () => {
-    render(
-      <QueryClientProvider client={makeQueryClient()}>
-        <DesktopShell navConfig={bookkeeperNav}>
-          <div>content</div>
-        </DesktopShell>
-      </QueryClientProvider>,
-    );
-    expect(screen.getByTestId("desktop-shell")).toBeTruthy();
-    // getAllByText: the shell renders the sidebar in both a desktop and a
-    // collapsed/mobile variant, so each label legitimately appears more than once.
-    expect(screen.getAllByText("Invoices").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Customers").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("QuickBooks").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Missing Location Data").length).toBeGreaterThan(0);
-  });
-
-  it("does not render out-of-scope entries in the shell", () => {
-    render(
-      <QueryClientProvider client={makeQueryClient()}>
-        <DesktopShell navConfig={bookkeeperNav}>
-          <div>content</div>
-        </DesktopShell>
-      </QueryClientProvider>,
-    );
-    expect(screen.queryByText("Financial Pulse")).toBeNull();
-    expect(screen.queryByText("Manager Workspace")).toBeNull();
-    expect(screen.queryByText("Wet Checks")).toBeNull();
+  it("renders those destinations as plain links and nothing else", () => {
+    renderShell();
+    expect(screen.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]))
+      .toEqual(expected);
   });
 
   it("lets the content column shrink so wide tables cannot widen the window", () => {
@@ -461,7 +406,7 @@ function installFakeInvoiceApi(rows: FixtureInvoice[]) {
 function renderShell() {
   return render(
     <QueryClientProvider client={makeQueryClient()}>
-      <DesktopShell navConfig={bookkeeperNav}>
+      <DesktopShell role={session.role}>
         <div>content</div>
       </DesktopShell>
     </QueryClientProvider>,

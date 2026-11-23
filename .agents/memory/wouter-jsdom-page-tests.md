@@ -37,3 +37,12 @@ responsive layout mount, so any `data-testid` shared between them resolves to tw
 
 `DropdownMenuTrigger` opens on `pointerdown`, which jsdom does not synthesise from a click. Fire
 `pointerDown` first, then `click`, then wait for `role="menu"`.
+
+## 4. The full router needs browser shims, not a mocked Switch
+
+When testing navigation against the real role routers, stub browser-only startup (notably the PWA
+registration component) and `matchMedia`, and wait for a destination marker instead of checking
+only that the 404 is absent. Keep a missing-route case that reaches the real 404.
+
+**Why:** Vitest does not load the dev server's virtual PWA module or supply media queries, and a
+lazy route's loading screen also lacks a 404. Mocking the Switch would defeat the parity check.

@@ -1,4 +1,4 @@
-import type { NavConfig, NavItem, NavGroup, NavLeaf } from "./nav-config";
+import { findActivePage, type ResolvedNavSection } from "./nav-config";
 
 export interface BreadcrumbSegment {
   label: string;
@@ -13,22 +13,6 @@ export interface RouteMeta {
 function trimSlash(p: string): string {
   if (p.length > 1 && p.endsWith("/")) return p.slice(0, -1);
   return p;
-}
-
-function findLeaf(
-  items: NavItem[],
-  location: string,
-  parents: NavGroup[],
-): { leaf: NavLeaf; parents: NavGroup[] } | null {
-  for (const item of items) {
-    if (item.type === "leaf") {
-      if (item.path === location) return { leaf: item, parents };
-    } else {
-      const found = findLeaf(item.items, location, [...parents, item]);
-      if (found) return found;
-    }
-  }
-  return null;
 }
 
 const FALLBACK_PATTERNS: Array<{ regex: RegExp; meta: () => RouteMeta }> = [
@@ -51,7 +35,7 @@ const FALLBACK_PATTERNS: Array<{ regex: RegExp; meta: () => RouteMeta }> = [
     meta: () => ({
       title: "Wet Check Review",
       breadcrumb: [
-        { label: "Operations" },
+        { label: "Approvals" },
         { label: "Wet Check Reviews", path: "/wet-checks?tab=needs-review" },
         { label: "Detail" },
       ],
@@ -62,7 +46,7 @@ const FALLBACK_PATTERNS: Array<{ regex: RegExp; meta: () => RouteMeta }> = [
     meta: () => ({
       title: "Wet Check",
       breadcrumb: [
-        { label: "Operations" },
+        { label: "Field Work" },
         { label: "Wet Checks", path: "/wet-checks" },
         { label: "Detail" },
       ],
@@ -101,20 +85,27 @@ function humanize(seg: string): string {
     .join(" ");
 }
 
-export function resolveRouteMeta(location: string, config: NavConfig): RouteMeta {
+export function resolveRouteMeta(
+  location: string,
+  sections: ResolvedNavSection[],
+  search = "",
+): RouteMeta {
   const loc = trimSlash(location || "/");
+  const page = findActivePage(sections, loc, search);
 
-  const found = findLeaf(config.items, loc, []);
-  if (found) {
-    const breadcrumb: BreadcrumbSegment[] = [
-      ...found.parents.map((p) => ({ label: p.label })),
-      { label: found.leaf.label, path: found.leaf.path },
-    ];
-    return { title: found.leaf.label, breadcrumb };
+  // A specific detail pattern takes precedence over a matching parent page,
+  // but not over an exact configured destination (e.g. the Users shortcut).
+  if (page?.path !== loc) {
+    for (const { regex, meta } of FALLBACK_PATTERNS) {
+      if (regex.test(loc)) return meta();
+    }
   }
 
-  for (const { regex, meta } of FALLBACK_PATTERNS) {
-    if (regex.test(loc)) return meta();
+  if (page) {
+    const section = sections.find(({ id }) => id === page.sectionId);
+    const breadcrumb = [{ label: page.label }];
+    if (section && section.id !== "dashboard") breadcrumb.unshift({ label: section.label });
+    return { title: page.label, breadcrumb };
   }
 
   const segs = loc.split("/").filter(Boolean);

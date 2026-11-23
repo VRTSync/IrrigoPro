@@ -5,14 +5,7 @@ import { memoryLocation } from "wouter/memory-location";
 import { AppRoutes } from "@/App";
 import { AuthProvider } from "@/lib/auth-context";
 import { queryClient } from "@/lib/queryClient";
-import {
-  billingManagerNav,
-  bookkeeperNav,
-  companyAdminNav,
-  managerNav,
-  superAdminNav,
-  type NavItem,
-} from "./nav-config";
+import { navForRole, type NavRole } from "./nav-config";
 
 vi.mock("@/pages/login", () => ({ default: () => null }));
 vi.mock("@/pages/estimate-approval", () => ({ default: () => null }));
@@ -21,6 +14,7 @@ vi.mock("@/pages/field-tech-dashboard", () => ({ default: () => <div>Field tech 
 vi.mock("@/pages/user-profile", () => ({ default: () => <div>User profile</div> }));
 vi.mock("@/pages/quickbooks", () => ({ default: () => <div>QuickBooks page</div> }));
 vi.mock("@/pages/system-user-management", () => ({ default: () => <div>System users page</div> }));
+vi.mock("@/pages/wet-checks/WetCheckSystemPage", () => ({ default: () => <div>Wet check tabs</div> }));
 vi.mock("@/components/notifications/notification-system", () => ({ NotificationSystem: () => null }));
 vi.mock("@/components/offline/service-worker-update-prompt", () => ({
   ServiceWorkerRegistration: () => null,
@@ -28,17 +22,9 @@ vi.mock("@/components/offline/service-worker-update-prompt", () => ({
 }));
 vi.mock("@/components/offline/conflict-toast-bridge", () => ({ ConflictToastBridge: () => null }));
 
-const roleConfigs = [
-  { role: "company_admin", config: companyAdminNav },
-  { role: "irrigation_manager", config: managerNav },
-  { role: "billing_manager", config: billingManagerNav },
-  { role: "bookkeeper", config: bookkeeperNav },
-  { role: "super_admin", config: superAdminNav },
+const roles: NavRole[] = [
+  "company_admin", "irrigation_manager", "billing_manager", "bookkeeper", "super_admin",
 ];
-
-function leafPaths(items: NavItem[]): string[] {
-  return items.flatMap((item) => item.type === "leaf" ? [item.path] : leafPaths(item.items));
-}
 
 function mount(role: string, width: number, path = "/user-profile") {
   vi.stubGlobal("innerWidth", width);
@@ -91,11 +77,11 @@ afterEach(() => {
 
 describe("phone nav uses the actual role shell", () => {
   for (const width of [390, 820, 1023]) {
-    it.each(roleConfigs)(`lists every $role sidebar link in order at ${width}px`, async ({ role, config }) => {
+    it.each(roles)(`lists every %s sidebar link in order at ${width}px`, async (role) => {
       mount(role, width);
       const menu = await openMenu();
 
-      // Nested sidebar groups can start collapsed, just as on desktop.
+      // Sections start collapsed when no page is active, just as on desktop.
       let collapsed = menu.queryAllByRole("button", { expanded: false })
         .find((button) => button.hasAttribute("aria-controls"));
       while (collapsed) {
@@ -104,7 +90,7 @@ describe("phone nav uses the actual role shell", () => {
           .find((button) => button.hasAttribute("aria-controls"));
       }
       expect(menu.getAllByRole("link").map((link) => link.getAttribute("href")))
-        .toEqual(leafPaths(config.items));
+        .toEqual(navForRole(role).flatMap(({ pages }) => pages.map(({ href }) => href)));
     });
   }
 
@@ -124,6 +110,16 @@ describe("phone nav uses the actual role shell", () => {
     mount("bookkeeper", 390, "/quickbooks");
     const menu = await openMenu();
     fireEvent.click(menu.getByRole("link", { name: "QuickBooks" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("closes after choosing a different tab on the same page", async () => {
+    const location = mount("irrigation_manager", 390, "/wet-checks");
+    const menu = await openMenu();
+    expect(menu.getByRole("button", { name: "Field Work", expanded: true })).toBeVisible();
+    fireEvent.click(menu.getByRole("button", { name: "Approvals" }));
+    fireEvent.click(menu.getByRole("link", { name: "Wet Check Reviews" }));
+    expect(location.history).toEqual(["/wet-checks", "/wet-checks?tab=needs-review"]);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
