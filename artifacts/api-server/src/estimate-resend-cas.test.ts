@@ -25,7 +25,6 @@ import express, { type RequestHandler } from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { companies, db, estimateEmailSendClaims, estimates } from "@workspace/db";
-import type { EstimateWithItems } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { computeLifecycleStatus, ESTIMATE_EXPIRATION_DAYS } from "@workspace/shared";
 
@@ -127,16 +126,14 @@ function makeReadOnlyStorage(): EstimateRoutesStorage {
         .limit(1);
       return row && { ...row, items: [], lifecycleStatus: computeLifecycleStatus(row) };
     },
-    async getEstimates() {
-      return (await db.select().from(estimates)) as unknown as EstimateWithItems[];
-    },
+    getEstimateByApprovalToken: storage.getEstimateByApprovalToken.bind(storage),
     async createEstimateFromPayload() {
       throw new Error("not used in this test");
     },
     async updateEstimateWithItems() {
       throw new Error("not used in this test");
     },
-  } as unknown as EstimateRoutesStorage;
+  };
 }
 
 let publicServer: Server;

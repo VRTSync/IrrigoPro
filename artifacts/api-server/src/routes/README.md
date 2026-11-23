@@ -39,8 +39,8 @@ Guards referenced below are exported from `./estimate-role-guards.ts`:
 
 | Method | Path                                              | Guard                                                  | super_admin | company_admin | manager | irrigation_manager | billing_manager | field_tech | anon |
 | ------ | ------------------------------------------------- | ------------------------------------------------------ | ----------- | ------------- | ------- | ------------------ | --------------- | ---------- | ---- |
-| GET    | `/api/estimates`                                  | (none)                                                 | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | ✓    |
-| GET    | `/api/estimates/:id`                              | (none)                                                 | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | ✓    |
+| GET    | `/api/estimates`                                  | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
+| GET    | `/api/estimates/:id`                              | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
 | GET    | `/api/estimates/pending-approval`                 | `requireAuth` + `requireEstimateApprovalAccess`        | ✓           | ✓             | 403     | ✓                  | ✓               | 403        | 401  |
 | POST   | `/api/estimates`                                  | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |
 | PUT    | `/api/estimates/:id`                              | `requireAuth`                                          | ✓           | ✓             | ✓       | ✓                  | ✓               | ✓          | 401  |

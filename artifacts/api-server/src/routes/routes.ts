@@ -5986,7 +5986,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
       const users = await storage.getUsers();
-      const estimates = await storage.getEstimates();
+      const estimates = await storage.getEstimates({ companyId: null });
       const workOrders = await storage.getWorkOrders(null);
       
       const stats = {
@@ -6098,7 +6098,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rawBillingSheets = allBillingSheets.filter(bs => bs.customerId === customerId);
 
       // Get all estimates for the customer
-      const allEstimates = await storage.getEstimates();
+      const allEstimates = await storage.getEstimates({ companyId: callerCompanyId6320 });
       const rawEstimates = allEstimates.filter(est => est.customerId === customerId);
 
       // Get wet check billings for the customer

@@ -234,8 +234,12 @@ function makeStorageStub(): StorageStub {
     async getEstimate(id) {
       return stub.estimates.get(id);
     },
-    async getEstimates() {
-      return [...stub.estimates.values()] as never;
+    async getEstimates({ companyId, includeDeleted }) {
+      return [...stub.estimates.values()].filter((row) =>
+        (companyId === null || row.companyId === companyId) && (includeDeleted || !row.deletedAt));
+    },
+    async getEstimateByApprovalToken(token) {
+      return [...stub.estimates.values()].find((row) => row.approvalToken === token && !row.deletedAt);
     },
     async createEstimateFromPayload(payload) {
       stub.lastCreatePayload = payload as never;

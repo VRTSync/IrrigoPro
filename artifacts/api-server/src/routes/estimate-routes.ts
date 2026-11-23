@@ -97,7 +97,8 @@ export interface EstimateRoutesStorage {
   // approve, reject, reviewed email delivery, token approve/
   // reject, convert-to-work-order, PDF). The existing test suite does
   // not exercise these routes and so does not stub them.
-  getEstimates?(opts?: { includeDeleted?: boolean }): Promise<Estimate[]>;
+  getEstimates?(opts: { companyId: number | null; includeDeleted?: boolean }): Promise<Estimate[]>;
+  getEstimateByApprovalToken?(token: string): Promise<Estimate | undefined>;
   getEstimatesPendingApproval?(companyId: number | null): Promise<Estimate[]>;
   getEstimateSummary?(companyId: number | null): Promise<EstimateSummary>;
   softDeleteEstimate?(id: number, userId: number): Promise<boolean>;
@@ -330,21 +331,16 @@ export function registerEstimateRoutes(
   // and totals identically. See server/estimate-payload.ts for details.
 
   // ── GET /api/estimates ────────────────────────────────────────────────
-  app.get("/api/estimates", requireAuthentication, async (req: any, res) => {
+  app.get("/api/estimates", requireAuthentication, async (req, res) => {
     try {
       // Task #634 — super_admin can opt-in to see soft-deleted rows via
       // ?includeDeleted=1. All other roles always get the active list.
-      // `requireAuthentication` populates `authenticatedUserRole` from
-      // the header-auth context; without it the super_admin check would
-      // silently evaluate false and the toggle would be a no-op.
-      const role =
-        (req.authenticatedUserRole as string | undefined) ??
-        (typeof req.headers?.["x-user-role"] === "string"
-          ? (req.headers["x-user-role"] as string)
-          : undefined);
+      const role = req.authenticatedUserRole;
+      // Authentication rejects non-super-admins without a company.
+      const companyId = role === "super_admin" ? null : req.authenticatedUserCompanyId!;
       const includeDeleted =
         role === "super_admin" && String(req.query?.includeDeleted ?? "") === "1";
-      const list = await storage.getEstimates!({ includeDeleted });
+      const list = await storage.getEstimates!({ companyId, includeDeleted });
       // Task #532 — opt-in pagination; full list returned when ?limit and
       // ?offset are both omitted to preserve existing client behavior.
       // Task #643 — pricing fields stripped for field_tech via
@@ -428,11 +424,11 @@ export function registerEstimateRoutes(
   );
 
   // ── GET /api/estimates/:id ────────────────────────────────────────────
-  app.get("/api/estimates/:id", async (req, res) => {
+  app.get("/api/estimates/:id", requireAuthentication, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id));
       const estimate = await storage.getEstimate(id);
-      if (!estimate) {
+      if (!estimate || !estimateOwnershipMatches(req, estimate.companyId)) {
         res.status(404).json({ message: "Estimate not found" });
         return;
       }
@@ -1629,8 +1625,7 @@ export function registerEstimateRoutes(
   app.get("/api/estimates/view-by-token/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
-      const list = await storage.getEstimates!();
-      const summary = list.find((e) => e.approvalToken === token);
+      const summary = await storage.getEstimateByApprovalToken!(token);
 
       if (!summary) {
         res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
@@ -1864,8 +1859,7 @@ export function registerEstimateRoutes(
       const { signatureType, signatureData, signerName, consentText } = parsed.data;
 
       // ── Look up estimate by token ────────────────────────────────────
-      const list = await storage.getEstimates!();
-      const estimate = list.find((e) => e.approvalToken === token);
+      const estimate = await storage.getEstimateByApprovalToken!(token);
 
       if (!estimate) {
         res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
@@ -2204,8 +2198,7 @@ export function registerEstimateRoutes(
   app.get("/api/estimates/reject-via-token/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
-      const list = await storage.getEstimates!();
-      const estimate = list.find((e) => e.approvalToken === token);
+      const estimate = await storage.getEstimateByApprovalToken!(token);
 
       if (!estimate) {
         res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
@@ -2257,8 +2250,7 @@ export function registerEstimateRoutes(
   app.post("/api/estimates/reject-via-token/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
-      const list = await storage.getEstimates!();
-      const estimate = list.find((e) => e.approvalToken === token);
+      const estimate = await storage.getEstimateByApprovalToken!(token);
 
       if (!estimate) {
         res.status(404).json({ error: "not_found", message: "Invalid or expired link." });
@@ -2393,8 +2385,7 @@ export function registerEstimateRoutes(
       const token = String(req.params.token);
 
       // Look up estimate by token (expired tokens are allowed here).
-      const list = await storage.getEstimates!();
-      const estimate = list.find((e) => e.approvalToken === token);
+      const estimate = await storage.getEstimateByApprovalToken!(token);
 
       if (!estimate) {
         res.status(404).json({ error: "not_found", message: "This link could not be found." });

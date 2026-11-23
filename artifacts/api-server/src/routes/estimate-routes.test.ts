@@ -560,10 +560,10 @@ describe("DELETE /api/estimates/:id — role × lifecycle matrix (Task #658)", (
         if (!row || row.deletedAt) return undefined;
         return row;
       },
-      async getEstimates(opts) {
-        const includeDeleted = opts?.includeDeleted ?? false;
+      async getEstimates({ companyId, includeDeleted }) {
         const rows: Estimate[] = [];
         for (const row of stub.estimates.values()) {
+          if (companyId !== null && row.companyId !== companyId) continue;
           if (!includeDeleted && row.deletedAt) continue;
           rows.push(row as unknown as Estimate);
         }

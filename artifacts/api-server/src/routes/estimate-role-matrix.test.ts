@@ -82,6 +82,10 @@ type Role = (typeof ROLES)[number];
 
 // ─── Test harness ─────────────────────────────────────────────────────────────
 
+// Read fixture uses a different ID so the write cases still hit their existing
+// not-found branches for estimate 1.
+const matrixReadEstimate = { id: 2, companyId: 1, items: [] } as unknown as EstimateWithItems;
+
 // Stub auth: reads x-user-role / x-user-company-id and stamps the same
 // req fields the real requireAuthentication sets. No DB, no session.
 const stubAuth: RequestHandler = (req: any, res, next) => {
@@ -113,8 +117,11 @@ function makeStorageStub(): EstimateRoutesStorage {
     async getCustomer() {
       return customer;
     },
-    async getEstimate() {
-      return undefined;
+    async getEstimate(id) {
+      return id === matrixReadEstimate.id ? matrixReadEstimate : undefined;
+    },
+    async getEstimates() {
+      return [matrixReadEstimate];
     },
     async createEstimateFromPayload(payload) {
       return {
@@ -150,9 +157,6 @@ async function startMatrixServer(): Promise<Harness> {
   // Endpoints that don't have a role guard get `stubAuth` + `ok` so we
   // can prove they accept every authenticated role and still hand
   // back 200.
-
-  // List — auth-optional in routes.ts (no middleware at all).
-  app.get("/api/estimates", ok);
 
   // ── Routes registered BEFORE registerEstimateRoutes() ──────────────────
   //
@@ -201,11 +205,8 @@ async function startMatrixServer(): Promise<Harness> {
   app.get("/api/estimates/:id/pdf", stubAuth, requireEstimatePdfAccess, ok);
   app.post("/api/estimates/:id/pdf", stubAuth, requireEstimatePdfAccess, ok);
 
-  // Detail — auth-optional, mounted after fixed-path stubs above.
-  app.get("/api/estimates/:id", ok);
-
   // ── registerEstimateRoutes() ────────────────────────────────────────────
-  // POST/PUT/submit-for-review — mounted from the real
+  // List/detail and POST/PUT/submit-for-review are mounted from the real
   // registerEstimateRoutes() so any future role gating added there is
   // observed by this test. Routes for endpoints already stubbed above
   // are also registered here but are shadowed by the earlier stubs.
@@ -333,11 +334,11 @@ describe("Estimate role × screen matrix (Task #632)", () => {
     await close();
   });
 
-  // ─── Public list / detail — no auth required ────────────────────────────
-  it("GET /api/estimates and /api/estimates/:id allow every role (and unauthenticated callers) — they are list/read endpoints", async () => {
+  it("GET /api/estimates and /api/estimates/:id allow every authenticated role and refuse anonymous callers", async () => {
     for (const role of [...ROLES, null] as (Role | null)[]) {
-      assert.equal(await callAs(baseUrl, "GET", "/api/estimates", role), 200, `list as ${role ?? "anon"}`);
-      assert.equal(await callAs(baseUrl, "GET", "/api/estimates/1", role), 200, `detail as ${role ?? "anon"}`);
+      const expected = role === null ? 401 : 200;
+      assert.equal(await callAs(baseUrl, "GET", "/api/estimates", role), expected, `list as ${role ?? "anon"}`);
+      assert.equal(await callAs(baseUrl, "GET", `/api/estimates/${matrixReadEstimate.id}`, role), expected, `detail as ${role ?? "anon"}`);
     }
   });
 

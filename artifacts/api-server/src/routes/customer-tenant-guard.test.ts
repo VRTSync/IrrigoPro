@@ -244,8 +244,8 @@ describe("actual customer read handlers use the guard's resolved customer ID", (
   const own = { id: 10, companyId: 1 } as Customer;
   const foreign = { id: 1, companyId: 2 } as Customer;
   const rows = [
-    { id: 101, customerId: 1, projectName: "foreign", totalAmount: "1.00" },
-    { id: 110, customerId: 10, projectName: "own", totalAmount: "10.00" },
+    { id: 101, customerId: 1, companyId: 2, projectName: "foreign", totalAmount: "1.00" },
+    { id: 110, customerId: 10, companyId: 1, projectName: "own", totalAmount: "10.00" },
   ];
   beforeEach(async () => {
     targetReads = [];
@@ -261,7 +261,9 @@ describe("actual customer read handlers use the guard's resolved customer ID", (
       },
       async getWorkOrders() { return rows; },
       async getAllBillingSheets() { return rows; },
-      async getEstimates() { return rows; },
+      async getEstimates({ companyId }: { companyId: number | null; includeDeleted?: boolean }) {
+        return rows.filter((row) => companyId === null || row.companyId === companyId);
+      },
       getWetCheckBillingsByCustomer: byCustomer,
       getEstimatesByCustomer: byCustomer,
       getWorkOrdersByCustomer: byCustomer,

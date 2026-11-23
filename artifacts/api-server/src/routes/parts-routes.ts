@@ -54,35 +54,25 @@ export function registerPartRoutes(
   { requireAuthentication, applyPricingVisibility }: RegisterPartRoutesDeps,
 ): void {
   // Parts routes
-  // Get popular parts (frequently used) - this must come before /api/parts/:id
+  // Popularity is ranked per company, not across the full catalog.
   app.get("/api/parts/popular", requireAuthentication, async (req, res) => {
     try {
-      const companyId = req.authenticatedUserCompanyId || 1;
+      const companyId = req.authenticatedUserCompanyId;
+      if (companyId == null) {
+        // Only a super admin can reach this handler without a company.
+        res.json([]);
+        return;
+      }
       const limit = parseInt(req.query.limit as string) || 10;
       const popularParts = await storage.getPopularParts(companyId, limit);
-      res.json(popularParts);
+      res.json(applyPricingVisibility(req, popularParts));
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Failed to fetch popular parts" });
     }
   });
 
-  app.get("/api/parts/search", async (req, res) => {
-    try {
-      const query = req.query.q as string;
-      if (!query) {
-        res.status(400).json({ message: "Search query is required" });
-        return;
-      }
-      const parts = await storage.searchParts(query);
-      res.json(parts);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to search parts" });
-    }
-  });
-
-  // GET pending parts for approval (billing manager only) - must be before /api/parts/:id
+  // GET pending parts for approval.
   app.get("/api/parts/pending-approval", requireAuthentication, async (req, res) => {
     try {
       const userRole = req.authenticatedUserRole;
@@ -100,32 +90,8 @@ export function registerPartRoutes(
   });
 
   // ── CSV Export ────────────────────────────────────────────────────────────
-  // GET /api/parts/export-csv — extracted to parts-export-route.ts for
-  // testability. Must be registered before /api/parts/:id so "export-csv"
-  // is not treated as a numeric part id.
+  // GET /api/parts/export-csv — extracted to parts-export-route.ts for testability.
   registerPartsExportRoute(app, { requireAuthentication, applyPricingVisibility, storage });
-
-  app.get("/api/parts/:id", async (req, res) => {
-    try {
-      const id = parseInt(String(req.params.id));
-
-      // Validate part ID is a valid number
-      if (isNaN(id) || id <= 0) {
-        res.status(400).json({ message: "Invalid part ID" });
-        return;
-      }
-
-      const part = await storage.getPart(id);
-      if (!part) {
-        res.status(404).json({ message: "Part not found" });
-        return;
-      }
-      res.json(part);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ message: "Failed to fetch part" });
-    }
-  });
 
   app.post("/api/parts", requireAuthentication, async (req, res) => {
     try {
@@ -1014,9 +980,14 @@ export function registerPartRoutes(
     }
   });
 
-  app.get("/api/parts", async (req, res) => {
+  app.get("/api/parts", requireAuthentication, async (req, res) => {
     try {
-      const parts = await storage.getParts();
+      const role = req.authenticatedUserRole;
+      const requested = Number(req.query.companyId);
+      const companyId = role === "super_admin"
+        ? (Number.isSafeInteger(requested) && requested > 0 ? requested : null)
+        : req.authenticatedUserCompanyId;
+      const parts = await storage.getParts(companyId);
       // Strip pricing fields for field technicians (they see names/quantities only)
       res.json(applyPricingVisibility(req, parts));
     } catch (error) {

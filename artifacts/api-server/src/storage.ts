@@ -629,13 +629,13 @@ export interface IStorage {
   // Parts
   getParts(companyId?: number | null): Promise<Part[]>;
   getPart(id: number): Promise<Part | undefined>;
-  searchParts(query: string): Promise<Part[]>;
   createPart(part: InsertPart): Promise<Part>;
   updatePart(id: number, part: Partial<InsertPart>): Promise<Part | undefined>;
   syncPartsFromGoogleDocs(docUrl: string): Promise<void>;
 
   // Estimates
-  getEstimates(opts?: { includeDeleted?: boolean }): Promise<Estimate[]>;
+  getEstimates(opts: { companyId: number | null; includeDeleted?: boolean }): Promise<Estimate[]>;
+  getEstimateByApprovalToken(token: string): Promise<Estimate | undefined>;
   getEstimatesPendingApproval(companyId: number | null): Promise<Estimate[]>;
   // Task #683 — aggregate summary for the Estimate Command Center.
   // Same company scoping as getEstimatesPendingApproval; `null` for
@@ -2779,21 +2779,6 @@ export class DatabaseStorage implements IStorage {
     return part || undefined;
   }
 
-  async searchParts(query: string): Promise<Part[]> {
-    const words = query.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      return await db.select().from(parts);
-    }
-    const conditions = words.map(word =>
-      or(
-        ilike(parts.name, `%${word}%`),
-        ilike(parts.description, `%${word}%`),
-        ilike(parts.sku, `%${word}%`)
-      )
-    );
-    return await db.select().from(parts).where(and(...conditions));
-  }
-
   async createPart(part: InsertPart): Promise<Part> {
     const serialized: DrizzlePartInsert = {
       ...toDrizzleInsert<DrizzlePartInsert>(part),
@@ -3027,14 +3012,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Estimates
-  async getEstimates(opts?: { includeDeleted?: boolean }): Promise<Estimate[]> {
+  async getEstimates(opts: { companyId: number | null; includeDeleted?: boolean }): Promise<Estimate[]> {
     // Task #634 — exclude soft-deleted rows unless the caller (super_admin
     // with `?includeDeleted=1`) explicitly opts in.
-    const baseQuery = db.select().from(estimates);
-    const filtered = opts?.includeDeleted
-      ? baseQuery
-      : baseQuery.where(isNull(estimates.deletedAt));
-    const estimatesList = await filtered.orderBy(desc(estimates.createdAt));
+    const estimatesList = await db.select().from(estimates).where(and(
+      opts.companyId === null ? undefined : eq(estimates.companyId, opts.companyId),
+      opts.includeDeleted ? undefined : isNull(estimates.deletedAt),
+    )).orderBy(desc(estimates.createdAt));
 
     // Task #1898 — item totals used to be fetched with one query PER estimate
     // (365 estimates = 366 round trips, each acquiring a pooled connection).
@@ -3042,16 +3026,29 @@ export class DatabaseStorage implements IStorage {
     // timeout and the whole list 500'd. One batched read instead.
     const itemTotals = await this._estimateItemTotals(estimatesList.map((e) => e.id));
 
-    return estimatesList.map((estimate) => {
-      const t = computeEstimateTotals(estimate, itemTotals.get(estimate.id));
-      return {
-        ...estimate,
-        partsSubtotal: t.partsSubtotal.toFixed(2),
-        laborSubtotal: t.laborSubtotal.toFixed(2),
-        totalAmount: t.totalAmount.toFixed(2),
-        lifecycleStatus: computeLifecycleStatus(estimate),
-      };
-    });
+    return estimatesList.map((estimate) => this._withEstimateTotals(estimate, itemTotals.get(estimate.id)));
+  }
+
+  async getEstimateByApprovalToken(token: string): Promise<Estimate | undefined> {
+    const [row] = await db.select().from(estimates).where(and(
+      eq(estimates.approvalToken, token),
+      isNull(estimates.deletedAt),
+    )).limit(1);
+    if (!row) return undefined;
+
+    const itemTotals = await this._estimateItemTotals([row.id]);
+    return this._withEstimateTotals(row, itemTotals.get(row.id));
+  }
+
+  private _withEstimateTotals(estimate: Estimate, totals: EstimateItemTotals | undefined): Estimate {
+    const t = computeEstimateTotals(estimate, totals);
+    return {
+      ...estimate,
+      partsSubtotal: t.partsSubtotal.toFixed(2),
+      laborSubtotal: t.laborSubtotal.toFixed(2),
+      totalAmount: t.totalAmount.toFixed(2),
+      lifecycleStatus: computeLifecycleStatus(estimate),
+    };
   }
 
   // Task #1898 — sum estimate_items per estimate in ONE query.
