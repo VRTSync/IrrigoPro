@@ -58,9 +58,9 @@ export function MetricTile({
       data-testid={testId}
     >
       <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <p className="text-sm font-medium text-slate-500 mb-1">{label}</p>
-          <p className="text-3xl font-bold text-slate-900 tracking-tight">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-500 mb-1 break-words">{label}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight break-words">
             {value}
           </p>
           {trend && (
@@ -77,7 +77,7 @@ export function MetricTile({
           )}
         </div>
         {Icon && (
-          <div className={cn("p-2 rounded-xl bg-white/50", iconColors[variant])}>
+          <div className={cn("hidden sm:block shrink-0 p-2 rounded-xl bg-white/50", iconColors[variant])}>
             <Icon className="w-6 h-6" />
           </div>
         )}

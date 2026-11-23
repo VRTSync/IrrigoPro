@@ -18,11 +18,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+// Radix Select uses pointer capture, which jsdom does not implement.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => {};
+Element.prototype.releasePointerCapture ??= () => {};
+Element.prototype.scrollIntoView ??= () => {};
+
 // ─── Module mocks ────────────────────────────────────────────────────────────
 
 // vi.hoisted so spies are defined before vi.mock factories run (hoisted to top).
 const { apiRequestSpy } = vi.hoisted(() => ({
-  apiRequestSpy: vi.fn(async () => []),
+  apiRequestSpy: vi.fn(async (_path: string): Promise<unknown> => []),
 }));
 
 vi.mock("@/lib/queryClient", async () => {
@@ -111,9 +117,23 @@ function buildQc(
   workOrders: ReturnType<typeof makeWorkOrder>[],
   opts: { forTechId?: number } = {},
 ) {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  const qc: QueryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0,
+        staleTime: Infinity,
+        queryFn: ({ queryKey }): unknown => {
+          const fixture = qc.getQueryData(queryKey);
+          if (fixture === undefined) throw new Error(`No query fixture for ${JSON.stringify(queryKey)}`);
+          return fixture;
+        },
+      },
+    },
   });
+  apiRequestSpy.mockImplementation(async (path) =>
+    path.startsWith("/api/work-orders") ? workOrders : [],
+  );
 
   if (opts.forTechId !== undefined) {
     // field_tech branch uses a different query key
@@ -144,13 +164,13 @@ function Wrapper({ qc }: { qc: QueryClient }) {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("WorkOrders — tech Assign Select role gate", () => {
-  afterEach(() => {
-    localStorage.clear();
-    apiRequestSpy.mockReset();
-    apiRequestSpy.mockResolvedValue([]);
-  });
+afterEach(() => {
+  localStorage.clear();
+  apiRequestSpy.mockReset();
+  apiRequestSpy.mockResolvedValue([]);
+});
 
+describe("WorkOrders — tech Assign Select role gate", () => {
   it("company_admin sees Assign select on an active non-billed work order", async () => {
     setUser("company_admin");
     const wo = makeWorkOrder(201);
@@ -200,5 +220,28 @@ describe("WorkOrders — tech Assign Select role gate", () => {
     // In no scenario should the Assign dropdown be present for field_tech
     expect(screen.queryByTestId("assign-tech-select-203")).toBeNull();
     expect(screen.queryByTestId("assign-tech-select-mobile-203")).toBeNull();
+  });
+});
+
+describe("WorkOrders — list fit", () => {
+  it("shows readable review and billing handoff statuses on the list", async () => {
+    setUser("company_admin");
+    const qc = buildQc([
+      { ...makeWorkOrder(204), status: "approved_passed_to_billing" },
+      { ...makeWorkOrder(205), status: "pending_manager_review" },
+    ]);
+
+    const { container } = render(<WorkOrders />, { wrapper: Wrapper({ qc }) });
+
+    expect(await screen.findByText("Approved / Passed to Billing")).toBeVisible();
+    expect(screen.getByText("Pending Review")).toBeVisible();
+    expect(container).not.toHaveTextContent(/_/);
+  });
+  it("lets the filters wrap instead of scrolling sideways", () => {
+    setUser("company_admin");
+    render(<WorkOrders />, { wrapper: Wrapper({ qc: buildQc([]) }) });
+    const filters = screen.getByTestId("filter-all").parentElement;
+    expect(filters).toHaveClass("flex-wrap");
+    expect(filters).not.toHaveClass("overflow-x-auto");
   });
 });

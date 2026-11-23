@@ -225,7 +225,7 @@ export default function MissingPhotosReport() {
         title="Missing Photos Report"
         subtitle="Past billing sheets with no photos attached. Open a sheet and use Add Photos to re-attach them."
         actions={
-          <div className="flex items-center gap-2">
+          <>
             <Button asChild variant="outline" size="sm">
               <a href="/api/billing-sheets/missing-photos?format=csv" data-testid="button-download-csv">
                 <Download className="w-4 h-4 mr-2" />
@@ -241,7 +241,7 @@ export default function MissingPhotosReport() {
               <Send className="w-4 h-4 mr-2" />
               {notifyMutation.isPending ? "Sending…" : "Notify technicians"}
             </Button>
-          </div>
+          </>
         }
       />
 

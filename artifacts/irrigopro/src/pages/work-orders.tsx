@@ -231,8 +231,12 @@ export default function WorkOrders() {
         return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Billed</Badge>;
       case 'cancelled':
         return <Badge className="bg-red-100 text-red-800 border-red-200">Cancelled</Badge>;
+      case 'pending_manager_review':
+        return <Badge className="bg-amber-100 text-amber-800 border-amber-200">Pending Review</Badge>;
+      case 'approved_passed_to_billing':
+        return <Badge className="bg-teal-100 text-teal-800 border-teal-200">Approved / Passed to Billing</Badge>;
       default:
-        return <Badge variant="outline">{status}</Badge>;
+        return <Badge variant="outline">{status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</Badge>;
     }
   };
 
@@ -498,8 +502,8 @@ export default function WorkOrders() {
             />
           </div>
           
-          {/* Filter Pills - Horizontally Scrollable on Mobile */}
-          <div className="flex gap-2 overflow-x-auto pb-2 -mx-5 px-5 scrollbar-hide">
+          {/* Filter Pills */}
+          <div className="flex flex-wrap gap-2 pb-2">
             <Button 
               variant={statusFilter === "all" ? "default" : "outline"}
               onClick={() => setStatusFilter("all")}

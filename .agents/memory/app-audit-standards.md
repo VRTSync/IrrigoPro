@@ -9,6 +9,8 @@ Pages must fit without horizontal window or inner scrolling at browser widths of
 
 **How to apply:** Measure both window and inner scrolling in a real browser; don't hide overflow or drop columns to pass. Use the same role navigation tree on desktop and in the phone menu, and keep legacy redirects for bookmarks rather than linking to them.
 
+Pass independent actions to a wrapping header as siblings. A nested non-wrapping flex row makes the parent treat the whole group as one item; the group can move below the title and still overflow. Check real narrow viewports with all actions present, and include intentional horizontal scrollers such as filter strips when measuring inner overflow.
+
 Opening a page must not write data. The throttled invoice payment-status refresh is the explicit exception. Estimate pages stay separate; Customers becomes one page with distinct Billable and All views.
 
 **Why:** Viewing a record is not consent to change it, and the separate billing view is part of the office workflow.
