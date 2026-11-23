@@ -9,6 +9,12 @@ Pages must fit without horizontal window or inner scrolling at browser widths of
 
 **How to apply:** Measure both window and inner scrolling in a real browser; don't hide overflow or drop columns to pass. Use the same role navigation tree on desktop and in the phone menu, and keep legacy redirects for bookmarks rather than linking to them.
 
+When one stacked table overflows just above the shared 820 px cutoff, fit that table rather than moving the shared cutoff for every page.
+
+**Why:** A wider navigation rail can place the first full-table layout in a narrow band that common viewport checks miss. Other tables may already fit there.
+
+**How to apply:** Measure the table's scroll wrapper at exactly 820 px with populated rows, including long text, and check that the card layout is unchanged just below it.
+
 When measuring a width transition, wait for the actual final width rather than a rounded approximation. Separate visible scrollers from offscreen accessibility text and intentional text ellipses; their `scrollWidth` alone does not establish visible overflow.
 
 When comparing sidebar links in Chromium, wait for React to render expanded groups before collecting links, and wait for the sheet to slide onscreen before clicking a link. A mounted, measurable sheet can still be offscreen during its opening animation.
