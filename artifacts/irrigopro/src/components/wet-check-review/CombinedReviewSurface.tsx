@@ -9,8 +9,8 @@
  *
  * Inspection mode (mode === 'inspection'):
  *   Skips finding-triage (Inspection WCs document only; no individual routing).
- *   Shows InspectionEstimateSection instead — auto-builds one estimate from findings,
- *   lets the manager review line items, then approve (which converts the WC).
+ *   Shows InspectionEstimateSection instead — reads the estimate if one exists,
+ *   or lets the manager build it before reviewing and passing it to Estimates.
  */
 
 import { useState } from "react";
@@ -377,9 +377,8 @@ function NoSnapshotYet() {
 
 // ── Inspection estimate section ───────────────────────────────────────────────
 // Shown instead of the triage + snapshot flow for mode === 'inspection'.
-// Calls build-inspection-estimate (idempotent) on mount to get/create the
-// estimate, shows a read-only summary of line items and totals, then lets the
-// manager approve it (which also marks the wet check `converted`).
+// Reads the estimate and only builds it on request. The manager can review
+// line items and totals before passing it to Estimates (which marks the wet check `converted`).
 
 interface InspectionEstimateSectionProps {
   wetCheckId: number;
@@ -395,17 +394,34 @@ function InspectionEstimateSection({ wetCheckId, wcStatus }: InspectionEstimateS
   const [editorOpen, setEditorOpen] = useState(false);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
 
-  // Build (or fetch) the estimate on mount. This is an idempotent POST.
+  const estimateQueryKey = ["/api/wet-checks", wetCheckId, "inspection-estimate"] as const;
+
+  // Read the estimate built from this inspection, if any. Never writes.
   const {
     data: estimate,
-    isLoading: buildLoading,
-    isError: buildError,
+    isLoading: estimateLoading,
+    isError: estimateError,
     refetch: refetchEstimate,
-  } = useQuery<EstimateWithItems>({
-    queryKey: ["/api/wet-checks", wetCheckId, "inspection-estimate"],
-    queryFn: () => apiRequest(`/api/wet-checks/${wetCheckId}/build-inspection-estimate`, "POST", {}),
+  } = useQuery<{ estimate: EstimateWithItems | null }, Error, EstimateWithItems | null>({
+    queryKey: estimateQueryKey,
+    queryFn: () => apiRequest(`/api/wet-checks/${wetCheckId}/inspection-estimate`, "GET"),
+    select: (r) => r.estimate,
     retry: 1,
-    staleTime: 0,
+    // The global stale time is infinite; another manager may have built the
+    // estimate since this inspection was last opened.
+    refetchOnMount: "always",
+  });
+
+  const buildMut = useMutation<EstimateWithItems, Error>({
+    mutationFn: () => apiRequest(`/api/wet-checks/${wetCheckId}/build-inspection-estimate`, "POST", {}),
+    onSuccess: async (est) => {
+      await qc.cancelQueries({ queryKey: estimateQueryKey });
+      qc.setQueryData(estimateQueryKey, { estimate: est });
+      void qc.invalidateQueries({ queryKey: ["/api/estimates"] });
+    },
+    onError: (error) => {
+      toast({ title: "Could not build estimate", description: error.message, variant: "destructive" });
+    },
   });
 
   const [passErr, setPassErr] = useState<string | null>(null);
@@ -457,7 +473,7 @@ function InspectionEstimateSection({ wetCheckId, wcStatus }: InspectionEstimateS
     },
   });
 
-  if (buildLoading) {
+  if (estimateLoading) {
     return (
       <div className="space-y-3" data-testid="crs-inspection-loading">
         <Skeleton className="h-6 w-64" />
@@ -467,7 +483,7 @@ function InspectionEstimateSection({ wetCheckId, wcStatus }: InspectionEstimateS
     );
   }
 
-  if (buildError || !estimate) {
+  if (estimateError || estimate === undefined) {
     return (
       <div
         className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 space-y-2"
@@ -484,6 +500,22 @@ function InspectionEstimateSection({ wetCheckId, wcStatus }: InspectionEstimateS
           className="border-red-300 text-red-700 hover:bg-red-100"
         >
           Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (estimate === null) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm space-y-2" data-testid="crs-inspection-no-estimate">
+        <p>No estimate has been built from this inspection yet.</p>
+        <Button
+          size="sm"
+          disabled={buildMut.isPending}
+          onClick={() => buildMut.mutate()}
+          data-testid="crs-inspection-build-estimate"
+        >
+          {buildMut.isPending ? "Building..." : "Build estimate"}
         </Button>
       </div>
     );
@@ -998,8 +1030,8 @@ export function CombinedReviewSurface({ wetCheckId }: CombinedReviewSurfaceProps
           testId="crs-inspection-section"
         >
           <div className="text-xs text-gray-500 mb-3">
-            This is an inspection wet check. All documented findings have been consolidated into a
-            single estimate below. Review the line items, then pass to estimates so the customer can approve.
+            All documented findings go into one estimate. Review the line items before passing the
+            estimate to Estimates for customer approval.
           </div>
           <InspectionEstimateSection
             wetCheckId={wetCheckId}

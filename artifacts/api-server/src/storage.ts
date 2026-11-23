@@ -1244,6 +1244,10 @@ export interface IStorage {
   }>;
 
   // WC Inspection Mode — Slice 2
+  getInspectionEstimateForWetCheck(wcId: number, companyId: number): Promise<
+    { status: "not_found" } | { status: "not_inspection" } | { status: "ok"; estimate: EstimateWithItems | null }
+  >;
+
   // Build (or return the existing) estimate from an Inspection wet check's
   // findings. Idempotent: if an estimate with originWetCheckId = wcId already
   // exists it is returned without creating a duplicate.
@@ -11178,6 +11182,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ─── WC Inspection Mode — Slice 2 ───────────────────────────────────────────
+  private async findInspectionEstimate(
+    exec: DbExecutor,
+    wcId: number,
+    companyId: number,
+  ): Promise<EstimateWithItems | null> {
+    const [existing] = await exec.select().from(estimates)
+      .where(and(eq(estimates.originWetCheckId, wcId), eq(estimates.companyId, companyId)));
+    if (!existing) return null;
+
+    const items = await exec.select().from(estimateItems)
+      .where(eq(estimateItems.estimateId, existing.id));
+    return { ...existing, lifecycleStatus: computeLifecycleStatus(existing), items };
+  }
+
+  async getInspectionEstimateForWetCheck(
+    wcId: number,
+    companyId: number,
+  ): Promise<
+    { status: "not_found" } | { status: "not_inspection" } | { status: "ok"; estimate: EstimateWithItems | null }
+  > {
+    const [wc] = await db.select().from(wetChecks)
+      .where(and(eq(wetChecks.id, wcId), eq(wetChecks.companyId, companyId)));
+    if (!wc) return { status: "not_found" };
+    if (wc.mode !== "inspection") return { status: "not_inspection" };
+    return { status: "ok", estimate: await this.findInspectionEstimate(db, wcId, companyId) };
+  }
+
   //
   // buildEstimateFromInspectionWetCheck
   // ------------------------------------
@@ -11201,13 +11232,8 @@ export class DatabaseStorage implements IStorage {
       }
 
       // 2. Duplicate guard: return existing estimate if one is already linked.
-      const [existing] = await tx.select().from(estimates)
-        .where(eq(estimates.originWetCheckId, wcId));
-      if (existing) {
-        const items = await tx.select().from(estimateItems)
-          .where(eq(estimateItems.estimateId, existing.id));
-        return { ...existing, lifecycleStatus: computeLifecycleStatus(existing), items } as EstimateWithItems;
-      }
+      const existing = await this.findInspectionEstimate(tx, wcId, companyId);
+      if (existing) return existing;
 
       // 3. Load customer for pricing context.
       const [cust] = await tx.select().from(customers).where(eq(customers.id, wc.customerId));

@@ -18,6 +18,7 @@ import {
 } from "../storage";
 import { classifyAndLog as _classifyAndLog } from "./route-error-helpers";
 import { registerWetCheckPhotoAttachRoutes } from "./wet-check-photo-attach-route";
+import { registerWetCheckInspectionEstimateGetRoute } from "./wet-check-inspection-estimate-get";
 import { registerWetCheckCreateRoutes } from "./wet-check-create-route";
 import { registerWorkOrderZoneRoutes } from "./work-order-zone-route";
 import type { InsertInvoice, InsertCustomer } from "@workspace/db";
@@ -17342,6 +17343,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ── WC Inspection Mode — Slice 2 ─────────────────────────────────────────
+  registerWetCheckInspectionEstimateGetRoute(app, { requireAuthentication, requireCompanyId });
+
   //
   // POST /api/wet-checks/:id/build-inspection-estimate
   //   Idempotent: builds one estimate from the Inspection wet check's findings,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth-context";
@@ -8,6 +8,7 @@ import { FileText, Loader2, AlertCircle, Calendar, CheckCircle2, RefreshCw, Clip
 import { Card, CardContent } from "@/components/ui/card";
 import { apiRequest, queryClient, useArrayQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { usePaymentStatusSync } from "@/hooks/use-payment-status-sync";
 import { InvoiceAuditModal } from "./invoice-audit-modal";
 
 interface Invoice {
@@ -108,37 +109,7 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
     },
   });
 
-  const paymentSyncMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("/api/invoices/sync-payment-status", "POST");
-    },
-    onSuccess: (result: any) => {
-      if (result?.throttled) {
-        // Silently swallow throttle responses from the auto-trigger on load
-        return;
-      }
-      const paid = result?.paid ?? 0;
-      const partial = result?.partiallyPaid ?? 0;
-      const msg = paid > 0 || partial > 0
-        ? `Updated ${paid} paid, ${partial} partially paid`
-        : "All invoices are up to date";
-      toast({ title: "Payment status refreshed", description: msg });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-    },
-    onError: () => {
-      // Silent on auto-trigger errors; user-initiated clicks will see the error
-    },
-  });
-
-  // Task #1831 — Auto-trigger payment sync on mount. Server-side throttle
-  // (5 min/company) prevents hammering QBO on every render.
-  // Task #1886 — only for roles that may write; otherwise this fires a
-  // guaranteed 403 on every mount for read-only roles.
-  useEffect(() => {
-    if (!canWriteInvoices) return;
-    paymentSyncMutation.mutate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canWriteInvoices]);
+  const paymentSync = usePaymentStatusSync({ autoRun: canWriteInvoices });
 
   const { data: invoices = [], isLoading, error } = useArrayQuery<Invoice>({
     queryKey: ["/api/invoices", { customerId, limit }],
@@ -246,11 +217,11 @@ export function InvoiceList({ customerId, limit = 20, onOpenPdf }: InvoiceListPr
             variant="outline"
             size="sm"
             className="text-xs gap-1.5"
-            disabled={paymentSyncMutation.isPending}
-            onClick={() => paymentSyncMutation.mutate()}
-            data-testid="button-sync-payment-status"
+            disabled={paymentSync.isPending}
+            onClick={paymentSync.runNow}
+            data-testid="button-refresh-qb-payments"
           >
-            {paymentSyncMutation.isPending ? (
+            {paymentSync.isPending ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <RefreshCw className="w-3.5 h-3.5" />

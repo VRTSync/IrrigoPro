@@ -82,6 +82,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
+import { usePaymentStatusSync } from "@/hooks/use-payment-status-sync";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { InvoicePdfPreviewModal } from "@/components/billing/invoice-pdf-preview-modal";
 import { InvoiceAuditModal } from "@/components/billing/invoice-audit-modal";
@@ -1084,77 +1085,7 @@ export default function InvoicesPage() {
     },
   });
 
-  // Task #1831/#1832 — Refresh payment status from QBO Balance field.
-  // isAutoSyncRef distinguishes the on-mount auto-trigger (silent on no
-  // changes) from manual button clicks (always shows a result toast).
-  const isAutoSyncRef = useRef(false);
-
-  const paymentSyncMutation = useMutation({
-    mutationFn: () => apiRequest("/api/invoices/sync-payment-status", "POST"),
-    onSuccess: (result: any) => {
-      const wasAuto = isAutoSyncRef.current;
-      isAutoSyncRef.current = false;
-
-      if (result?.throttled) {
-        // Auto-trigger: always silent when throttled (background operation).
-        // Manual click: show a toast with how long until the next sync is available.
-        if (!wasAuto) {
-          const secs = result?.nextAllowedIn ?? 0;
-          const mins = Math.ceil(secs / 60);
-          toast({
-            title: "Recently synced",
-            description: `Next refresh available in ${mins} minute${mins !== 1 ? "s" : ""}.`,
-          });
-        }
-        return;
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-
-      const paid = result?.paid ?? 0;
-      const partial = result?.partiallyPaid ?? 0;
-      const voided = result?.qbVoided ?? 0;
-      const hasChanges = paid > 0 || partial > 0;
-
-      // Auto-trigger: only toast when something actually changed
-      if (wasAuto && !hasChanges && voided === 0) return;
-
-      const parts: string[] = [];
-      if (hasChanges) parts.push(`Updated ${paid} paid, ${partial} partially paid`);
-      else parts.push("All invoices are up to date");
-      if (voided > 0) parts.push(`${voided} voided in QuickBooks — review required`);
-      toast({ title: "Payment status refreshed from QuickBooks", description: parts.join(". ") });
-    },
-    onError: (err: Error) => {
-      const wasAuto = isAutoSyncRef.current;
-      isAutoSyncRef.current = false;
-
-      // Auto-trigger errors are silent — it's a background operation
-      if (wasAuto) return;
-
-      toast({
-        title: "Payment sync failed",
-        description: err.message || "Could not read payment status from QuickBooks.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Task #1832 — Auto-trigger payment sync on page load. The endpoint is
-  // throttled server-side (5 min per company), so calling it on every mount
-  // is safe — it returns immediately with {throttled:true} when recently run.
-  // Silent when throttled or when nothing changed; toast only on actual updates.
-  //
-  // Task #1886 — gated on CAN_EDIT_INVOICES. The endpoint stamps
-  // paymentStatus/balance/paidAt, so it is write-classified; firing it on mount
-  // for a read-only role (bookkeeper) produced a silent background 403 on the
-  // role's own landing page.
-  useEffect(() => {
-    if (!canBillingEdit) return;
-    isAutoSyncRef.current = true;
-    paymentSyncMutation.mutate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canBillingEdit]);
+  const paymentSync = usePaymentStatusSync({ autoRun: canBillingEdit });
 
   // Task #1438 — record/undo manual delivery of an invoice. mark-sent flips
   // a draft → sent (stamping sentAt); mark-unsent reverts a sent → draft.
@@ -2198,8 +2129,8 @@ export default function InvoicesPage() {
           canSeeQuickBooksStatus={canManageQuickBooks}
           canRunPaymentSync={canManageQuickBooks}
           quickBooksHealth={quickBooksHealth}
-          onRunPaymentSync={() => paymentSyncMutation.mutate()}
-          isSyncing={paymentSyncMutation.isPending}
+          onRunPaymentSync={paymentSync.runNow}
+          isSyncing={paymentSync.isPending}
           actions={
             <Button
               variant="outline"

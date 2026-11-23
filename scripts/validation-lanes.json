@@ -175,6 +175,10 @@
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-reporter=spec src/wet-check-select-shape.test.ts"
     },
     {
+      "name": "wet-check-inspection-estimate-read",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --experimental-test-module-mocks --test --test-concurrency=1 --test-reporter=spec src/routes/wet-check-inspection-estimate-get.test.ts"
+    },
+    {
       "name": "work-order-labor-hours",
       "command": "pnpm --filter @workspace/shared exec node --import tsx --test --test-reporter=spec src/work-order-labor-hours.test.ts"
     },
@@ -279,6 +283,10 @@
     {
       "name": "invoice-ar-ui",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/invoices-ar-collections.test.tsx"
+    },
+    {
+      "name": "audit-page-open-ui",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/wet-check-review/CombinedReviewSurface.test.tsx src/hooks/use-payment-status-sync.test.ts"
     },
     {
       "name": "invoice-ar-notes-panel",
