@@ -58,7 +58,6 @@ import NewWetCheckPage from "@/pages/wet-checks/NewWetCheckPage";
 const WetCheckConfirm = lazy(() => import("@/components/manager/wet-check-confirm").then((m) => ({ default: m.WetCheckConfirm })));
 const WetCheckDone = lazy(() => import("@/components/manager/wet-check-done").then((m) => ({ default: m.WetCheckDone })));
 import AdminIssueTypesPage from "@/pages/admin-issue-types";
-import AdminClientErrorsPage from "@/pages/admin-client-errors";
 import WetCheckInspectionSummaryPage from "@/pages/wet-checks/WetCheckInspectionSummaryPage";
 import ManagerWetCheckDetailPage from "@/pages/wet-checks/ManagerWetCheckDetailPage";
 import CombinedReviewPage from "@/pages/wet-checks/CombinedReviewPage";
@@ -225,7 +224,6 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/manager/wet-checks/:id" component={CombinedReviewPage} />
           <Route path="/wet-checks/admin" component={RedirectToWetChecks} />
           <Route path="/admin/issue-types" component={AdminIssueTypesPage} />
-          <Route path="/admin/client-errors" component={AdminClientErrorsPage} />
           <Route path="/admin/wet-check-reconciliation" component={WetCheckReconciliationPage} />
           <Route path="/wet-checks/pending-review" component={RedirectToWetChecksNeedsReview} />
           <Route path="/wet-checks/:id/review" component={CombinedReviewPage} />

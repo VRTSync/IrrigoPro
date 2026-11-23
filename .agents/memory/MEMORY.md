@@ -86,3 +86,4 @@
 - [Unwired controller slots](unwired-controller-slots.md) — physical unused slots need Not Wired, distinct from Other or a wired zone at zero minutes; preserve numbering.
 - [Outgoing Email decisions](outgoing-email-decisions.md) — locked sender, review, sent-copy and batch-delivery rules; assigned slice text controls implementation and evidence.
 - [Runtime email readiness](runtime-email-readiness.md) — a secret-existence listing can disagree with the running service; use the domain-check response without reading credentials.
+- [Crash report access](crash-report-access.md) — crash report viewing is platform-only; crash submissions stay open to all existing reporter roles.

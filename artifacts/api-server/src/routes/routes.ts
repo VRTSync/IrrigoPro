@@ -1582,8 +1582,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   app.get("/api/admin/client-errors", requireAuthentication, async (req, res) => {
     const role = req.authenticatedUserRole;
-    if (role !== "super_admin" && role !== "company_admin") {
-      res.status(403).json({ message: "Admin access required" });
+    if (role !== "super_admin") {
+      res.status(403).json({ message: "Super admin access required" });
       return;
     }
     try {

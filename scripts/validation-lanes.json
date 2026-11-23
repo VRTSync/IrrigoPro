@@ -107,6 +107,10 @@
   ],
   "api-field": [
     {
+      "name": "admin-client-errors-role",
+      "command": "pnpm --filter @workspace/api-server exec node --import tsx --test src/routes/admin-client-errors-role.test.ts"
+    },
+    {
       "name": "customer-email-wording",
       "command": "pnpm --filter @workspace/api-server exec node --import tsx --test --test-force-exit --test-concurrency=1 --test-reporter=spec src/outgoing-email/wording.test.ts src/routes/email-wording-routes.test.ts"
     },
@@ -291,6 +295,10 @@
     {
       "name": "nav-config-bookkeeper",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/layout/nav-config.test.ts src/components/layout/bookkeeper-nav.test.tsx"
+    },
+    {
+      "name": "admin-client-errors-page",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run src/pages/admin-client-errors.test.tsx"
     },
     {
       "name": "invoice-draft-editor-line-items",

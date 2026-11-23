@@ -59,7 +59,7 @@ function shortHash(h: string): string {
 
 export default function AdminClientErrorsPage() {
   const role = readUserRole();
-  const allowed = role === "super_admin" || role === "company_admin";
+  const allowed = role === "super_admin";
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery<CrashReport>({
