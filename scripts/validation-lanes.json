@@ -329,6 +329,10 @@
       "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/pages/audit-page-header-rows.test.tsx"
     },
     {
+      "name": "navigation-page-fit",
+      "command": "pnpm --filter @workspace/irrigopro exec vitest run --maxWorkers=1 --minWorkers=1 src/components/wet-checks/wet-check-status-tabs-fit.test.tsx src/components/markup/tier-editor-fit.test.tsx"
+    },
+    {
       "name": "invoice-ar-notes-panel",
       "command": "pnpm --filter @workspace/irrigopro exec vitest run src/components/billing/invoice-ar-notes-panel.test.tsx"
     },

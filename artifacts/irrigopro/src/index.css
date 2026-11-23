@@ -426,6 +426,14 @@
       content: attr(data-label); flex-shrink: 0; font-weight: 500; color: hsl(var(--muted-foreground)); text-align: left;
     }
   }
+
+  .users-view-container { container-type: inline-size; }
+  .users-view-container .users-card-view { display: block; }
+  .users-view-container .users-table-view { display: none; }
+  @container (min-width: 860px) {
+    .users-view-container .users-card-view { display: none; }
+    .users-view-container .users-table-view { display: block; }
+  }
 }
 
 @layer utilities {

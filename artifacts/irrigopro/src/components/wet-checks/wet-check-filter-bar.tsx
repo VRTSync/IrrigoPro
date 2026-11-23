@@ -118,12 +118,9 @@ function WcStatusTabs({
   onToggleMoreFilters: () => void;
 }) {
   return (
-    <div className="relative flex items-center gap-2">
-      <div
-        className="overflow-x-auto scrollbar-none flex-1 min-w-0"
-        style={{ maskImage: "linear-gradient(to right, transparent 0%, black 3%, black 94%, transparent 100%)" }}
-      >
-        <div className="flex items-center gap-2 whitespace-nowrap pb-0.5 px-1">
+    <div className="relative flex flex-wrap items-center gap-2">
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 pb-0.5 px-1">
           {TABS.map((tab) => {
             const isActive = status === tab.value;
             const count = counts?.[tab.countKey] ?? 0;
@@ -135,7 +132,7 @@ function WcStatusTabs({
                 onClick={() => onStatusChange(tab.value)}
                 data-testid={`tab-wc-status-${tab.countKey}`}
                 className={[
-                  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 whitespace-nowrap rounded-full border text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
                   isActive ? tab.activeClass : tab.inactiveClass,
                 ].join(" ")}
               >

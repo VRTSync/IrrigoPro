@@ -446,7 +446,7 @@ export default function CompanyUserManagement() {
   }
 
   return (
-    <div className="w-full p-6 space-y-8">
+    <div className="users-view-container w-full p-6 space-y-8">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -604,8 +604,8 @@ export default function CompanyUserManagement() {
         </Card>
       </div>
 
-      {/* Mobile Card View */}
-      <div className="lg:hidden space-y-3">
+      {/* Narrow content view */}
+      <div className="users-card-view space-y-3">
         {isLoading ? (
           Array.from({ length: 3 }).map((_, i) => (
             <Card key={i} className="p-4">
@@ -716,8 +716,8 @@ export default function CompanyUserManagement() {
         )}
       </div>
 
-      {/* Desktop Table View */}
-      <div className="hidden lg:block">
+      {/* Wide content view */}
+      <div className="users-table-view">
         <Card>
           <CardHeader>
             <CardTitle>Company Users</CardTitle>
@@ -745,7 +745,7 @@ export default function CompanyUserManagement() {
                           <div className="flex-shrink-0">
                             {getRoleIcon(user.role)}
                           </div>
-                          <div>
+                          <div className="min-w-0 [overflow-wrap:anywhere]">
                             <div className="font-medium">{user.name}</div>
                             <div className="text-sm text-muted-foreground">
                               {user.phone ? user.phone : `@${user.username}`}
@@ -779,7 +779,7 @@ export default function CompanyUserManagement() {
                         {new Date(user.createdAt).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end space-x-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
                           {user.id !== currentUser?.id && (
                             <TooltipProvider>
                               <>

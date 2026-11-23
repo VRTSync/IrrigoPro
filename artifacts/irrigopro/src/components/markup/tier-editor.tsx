@@ -26,14 +26,14 @@ export function TierEditor({ idPrefix, drafts, onChange, readOnly = false }: Tie
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <div className="rounded-lg border border-gray-200">
         <table className="w-full text-sm" data-testid={`table-tiers-${idPrefix}`}>
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
-              <th scope="col" className="px-3 py-2 font-semibold">Tier</th>
-              <th scope="col" className="px-3 py-2 font-semibold">From ($)</th>
-              <th scope="col" className="px-3 py-2 font-semibold">To ($)</th>
-              <th scope="col" className="px-3 py-2 font-semibold">Markup (%)</th>
+              <th scope="col" className="px-2 sm:px-3 py-2 font-semibold">Tier</th>
+              <th scope="col" className="px-2 sm:px-3 py-2 font-semibold">From ($)</th>
+              <th scope="col" className="px-2 sm:px-3 py-2 font-semibold">To ($)</th>
+              <th scope="col" className="px-2 sm:px-3 py-2 font-semibold">Markup (%)</th>
             </tr>
           </thead>
           <tbody>
@@ -41,9 +41,9 @@ export function TierEditor({ idPrefix, drafts, onChange, readOnly = false }: Tie
               const isLast = i === drafts.length - 1;
               return (
                 <tr key={i} className="border-t border-gray-100" data-testid={`row-tier-${idPrefix}-${i + 1}`}>
-                  <td className="px-3 py-2 font-medium text-gray-700">{i + 1}</td>
-                  <td className="px-3 py-2 tabular-nums text-gray-600">{lowerBoundFor(drafts, i)}</td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 sm:px-3 py-2 font-medium text-gray-700">{i + 1}</td>
+                  <td className="px-2 sm:px-3 py-2 tabular-nums text-gray-600">{lowerBoundFor(drafts, i)}</td>
+                  <td className="px-2 sm:px-3 py-2">
                     {isLast ? (
                       <span className="text-gray-500">and above</span>
                     ) : readOnly ? (
@@ -55,14 +55,14 @@ export function TierEditor({ idPrefix, drafts, onChange, readOnly = false }: Tie
                         step="0.01"
                         min="0.01"
                         inputMode="decimal"
-                        className="h-9 w-32"
+                        className="h-9 w-full min-w-[72px] max-w-32 px-1.5 text-sm sm:px-4 sm:text-base"
                         value={d.maxCost}
                         onChange={(e) => update(i, { maxCost: e.target.value })}
                         data-testid={`input-tier-max-${idPrefix}-${i + 1}`}
                       />
                     )}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 sm:px-3 py-2">
                     {readOnly ? (
                       <span className="tabular-nums">{d.markupPercent}%</span>
                     ) : (
@@ -73,7 +73,7 @@ export function TierEditor({ idPrefix, drafts, onChange, readOnly = false }: Tie
                         min="0"
                         max="999.99"
                         inputMode="decimal"
-                        className="h-9 w-28"
+                        className="h-9 w-full min-w-[72px] max-w-28 px-1.5 text-sm sm:px-4 sm:text-base"
                         value={d.markupPercent}
                         onChange={(e) => update(i, { markupPercent: e.target.value })}
                         data-testid={`input-tier-percent-${idPrefix}-${i + 1}`}

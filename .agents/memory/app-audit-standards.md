@@ -33,6 +33,8 @@ Measure populated stacked tables in their inline edit and expanded states, not j
 
 **Why:** A view can fit until an input's intrinsic width competes with a card label, or an extra role-specific button pushes the page past the viewport.
 
+For a cards-to-table container breakpoint, measure one pixel below and exactly at the switch, with long record text and the fullest action row. The table gets less width than the query container when nested cards have padding; a correct view switch does not prove the visible table fits.
+
 Opening a page must not write data. The throttled invoice payment-status refresh is the explicit exception. Estimate pages stay separate; Customers becomes one page with distinct Billable and All views.
 
 **Why:** Viewing a record is not consent to change it, and the separate billing view is part of the office workflow.

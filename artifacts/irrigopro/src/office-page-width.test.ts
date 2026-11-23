@@ -20,7 +20,7 @@ const wrappers = [
   ["pages/admin-client-errors.tsx", "max-w-6xl mx-auto py-6 space-y-6", "w-full py-6 space-y-6"],
   ["pages/company-profile.tsx", "max-w-4xl mx-auto", "w-full"],
   ["pages/user-profile.tsx", "container mx-auto p-6 max-w-4xl", "w-full p-6"],
-  ["pages/company-user-management.tsx", "container mx-auto p-6 space-y-8", "w-full p-6 space-y-8"],
+  ["pages/company-user-management.tsx", "container mx-auto p-6 space-y-8", "users-view-container w-full p-6 space-y-8"],
   ["pages/customers/IrrigationProfile.tsx", "container mx-auto p-4 max-w-4xl space-y-4", "w-full p-4 lg:px-6 space-y-4"],
   ["pages/estimates.tsx", "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6", "w-full px-4 sm:px-6 lg:px-8 py-6"],
   ["pages/estimates-pending-approval.tsx", "space-y-6 p-6 max-w-6xl mx-auto", "space-y-6 p-6 w-full"],
