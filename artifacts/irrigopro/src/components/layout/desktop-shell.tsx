@@ -399,7 +399,7 @@ function TopStrip({
           </kbd>
         </Button>
         {typeof user.id === "number" && (
-          <NotificationSystem userId={user.id} />
+          <NotificationSystem userId={user.id} sections={sections} />
         )}
       </div>
     </header>

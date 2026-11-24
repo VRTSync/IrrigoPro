@@ -172,7 +172,7 @@ export function PhoneNav({ sections, activePage, badges, user, brandThemed }: Ph
         >
           <Search className="size-5" aria-hidden="true" />
         </button>
-        {typeof user.id === "number" && <NotificationSystem userId={user.id} phone />}
+        {typeof user.id === "number" && <NotificationSystem userId={user.id} sections={sections} phone />}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className="grid size-11 shrink-0 place-items-center rounded-md hover:bg-black/10" aria-label="Account" data-testid="button-phone-account">

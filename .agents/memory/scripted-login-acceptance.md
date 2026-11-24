@@ -31,9 +31,15 @@ rather than silently "fixed" into scope creep.
 
 **Rule:** Wait for a scrolled target to pass hit-testing before browser pointer actions.
 
-**Why:** Smooth scrolling can leave a target under the sticky wizard footer after `scrollIntoView` returns. An immediate click may hit the footer instead, falsely suggesting a broken control.
+**Why:** Smooth scrolling can leave a target under the sticky wizard footer after `scrollIntoView` returns. Likewise, a slide-in notification sheet can contain its text in the DOM while it is still off-screen. An immediate click can fail even when the control works.
 
 **How to apply:** Wait until the target contains `document.elementFromPoint` at its center, then click. Do not substitute a DOM-triggered click, which would conceal an actual obstruction.
+
+**Rule:** Pick the visible control when the office shell renders both responsive versions.
+
+**Why:** The desktop and phone bells have the same accessible name and are both mounted. A browser helper that waits on the first match can time out on the CSS-hidden bell despite the other one being usable.
+
+**How to apply:** Filter all matches to elements with a visible layout box before performing a pointer check.
 
 **Rule:** Verify authenticated PDF bytes with a browser-page fetch, not the PDF popup's captured response buffer.
 

@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 
 it("uses legacy navigation paths only in bookmark route declarations", () => {
   const root = join(import.meta.dirname, "../..");
-  const legacy = /(["'`])(\/wet-checks\/admin|\/manager\/wet-checks|\/wet-checks\/pending-review|\/billing\/dashboard|\/manager)\1/g;
+  const legacy = /(["'`])(\/wet-checks\/admin|\/manager\/wet-checks|\/wet-checks\/pending-review|\/billing\/dashboard|\/manager|\/operations)\1/g;
   const redirectFiles = new Set(["App.tsx", "components/company-admin-app.tsx"]);
   const violations: string[] = [];
 

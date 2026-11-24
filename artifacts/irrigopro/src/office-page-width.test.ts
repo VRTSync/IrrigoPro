@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const wrappers = [
-  ["pages/operations.tsx", "max-w-7xl mx-auto -mt-2", "w-full -mt-2"],
   ["pages/estimate-command-center.tsx", "py-6 max-w-[1400px] mx-auto space-y-6", "py-6 w-full space-y-6"],
   ["pages/wet-checks/WetCheckSystemPage.tsx", "max-w-6xl mx-auto py-6 px-4", "w-full py-6 px-4 lg:px-6"],
   ["pages/manager-workspace.tsx", "max-w-5xl mx-auto py-4 px-4 space-y-4", "w-full py-4 px-4 lg:px-6 space-y-4"],

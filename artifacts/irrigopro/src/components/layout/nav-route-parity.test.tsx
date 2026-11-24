@@ -107,6 +107,15 @@ it("replaces the legacy company admin dashboard bookmark with /", async () => {
   expect(location.history).toEqual(["/"]);
 });
 
+it.each(["/operations", "/estimates", "/estimates/pending-approval"])(
+  "replaces the company admin bookmark %s with the Estimates Command Center",
+  async (href) => {
+    const location = mountAt("company_admin", href);
+    expect(await screen.findByTestId("route-destination")).toHaveTextContent("estimate-command-center");
+    expect(location.history).toEqual(["/estimates/command-center"]);
+  },
+);
+
 it("keeps the super admin landing on App Health", async () => {
   const location = mountAt("super_admin", "/");
   expect(await screen.findByTestId("route-destination")).toHaveTextContent("app-health");
