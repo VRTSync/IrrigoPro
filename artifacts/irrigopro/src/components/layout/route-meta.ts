@@ -65,10 +65,6 @@ const FALLBACK_PATTERNS: Array<{ regex: RegExp; meta: () => RouteMeta }> = [
     meta: () => ({ title: "Privacy Policy", breadcrumb: [{ label: "Privacy Policy" }] }),
   },
   {
-    regex: /^\/operations$/,
-    meta: () => ({ title: "Operations", breadcrumb: [{ label: "Operations" }] }),
-  },
-  {
     regex: /^\/admin$/,
     meta: () => ({ title: "Dashboard", breadcrumb: [{ label: "Dashboard", path: "/" }] }),
   },

@@ -42,7 +42,6 @@ const TARGET_GLOBS = [
   "artifacts/irrigopro/src/pages/labor-rate-audit.tsx",
   "artifacts/irrigopro/src/pages/parts-list.tsx",
   "artifacts/irrigopro/src/pages/billing-dashboard.tsx",
-  "artifacts/irrigopro/src/pages/operations.tsx",
   "artifacts/irrigopro/src/pages/customers.tsx",
   "artifacts/irrigopro/src/pages/field-tech.tsx",
   "artifacts/irrigopro/src/pages/super-admin-dashboard.tsx",

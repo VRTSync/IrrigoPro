@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, X, Building2, CheckCircle, Clock, FileText, XCircle, Receipt } from "lucide-react";
+import { useLocation } from "wouter";
+import { Bell, Building2, CheckCircle, Clock, FileText, XCircle, Receipt } from "lucide-react";
+import type { ResolvedNavSection } from "@/components/layout/nav-config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest, adaptiveRefetchInterval } from "@/lib/queryClient";
@@ -17,8 +19,8 @@ interface Notification {
   type: string;
   title: string;
   message: string;
-  relatedEntityType?: string;
-  relatedEntityId?: number;
+  relatedEntityType?: string | null;
+  relatedEntityId?: number | null;
   isRead: boolean;
   createdAt: string;
 }
@@ -26,10 +28,35 @@ interface Notification {
 interface NotificationSystemProps {
   userId: number;
   phone?: boolean;
+  sections?: ResolvedNavSection[];
 }
 
-export function NotificationSystem({ userId, phone = false }: NotificationSystemProps) {
+const FIELD_TECH_PATHS = {
+  "work-orders": "/work-orders",
+  "billing-sheets": "/billing-sheets",
+  "estimates": "/estimates",
+  "parts-pending": "/parts-pending-approval",
+};
+
+export function notificationTarget(
+  n: Pick<Notification, "type" | "relatedEntityType" | "relatedEntityId">,
+  sections: ResolvedNavSection[] | undefined,
+): string | null {
+  const pageId =
+    n.type === "part_pending_approval" || n.type === "manual_part_pending_review" ? "parts-pending"
+    : n.relatedEntityId == null ? null
+    : n.relatedEntityType === "estimate" ? "estimates"
+    : n.relatedEntityType === "work_order" ? "work-orders"
+    : n.relatedEntityType === "billing_sheet" ? "billing-sheets"
+    : null;
+  if (!pageId) return null;
+  if (!sections) return FIELD_TECH_PATHS[pageId];
+  return sections.flatMap((s) => s.pages).find((p) => p.id === pageId)?.href ?? null;
+}
+
+export function NotificationSystem({ userId, phone = false, sections }: NotificationSystemProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   
   // Initialize push notifications
@@ -141,33 +168,10 @@ export function NotificationSystem({ userId, phone = false }: NotificationSystem
     if (!notification.isRead) {
       markAsReadMutation.mutate(notification.id);
     }
-    
-    // Navigate to related entity if available
-    if (notification.type === "part_pending_approval" || notification.type === "manual_part_pending_review") {
-      setIsOpen(false);
-      window.location.href = "/parts-pending-approval";
-      return;
-    }
 
-    if (notification.relatedEntityType && notification.relatedEntityId) {
-      let path = "";
-      switch (notification.relatedEntityType) {
-        case "work_order":
-          path = "/work-orders";
-          break;
-        case "estimate":
-          path = "/estimates";
-          break;
-        case "billing_sheet":
-          path = "/billing-sheets";
-          break;
-      }
-      
-      if (path) {
-        setIsOpen(false);
-        window.location.href = path;
-      }
-    }
+    const target = notificationTarget(notification, sections);
+    setIsOpen(false);
+    if (target) navigate(target);
   };
 
   return (

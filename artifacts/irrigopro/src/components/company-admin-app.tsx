@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { DesktopShell } from "@/components/layout/desktop-shell";
 import InvoicesPage from "@/pages/invoices";
 import RoleDashboard from "@/pages/role-dashboard";
-import Operations from "@/pages/operations";
 import CompanyUserManagement from "@/pages/company-user-management";
 import CompanyProfile from "@/pages/company-profile";
 import QuickBooksPage from "@/pages/quickbooks";
@@ -83,7 +82,7 @@ import AdminControllers from "@/pages/admin-controllers";
 import WetCheckReconciliationPage from "@/pages/wet-check-reconciliation";
 import PartsPendingApproval from "@/pages/parts-pending-approval";
 import EstimateCommandCenter from "@/pages/estimate-command-center";
-import RedirectPendingApprovalToCC from "@/components/estimates/redirect-to-command-center";
+import RedirectToEstimates from "@/components/estimates/redirect-to-command-center";
 
 import UserProfile from "@/pages/user-profile";
 import LicenseAgreement from "@/pages/license-agreement";
@@ -183,7 +182,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
         <Switch>
           <Route path="/" component={RoleDashboard} />
           <Route path="/admin" component={RedirectToDashboard} />
-          <Route path="/operations" component={Operations} />
+          <Route path="/operations" component={RedirectToEstimates} />
           <Route path="/users" component={CompanyUserManagement} />
           <Route path="/company-profile" component={CompanyProfile} />
           <Route path="/quickbooks" component={QuickBooksPage} />
@@ -191,7 +190,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/invoices" component={InvoicesPage} />
           <Route path="/parts-pending-approval" component={PartsPendingApproval} />
           <Route path="/estimates/command-center" component={EstimateCommandCenter} />
-          <Route path="/estimates/pending-approval" component={RedirectPendingApprovalToCC} />
+          <Route path="/estimates/pending-approval" component={RedirectToEstimates} />
           <Route path="/parts" component={PartsCatalog} />
           <Route path="/parts-settings" component={PartsSettings} />
           <Route path="/admin/markup-schedule" component={MarkupSchedulePage} />
@@ -249,8 +248,7 @@ export default function CompanyAdminApp({ user }: CompanyAdminAppProps) {
           <Route path="/forgot-password" component={ForgotPassword} />
           <Route path="/reset-password" component={ResetPassword} />
           {/* /field-portal route removed by Task #1857 */}
-          {/* Estimates still routes through the Operations page */}
-          <Route path="/estimates" component={Operations} />
+          <Route path="/estimates" component={RedirectToEstimates} />
           <Route component={NotFound} />
         </Switch>
       </div>
